@@ -29,7 +29,7 @@ pnpm wrangler d1 create edgephotos-remote-test
 pnpm wrangler r2 bucket create edgephotos-remote-test
 # database_id を書かなくても、wrangler は database_name で既存 D1 を解決した（wrangler 4.131 で確認）
 
-pnpm wrangler d1 migrations apply DB --env remote-test --remote
+pnpm wrangler d1 migrations apply edgephotos-remote-test --env remote-test --remote
 CLOUDFLARE_ENV=remote-test pnpm build
 pnpm wrangler deploy --config dist/edgephotos/wrangler.json
 ```
