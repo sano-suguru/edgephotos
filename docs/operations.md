@@ -2,7 +2,10 @@
 
 この文書は、EdgePhotos v1 のセットアップ、更新、backup / restore、uninstall の運用契約を定義します。
 
-> **検証状況:** 以下のうち local（Miniflare / `vite dev` / `vite preview`）で確認したのは、migration 適用、fail-closed、upload → timeline → album → share → revoke、export / restore / verify のロジックです。実 Cloudflare 環境（Access application、R2 presigned URL と CORS、remote D1 migration、デプロイ）での手順は **未検証** です。初回の remote-test 環境構築時に実測し、この文書を更新してください。
+> **検証状況（2026-09-16）:**
+> - local（Miniflare / `vite dev` / `vite preview`）: migration 適用、fail-closed、upload → timeline → album → share → revoke、export / restore / verify を確認済み。
+> - remote-test 環境: D1・R2 の作成、remote D1 migration、`CLOUDFLARE_ENV=remote-test` での build と deploy、未設定 Worker が private / share API を `503` で拒否すること、共有ページの header / CSP、`/share/assets/*` の配信を確認済み。
+> - **未検証:** Access application（JWT / AUD / Bypass）、R2 API token による presigned PUT / GET、R2 CORS、実環境での restore。
 
 ## 1. セットアップ目標
 
@@ -17,15 +20,14 @@
 
 Deploy to Cloudflare ボタンは Release polish の範囲です（roadmap）。
 
-## 2. リソース作成とデプロイ（未検証の想定手順）
+## 2. リソース作成とデプロイ
 
 環境ごとに D1・R2・Access application・R2 credential を分けます。以下は `remote-test` の例です。production は `--env` を外し、`wrangler.jsonc` の top-level 設定を使います。
 
 ```bash
 pnpm wrangler d1 create edgephotos-remote-test
 pnpm wrangler r2 bucket create edgephotos-remote-test
-# D1 の database_id を wrangler.jsonc の env.remote-test.d1_databases に記入する
-# (または wrangler の自動 provisioning を使う)
+# database_id を書かなくても、wrangler は database_name で既存 D1 を解決した（wrangler 4.131 で確認）
 
 pnpm wrangler d1 migrations apply DB --env remote-test --remote
 CLOUDFLARE_ENV=remote-test pnpm build

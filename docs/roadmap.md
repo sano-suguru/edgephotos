@@ -14,7 +14,7 @@
 - ✅ private API の認証・owner authorization が機能する
 - ✅ D1 migration と private R2 binding が利用できる（local）
 - ✅ OpenAPI を生成できる（`/api/v1/openapi.json`）
-- 🟡 local / remote-test / production が分離されている（`wrangler.jsonc` に env を定義。remote 資源は未作成）
+- 🟡 local / remote-test / production が分離されている（remote-test は D1 / R2 / Worker を作成・デプロイ済み。production は未作成）
 - 🟡 shadcn/ui + Base UI の主要 component が Preact production build で成立する（Dialog / Menu は確認済み、Select と touch は未確認）
 - ⬜ `/share/*` の公開経路と private path の Access 保護を実環境で検証できる
 - ⬜ R2 presigned PUT / GET と CORS を実環境で検証できる（署名形式は unit test 済み）
