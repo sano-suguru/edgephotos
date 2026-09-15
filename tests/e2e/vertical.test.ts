@@ -78,8 +78,8 @@ describe('vertical: owner uploads, organizes and shares a photo', () => {
     expect((await guestFetch(`/shares/${shareId}/assets/${assetId}/preview`)).status).toBe(404)
   })
 
-  it('deployed Worker entry fails closed without configuration', async () => {
-    // The real default export, with wrangler vars empty/absent: no Access config, no R2 credentials.
+  it('Worker entry fails closed when vars and R2 credentials are absent (production-bundle stripping is checked separately via dist)', async () => {
+    // Default export with no Access vars and no R2 credentials. Runs with DEV=true under vitest.
     const entry = (exports as unknown as { default: Fetcher }).default
     const res = await entry.fetch(new Request('https://example.test/api/v1/assets'))
     expect(res.status).toBe(503)
