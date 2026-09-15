@@ -1,0 +1,265 @@
+# アーキテクチャ
+
+この文書は、EdgePhotos v1 で採用するシステム構造、責務分担、外部との境界を定義します。技術選定の理由や却下した案は [設計判断](decisions.md) を参照してください。
+
+## 1. 全体構成
+
+```text
+                    Web
+             Preact + Signals
+                    |
+                    | HTTP/JSON
+                    v
+             Cloudflare Access
+                    |
+                    v
++---------------------------------------------+
+|           Cloudflare Worker                 |
+|                                             |
+| Hono + @hono/zod-openapi                    |
+|                                             |
+| auth -> AppPrincipal                        |
+| uploads / assets / albums / shares / export |
++------------------+--------------------------+
+                   |            |
+                   v            v
+                  D1        private R2
+               metadata      originals
+                             derivatives
+
+Binary data path:
+Web / Future Native <---- presigned PUT/GET ----> R2
+```
+
+デプロイ単位は 1 Worker です。Web の静的ファイルは Workers Static Assets として同じデプロイに含めます。
+
+## 2. 各層の責務
+
+### Client
+
+Web は Preact + Signals で構築します。
+
+Client の責務:
+
+- ファイル選択
+- 画像形式・画素数等の事前確認
+- EXIF から必要な metadata を抽出
+- original の SHA-256 計算
+- thumbnail / preview 生成
+- presigned URL を使った R2 直接 PUT / GET
+- UI state と upload progress の管理
+
+Client が担当しないもの:
+
+- 最終認可
+- asset の保存確定
+- object key の決定
+- share 対象 asset の最終判定
+
+将来 Native client を追加する場合も、「Client が前処理し、Server が保存契約と認可を検証する」という境界を維持します。
+
+### Worker / Hono
+
+Worker は control plane を担当します。
+
+- Access assertion の検証
+- `AppPrincipal` への正規化
+- owner authorization
+- API request validation
+- D1 への状態保存
+- R2 object の存在・属性確認
+- presigned URL 発行
+- share capability の検証
+- export / operational endpoints
+
+画像の decode / resize / 動画変換は通常処理として Worker に載せません。
+
+### D1
+
+D1 は状態と索引を保持します。
+
+主なデータ:
+
+- assets
+- uploads
+- albums
+- album_assets
+- shares
+- settings
+
+写真 binary、R2 credential、Access token、share secret 平文は保存しません。正確な schema は migration を正本とします。
+
+### private R2
+
+R2 は binary data を保持します。
+
+```text
+originals/{assetId}
+derivatives/v1/{assetId}/thumbnail.jpg
+derivatives/v1/{assetId}/preview.jpg
+```
+
+original と再生成可能な derivative を物理的にも分離します。
+
+## 3. Identity boundary
+
+Web と将来 Native で認証の入口が変わっても、application logic へ渡す identity は統一します。
+
+```ts
+type AppPrincipal = {
+  subject: string
+  email: string
+  authSource: 'cloudflare-access'
+}
+```
+
+v1 は 1 owner です。Access を通過した全ユーザーを owner とみなさず、設定された owner identity と一致する principal だけが private API を利用できます。
+
+将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とし、application service が Native 固有 token を直接解釈しない構造を維持します。
+
+## 4. API boundary
+
+API は Web の画面構造ではなく、写真ライブラリの操作を表現します。
+
+```text
+/api/v1/*        private application API
+/share/api/v1/*  public share capability API
+```
+
+HTTP/JSON を使用し、request / response / error schema は `@hono/zod-openapi` の route schema を正本とします。そこから runtime validation と OpenAPI を生成します。
+
+Web も将来の Native client も、同じ application API の consumer とします。
+
+エラー形式は以下を基本とします。
+
+```json
+{
+  "error": {
+    "code": "UPLOAD_NOT_READY",
+    "message": "Upload is not ready to finalize.",
+    "requestId": "..."
+  }
+}
+```
+
+`code` は機械可読とし、UI 文言のローカライズは Client 側で行います。
+
+## 5. Upload protocol
+
+```text
+1. Client preprocess
+2. POST /api/v1/uploads
+3. Worker creates reservation and object keys
+4. Worker returns short-lived presigned PUT URLs
+5. Client PUTs original / thumbnail / preview directly to R2
+6. POST /api/v1/uploads/{id}/finalize
+7. Worker verifies reserved R2 objects
+8. D1 transaction creates/commits asset
+9. asset becomes ready
+```
+
+不変条件:
+
+- original は byte-for-byte immutable
+- 保存済み original を上書きしない
+- R2 確認前に `ready` にしない
+- finalize 再送で同じ asset へ収束する
+- D1 障害時に R2 object を即削除しない
+- D1 と R2 を 1 transaction として扱わない
+
+## 6. Derivative contract
+
+### original
+
+- 元 byte 列をそのまま保持
+- 再エンコードしない
+- EXIF / GPS を改変しない
+- SHA-256 を metadata として保持
+- owner のみ取得可能
+- share では配信しない
+
+### thumbnail
+
+- JPEG
+- 長辺 512px 以下
+- upscale しない
+- EXIF / GPS を含めない
+- timeline / grid 用
+
+### preview
+
+- JPEG
+- 長辺 2048px 以下
+- upscale しない
+- EXIF / GPS を含めない
+- detail / share 用
+
+JPEG quality は実機測定で調整できる tuning parameter とします。
+
+## 7. Share architecture
+
+共有リンクは次の形式を採用します。
+
+```text
+/share/{shareId}#{secret}
+```
+
+`secret` は URL fragment に置き、最初の HTTP request には含めません。Browser は fragment を読み、share API へ Authorization header として送ります。
+
+D1 には secret の hash のみ保存します。
+
+共有 API は各 request で次を検証します。
+
+- secret hash
+- share の存在
+- expires_at
+- revoked_at
+- album の存在
+- asset がその album に所属すること
+- asset が ready かつ非削除であること
+- variant が thumbnail / preview であること
+
+share session / share Cookie は v1 では作りません。
+
+## 8. Access routing
+
+同一 Worker の private area と public share area を分けます。
+
+```text
+/*       Access required
+/share/* Access Bypass + Hono share authorization
+```
+
+Bypass 対象は `/share/*` に限定し、公開部分の認可責任は Worker が持ちます。
+
+Workers Static Assets 利用時の `ctx.access` だけには依存せず、Access assertion を Worker 側で検証します。
+
+## 9. Native client への拡張境界
+
+v1 では Web と API の間に client-specific BFF を置きません。
+
+```text
+Preact Web -----+
+                +---- HTTP/JSON API ---- Hono
+Future Native --+
+```
+
+将来、Client ごとに具体的な集約・性能要求が生じた場合だけ adapter / BFF の追加を判断します。
+
+Native 対応のために現在保証すること:
+
+- API が Web component 構造に依存しない
+- API error が機械可読
+- 認証後 identity が `AppPrincipal` に正規化される
+- upload protocol が Browser API 固有ではない
+- OpenAPI を外部 Client 実装の契約として利用できる
+
+## 参考資料
+
+- Cloudflare Vite Plugin: https://developers.cloudflare.com/workers/vite-plugin/
+- Workers Static Assets: https://developers.cloudflare.com/workers/static-assets/
+- Access application paths: https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/
+- Workers + Access: https://developers.cloudflare.com/workers/configuration/cloudflare-access/
+- Managed OAuth: https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/
+- R2 presigned URLs: https://developers.cloudflare.com/r2/api/s3/presigned-urls/
+- Hono Zod OpenAPI: https://hono.dev/examples/zod-openapi
