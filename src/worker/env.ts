@@ -34,7 +34,7 @@ export function readAppConfig(env: Env): AppConfig | null {
   const teamDomain = env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase()
   const audience = env.ACCESS_AUD?.trim()
   const appOrigin = normalizeOrigin(env.APP_ORIGIN)
-  if (!ownerEmail || !ownerEmail.includes('@')) return null
+  if (!ownerEmail?.includes('@')) return null
   if (!teamDomain || !HOST_RE.test(teamDomain)) return null
   if (!audience) return null
   if (!appOrigin) return null

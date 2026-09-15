@@ -4,7 +4,7 @@ import type { ApiClient } from '../scripts/lib/backup'
 import type { UploadFinalizeResult, UploadReservation } from '../src/contracts/schemas'
 import { type AppOptions, createApp } from '../src/worker/app'
 import type { Env } from '../src/worker/env'
-import { createLocalSigner } from '../src/worker/storage/local-blobs'
+import { createLocalSigner, LOCAL_BLOB_PREFIX, localBlobRoutes } from '../src/worker/storage/local-blobs'
 
 export const APP_ORIGIN = 'https://photos.example.test'
 export const OWNER = 'owner@example.test'
@@ -80,7 +80,7 @@ export async function makeApp(
     now,
     accessKeys: () => jwks,
     signer: createLocalSigner(APP_ORIGIN, BLOB_SECRET, now),
-    localBlobSecret: BLOB_SECRET,
+    localRoutes: { prefix: LOCAL_BLOB_PREFIX, app: localBlobRoutes(e.BUCKET, BLOB_SECRET, now) },
     ...opts.app,
   })
 }

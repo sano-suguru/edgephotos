@@ -74,8 +74,7 @@ export function createR2Signer(config: R2SignerConfig, now: () => Date = () => n
 
   return {
     // If-None-Match: * makes R2 reject a second PUT, so a still-valid URL cannot overwrite an original.
-    signPut: (key, contentType, ttl) =>
-      sign('PUT', key, ttl, { 'content-type': contentType, 'if-none-match': '*' }),
+    signPut: (key, contentType, ttl) => sign('PUT', key, ttl, { 'content-type': contentType, 'if-none-match': '*' }),
     signGet: (key, ttl) => sign('GET', key, ttl, {}),
   }
 }

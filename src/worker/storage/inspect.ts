@@ -16,12 +16,7 @@ export function sniffImageType(head: Uint8Array): ContentType | null {
     head[7] === 0x0a
   )
     return 'image/png'
-  if (
-    head.length >= 12 &&
-    ascii(head, 0, 4) === 'RIFF' &&
-    ascii(head, 8, 12) === 'WEBP'
-  )
-    return 'image/webp'
+  if (head.length >= 12 && ascii(head, 0, 4) === 'RIFF' && ascii(head, 8, 12) === 'WEBP') return 'image/webp'
   return null
 }
 
@@ -29,9 +24,7 @@ function ascii(bytes: Uint8Array, start: number, end: number): string {
   return String.fromCharCode(...bytes.subarray(start, end))
 }
 
-export type JpegMetadataScan =
-  | { ok: true }
-  | { ok: false; reason: 'not_jpeg' | 'metadata_segment' | 'truncated' }
+export type JpegMetadataScan = { ok: true } | { ok: false; reason: 'not_jpeg' | 'metadata_segment' | 'truncated' }
 
 // Derivatives must be plain JPEGs without EXIF/XMP (APP1) or IPTC (APP13) segments,
 // so GPS and other capture metadata cannot leak through thumbnails/previews.

@@ -1,5 +1,5 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
-import type { Context } from 'hono'
+import type { Context, Hono } from 'hono'
 import {
   AlbumInputSchema,
   AlbumListSchema,
@@ -24,7 +24,7 @@ import {
   UploadReserveSchema,
 } from '../contracts/schemas'
 import { type AccessKeyResolver, type AppPrincipal, authenticateAccess, remoteAccessKeys } from './auth/access'
-import { type AppConfig, type Env, normalizeOrigin, readAppConfig } from './env'
+import { type AppConfig, type Env, readAppConfig } from './env'
 import { ApiError, errorResponse, requestId } from './http/errors'
 import {
   checkWriteOrigin,
@@ -39,7 +39,6 @@ import type { ServiceContext } from './services/context'
 import { buildExport, diagnostics } from './services/export'
 import * as shares from './services/shares'
 import * as uploads from './services/uploads'
-import { LOCAL_BLOB_PREFIX, localBlobRoutes } from './storage/local-blobs'
 import { type BlobSigner, createR2Signer, readR2SignerConfig } from './storage/signer'
 
 export type AppOptions = {
@@ -48,8 +47,8 @@ export type AppOptions = {
   accessKeys?: AccessKeyResolver
   // Overrides the R2 SigV4 signer. Used for local development and tests only.
   signer?: BlobSigner
-  // Mounts the local blob endpoint that backs `signer` when it is a local signer.
-  localBlobSecret?: string
+  // Extra routes mounted before everything else (local development blob endpoint and tests only).
+  localRoutes?: { prefix: string; app: Hono }
 }
 
 type Vars = {
@@ -123,9 +122,7 @@ export function createApp(options: AppOptions) {
   })
   app.notFound((c) => errorResponse(c, new ApiError(404, 'NOT_FOUND', 'Not found.')))
 
-  if (options.signer && options.localBlobSecret) {
-    app.route(LOCAL_BLOB_PREFIX, localBlobRoutes(env.BUCKET, options.localBlobSecret, now))
-  }
+  if (options.localRoutes) app.route(options.localRoutes.prefix, options.localRoutes.app)
 
   // ---------------- Private API: /api/v1/* ----------------
 
@@ -158,7 +155,10 @@ export function createApp(options: AppOptions) {
       path: '/api/v1/me',
       tags: tag('session'),
       responses: {
-        200: json(z.object({ email: z.string(), subject: z.string(), authSource: z.literal('cloudflare-access') }), 'Current principal'),
+        200: json(
+          z.object({ email: z.string(), subject: z.string(), authSource: z.literal('cloudflare-access') }),
+          'Current principal',
+        ),
         ...errorResponses,
       },
     }),
@@ -350,8 +350,7 @@ export function createApp(options: AppOptions) {
       request: { params: AlbumParams, body: jsonBody(AlbumInputSchema) },
       responses: { 200: json(AlbumSchema, 'Renamed album'), ...errorResponses },
     }),
-    async (c) =>
-      c.json(await albums.renameAlbum(svc(c), c.req.valid('param').albumId, c.req.valid('json').title), 200),
+    async (c) => c.json(await albums.renameAlbum(svc(c), c.req.valid('param').albumId, c.req.valid('json').title), 200),
   )
 
   app.openapi(
@@ -588,12 +587,10 @@ export function createApp(options: AppOptions) {
   // Share page shell. Served by the Worker so share-specific headers always apply.
   app.get('/share/:shareId{[A-Za-z0-9_-]{22}}', async (c) => {
     if (!env.ASSETS) throw new ApiError(404, 'NOT_FOUND', 'Not found.')
-    const asset = await env.ASSETS.fetch(new URL('/share.html', c.req.url))
+    const asset = await env.ASSETS.fetch(new URL('/share', c.req.url))
     const res = new Response(asset.body, asset)
     const r2 = readR2SignerConfig(env)
     const imgSources = r2 ? [`https://${r2.accountId}.r2.cloudflarestorage.com`] : []
-    const origin = normalizeOrigin(env.APP_ORIGIN)
-    if (options.signer && origin) imgSources.push(origin)
     for (const [k, v] of Object.entries(SHARE_HEADERS)) res.headers.set(k, v)
     res.headers.set('Content-Security-Policy', shareContentSecurityPolicy(imgSources))
     return res

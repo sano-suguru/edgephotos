@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { type BlobStore, backupLibrary, readManifest, restoreLibrary, verifyLibrary } from '../../scripts/lib/backup'
-import { apiClient, call, callJson, makeApp, photo, syntheticPng, uploadPhoto } from '../helpers'
+import { apiClient, call, callJson, makeApp, photo, putObject, reserve, syntheticPng, uploadPhoto } from '../helpers'
 
 function memoryStore(): BlobStore & { files: Map<string, Uint8Array> } {
   const files = new Map<string, Uint8Array>()
@@ -19,13 +19,13 @@ function memoryStore(): BlobStore & { files: Map<string, Uint8Array> } {
 describe('export and restore to an empty environment', () => {
   it('round-trips assets, originals, favorites, trash and album membership', async () => {
     const source = await makeApp({ which: 'primary' })
-    const a = await uploadPhoto(source, undefined, { filename: 'a.jpg', takenAt: '2019-06-01T08:00:00+02:00', width: 4000, height: 3000 })
-    const b = await uploadPhoto(source, await photo({ original: syntheticPng() }).then(async (p) => p), {})
-      .catch(async () => null)
-    // PNG needs its content type declared; upload it explicitly.
-    expect(b).toBeNull()
+    const a = await uploadPhoto(source, undefined, {
+      filename: 'a.jpg',
+      takenAt: '2019-06-01T08:00:00+02:00',
+      width: 4000,
+      height: 3000,
+    })
     const pngFixture = await photo({ original: syntheticPng() })
-    const { reserve, putObject } = await import('../helpers')
     const r = await reserve(source, pngFixture, { filename: 'b.png' }, 'image/png')
     for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(source, r.targets[v], pngFixture[v])
     const bAsset = (await callJson(source, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })).asset
@@ -60,7 +60,10 @@ describe('export and restore to an empty environment', () => {
     expect(verification).toEqual({ ok: true, checkedOriginals: 3, problems: [] })
 
     // Independent checks against the restored storage.
-    const restoredAssets = await env.RESTORE_DB.prepare('SELECT id, sha256 FROM assets').all<{ id: string; sha256: string }>()
+    const restoredAssets = await env.RESTORE_DB.prepare('SELECT id, sha256 FROM assets').all<{
+      id: string
+      sha256: string
+    }>()
     expect(restoredAssets.results).toHaveLength(3)
     for (const row of restoredAssets.results) {
       const obj = await env.RESTORE_BUCKET.get(`originals/${row.id}`)

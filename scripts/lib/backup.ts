@@ -172,7 +172,15 @@ export async function verifyLibrary(client: ApiClient, expected: ExportManifest)
       problems.push(`missing asset ${e.sha256}`)
       continue
     }
-    for (const field of ['contentType', 'originalSize', 'filename', 'width', 'height', 'takenAt', 'isFavorite'] as const) {
+    for (const field of [
+      'contentType',
+      'originalSize',
+      'filename',
+      'width',
+      'height',
+      'takenAt',
+      'isFavorite',
+    ] as const) {
       if (a[field] !== e[field]) problems.push(`asset ${e.sha256}: ${field} differs`)
     }
     if ((a.trashedAt === null) !== (e.trashedAt === null)) problems.push(`asset ${e.sha256}: trash state differs`)
@@ -181,7 +189,13 @@ export async function verifyLibrary(client: ApiClient, expected: ExportManifest)
   const albumSignature = (m: ExportManifest) => {
     const shaById = new Map(m.assets.map((a) => [a.id, a.sha256]))
     return m.albums
-      .map((al) => `${al.title}\u0000${al.assetIds.map((id) => shaById.get(id) ?? `?${id}`).sort().join(',')}`)
+      .map(
+        (al) =>
+          `${al.title}\u0000${al.assetIds
+            .map((id) => shaById.get(id) ?? `?${id}`)
+            .sort()
+            .join(',')}`,
+      )
       .sort()
   }
   const expectedAlbums = albumSignature(expected)

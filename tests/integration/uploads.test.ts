@@ -29,11 +29,15 @@ describe('upload reservation', () => {
   it('returns PUT targets on server-chosen keys without personal data', async () => {
     const app = await makeApp()
     const p = await photo()
-    const r = await reserve(app, p, { filename: 'IMG_owner@example.test_2024-05-01.jpg', takenAt: '2024-05-01T10:00:00' })
+    const r = await reserve(app, p, {
+      filename: 'IMG_owner@example.test_2024-05-01.jpg',
+      takenAt: '2024-05-01T10:00:00',
+    })
     expect(r.upload.status).toBe('pending')
     const keys = (['original', 'thumbnail', 'preview'] as const).map((v) => assetIdFromTarget(r.targets[v].url))
-    const assetId = (await env.DB.prepare('SELECT asset_id FROM uploads WHERE id = ?').bind(r.upload.id).first<{ asset_id: string }>())!
-      .asset_id
+    const assetId = (await env.DB.prepare('SELECT asset_id FROM uploads WHERE id = ?')
+      .bind(r.upload.id)
+      .first<{ asset_id: string }>())!.asset_id
     expect(keys).toEqual([
       `originals/${assetId}`,
       `derivatives/v1/${assetId}/thumbnail.jpg`,
@@ -50,7 +54,11 @@ describe('upload reservation', () => {
   it('validates the request body', async () => {
     const app = await makeApp()
     const res = await call(app, 'POST', '/api/v1/uploads', {
-      body: { original: { size: 10, contentType: 'image/gif', sha256: 'abc' }, thumbnail: { size: 1 }, preview: { size: 1 } },
+      body: {
+        original: { size: 10, contentType: 'image/gif', sha256: 'abc' },
+        thumbnail: { size: 1 },
+        preview: { size: 1 },
+      },
     })
     expect(res.status).toBe(400)
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED')
@@ -109,7 +117,9 @@ describe('upload finalize', () => {
     await putObject(app, r.targets.thumbnail, p.thumbnail)
     const first = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
     expect(first.status).toBe(409)
-    expect(((await first.json()) as { error: { details: { missing: string[] } } }).error.details.missing).toEqual(['preview'])
+    expect(((await first.json()) as { error: { details: { missing: string[] } } }).error.details.missing).toEqual([
+      'preview',
+    ])
     expect(await assetCount(p.sha256)).toBe(0)
     await putObject(app, r.targets.preview, p.preview)
     const second = await callJson(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })

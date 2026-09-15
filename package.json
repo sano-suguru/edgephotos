@@ -15,7 +15,7 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "cf-typegen": "wrangler types src/worker/worker-configuration.d.ts --include-runtime=false",
-    "backup": "node --experimental-strip-types scripts/backup.ts"
+    "backup": "node scripts/backup.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -41,5 +41,9 @@
     "vite": "^8.3.0",
     "vitest": "^4.1.11",
     "wrangler": "^4.131.2"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22.18"
   }
 }

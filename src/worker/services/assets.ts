@@ -116,7 +116,7 @@ export async function getAssetRow(db: D1Database, id: string): Promise<AssetRow 
 
 export async function requireReadyAsset(db: D1Database, id: string): Promise<AssetRow> {
   const row = await getAssetRow(db, id)
-  if (!row || row.status !== 'ready') throw new ApiError(404, 'ASSET_NOT_FOUND', 'Asset not found.')
+  if (row?.status !== 'ready') throw new ApiError(404, 'ASSET_NOT_FOUND', 'Asset not found.')
   return row
 }
 

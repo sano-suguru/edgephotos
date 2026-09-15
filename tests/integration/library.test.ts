@@ -48,7 +48,9 @@ describe('timeline', () => {
   it('does not show pending uploads', async () => {
     const app = await makeApp()
     const before = await callJson(app, 'GET', '/api/v1/assets?limit=200', { expect: 200 })
-    const count = (await env.DB.prepare("SELECT COUNT(*) AS n FROM uploads WHERE status = 'pending'").first<{ n: number }>())!.n
+    const count = (await env.DB.prepare("SELECT COUNT(*) AS n FROM uploads WHERE status = 'pending'").first<{
+      n: number
+    }>())!.n
     expect(before.items.length).toBeLessThanOrEqual(200)
     expect(count).toBeGreaterThanOrEqual(0)
   })
@@ -73,7 +75,9 @@ describe('favorites', () => {
   })
 
   it('returns 404 for unknown assets', async () => {
-    const res = await call(await makeApp(), 'PATCH', `/api/v1/assets/${crypto.randomUUID()}`, { body: { isFavorite: true } })
+    const res = await call(await makeApp(), 'PATCH', `/api/v1/assets/${crypto.randomUUID()}`, {
+      body: { isFavorite: true },
+    })
     expect(res.status).toBe(404)
   })
 })
@@ -83,7 +87,10 @@ describe('albums', () => {
     const app = await makeApp()
     const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: '  Trip  ' }, expect: 201 })
     expect(album).toMatchObject({ title: 'Trip', assetCount: 0 })
-    const renamed = await callJson(app, 'PATCH', `/api/v1/albums/${album.id}`, { body: { title: 'Trip 2' }, expect: 200 })
+    const renamed = await callJson(app, 'PATCH', `/api/v1/albums/${album.id}`, {
+      body: { title: 'Trip 2' },
+      expect: 200,
+    })
     expect(renamed.title).toBe('Trip 2')
     const list = await callJson(app, 'GET', '/api/v1/albums', { expect: 200 })
     expect(list.items.map((a: { id: string }) => a.id)).toContain(album.id)
@@ -135,7 +142,9 @@ describe('albums', () => {
     await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${asset}`)
     expect((await call(app, 'DELETE', `/api/v1/albums/${album.id}`)).status).toBe(204)
     expect((await call(app, 'GET', `/api/v1/assets/${asset}`)).status).toBe(200)
-    const rows = await env.DB.prepare('SELECT COUNT(*) AS n FROM album_assets WHERE album_id = ?').bind(album.id).first<{ n: number }>()
+    const rows = await env.DB.prepare('SELECT COUNT(*) AS n FROM album_assets WHERE album_id = ?')
+      .bind(album.id)
+      .first<{ n: number }>()
     expect(rows?.n).toBe(0)
   })
 })

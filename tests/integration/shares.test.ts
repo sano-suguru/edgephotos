@@ -8,7 +8,10 @@ async function sharedAlbumWith(app: App, assetCount = 2) {
   const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'Shared' }, expect: 201 })
   const assets: string[] = []
   for (let i = 0; i < assetCount; i++) {
-    const { result } = await uploadPhoto(app, undefined, { filename: `secret-name-${i}.jpg`, takenAt: '2020-02-02T02:02:02Z' })
+    const { result } = await uploadPhoto(app, undefined, {
+      filename: `secret-name-${i}.jpg`,
+      takenAt: '2020-02-02T02:02:02Z',
+    })
     await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${result.asset.id}`)
     assets.push(result.asset.id)
   }
@@ -36,7 +39,9 @@ describe('share creation', () => {
     expect(url.hash).toBe(`#${created.secret}`)
     expect(created.secret).toMatch(/^[A-Za-z0-9_-]{43}$/) // 32 random bytes, base64url
 
-    const row = await env.DB.prepare('SELECT * FROM shares WHERE id = ?').bind(created.share.id).first<Record<string, unknown>>()
+    const row = await env.DB.prepare('SELECT * FROM shares WHERE id = ?')
+      .bind(created.share.id)
+      .first<Record<string, unknown>>()
     expect(Object.values(row ?? {}).some((v) => typeof v === 'string' && v.includes(created.secret))).toBe(false)
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(created.secret))
     const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -164,7 +169,11 @@ describe('public share API', () => {
     expect(Date.parse(body.expiresAt) - c.now().getTime()).toBeLessThanOrEqual(100_000)
     c.advance(100_001)
     expect((await guest(app, `/shares/${created.share.id}`, created.secret)).status).toBe(404)
-    const list = await callJson(app, 'GET', `/api/v1/albums/${(await env.DB.prepare('SELECT album_id FROM shares WHERE id = ?').bind(created.share.id).first<{ album_id: string }>())!.album_id}/shares`)
+    const list = await callJson(
+      app,
+      'GET',
+      `/api/v1/albums/${(await env.DB.prepare('SELECT album_id FROM shares WHERE id = ?').bind(created.share.id).first<{ album_id: string }>())!.album_id}/shares`,
+    )
     expect(list.items[0].status).toBe('expired')
   })
 
@@ -172,9 +181,13 @@ describe('public share API', () => {
     const app = await makeApp()
     const { album, assets, created } = await sharedAlbumWith(app, 2)
     await callJson(app, 'POST', `/api/v1/assets/${assets[0]}/trash`, { expect: 200 })
-    const body = (await (await guest(app, `/shares/${created.share.id}`, created.secret)).json()) as { items: { id: string }[] }
+    const body = (await (await guest(app, `/shares/${created.share.id}`, created.secret)).json()) as {
+      items: { id: string }[]
+    }
     expect(body.items.map((i) => i.id)).toEqual([assets[1]])
-    expect((await guest(app, `/shares/${created.share.id}/assets/${assets[0]}/preview`, created.secret)).status).toBe(404)
+    expect((await guest(app, `/shares/${created.share.id}/assets/${assets[0]}/preview`, created.secret)).status).toBe(
+      404,
+    )
 
     expect((await call(app, 'DELETE', `/api/v1/albums/${album.id}`)).status).toBe(204)
     expect((await guest(app, `/shares/${created.share.id}`, created.secret)).status).toBe(404)

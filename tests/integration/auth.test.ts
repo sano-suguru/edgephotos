@@ -97,7 +97,9 @@ describe('private API authentication', () => {
     const { jwks } = await accessKeys()
     const spy = vi
       .spyOn(globalThis, 'fetch')
-      .mockImplementation(async () => new Response(JSON.stringify(jwks), { headers: { 'content-type': 'application/json' } }))
+      .mockImplementation(
+        async () => new Response(JSON.stringify(jwks), { headers: { 'content-type': 'application/json' } }),
+      )
     try {
       const result = await authenticateAccess(
         await assertion(),
@@ -188,7 +190,9 @@ describe('write origin checks', () => {
 
   it('allows same-origin browser writes and non-browser clients', async () => {
     const app = await makeApp()
-    expect((await call(app, 'POST', '/api/v1/albums', { body: { title: 'a' }, headers: { origin: APP_ORIGIN } })).status).toBe(201)
+    expect(
+      (await call(app, 'POST', '/api/v1/albums', { body: { title: 'a' }, headers: { origin: APP_ORIGIN } })).status,
+    ).toBe(201)
     expect((await call(app, 'POST', '/api/v1/albums', { body: { title: 'b' } })).status).toBe(201)
   })
 })

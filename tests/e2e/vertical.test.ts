@@ -1,16 +1,6 @@
 import { exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import {
-  APP_ORIGIN,
-  assertion,
-  call,
-  callJson,
-  makeApp,
-  photo,
-  putObject,
-  reserve,
-  sha256,
-} from '../helpers'
+import { APP_ORIGIN, assertion, call, callJson, makeApp, photo, putObject, reserve, sha256 } from '../helpers'
 
 // Critical vertical path over HTTP only (no direct DB/R2 access):
 // auth -> reserve -> object PUT -> finalize -> timeline -> album -> share -> revoke.
@@ -20,7 +10,9 @@ describe('vertical: owner uploads, organizes and shares a photo', () => {
 
     // Authentication
     expect((await call(app, 'GET', '/api/v1/me', { token: null })).status).toBe(401)
-    expect((await call(app, 'GET', '/api/v1/me', { token: await assertion({ email: 'guest@example.test' }) })).status).toBe(403)
+    expect(
+      (await call(app, 'GET', '/api/v1/me', { token: await assertion({ email: 'guest@example.test' }) })).status,
+    ).toBe(403)
     expect((await callJson(app, 'GET', '/api/v1/me', { expect: 200 })).email).toBe('owner@example.test')
 
     // Upload reservation
@@ -61,7 +53,10 @@ describe('vertical: owner uploads, organizes and shares a photo', () => {
     expect(albumAssets.items.map((i: { id: string }) => i.id)).toEqual([assetId])
 
     // Share
-    const share = await callJson(app, 'POST', `/api/v1/albums/${album.id}/shares`, { body: { expiresInDays: 1 }, expect: 201 })
+    const share = await callJson(app, 'POST', `/api/v1/albums/${album.id}/shares`, {
+      body: { expiresInDays: 1 },
+      expect: 201,
+    })
     const link = new URL(share.url)
     expect(link.search).toBe('')
     const secret = link.hash.slice(1)
@@ -69,7 +64,9 @@ describe('vertical: owner uploads, organizes and shares a photo', () => {
     const guestFetch = (path: string) =>
       app.request(`${APP_ORIGIN}/share/api/v1${path}`, { headers: { authorization: `Bearer ${secret}` } })
 
-    const shared = (await (await guestFetch(`/shares/${shareId}`)).json()) as { items: { id: string; thumbnailUrl: string }[] }
+    const shared = (await (await guestFetch(`/shares/${shareId}`)).json()) as {
+      items: { id: string; thumbnailUrl: string }[]
+    }
     expect(shared.items.map((i) => i.id)).toEqual([assetId])
     const preview = (await (await guestFetch(`/shares/${shareId}/assets/${assetId}/preview`)).json()) as { url: string }
     expect(new Uint8Array(await (await app.request(preview.url)).arrayBuffer())).toEqual(p.preview)

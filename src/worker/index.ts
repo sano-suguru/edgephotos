@@ -1,33 +1,37 @@
-import type { JWTVerifyGetKey } from 'jose'
-import { createLocalJWKSet } from 'jose'
 import { type AppOptions, createApp } from './app'
 import type { Env } from './env'
-import { createLocalSigner } from './storage/local-blobs'
 
-let cached: { env: Env; app: ReturnType<typeof createApp> } | undefined
+let cached: { env: Env; app: Promise<ReturnType<typeof createApp>> } | undefined
 
-function appFor(env: Env) {
-  if (cached?.env === env) return cached.app
+async function buildApp(env: Env) {
   const options: AppOptions = { env }
-  // Local development wiring. `import.meta.env.DEV` is statically false in production builds,
-  // so this branch (dev JWKS + local blob URLs) is removed from the deployed Worker.
+  // Local development wiring. `import.meta.env.DEV` is statically false in production builds, so this
+  // branch and its dynamic imports (dev JWKS, local blob URLs) are dropped from the deployed Worker.
   if (import.meta.env.DEV) {
     if (env.DEV_ACCESS_JWKS) {
-      const keys: JWTVerifyGetKey = createLocalJWKSet(JSON.parse(env.DEV_ACCESS_JWKS))
+      const { createLocalJWKSet } = await import('jose')
+      const keys = createLocalJWKSet(JSON.parse(env.DEV_ACCESS_JWKS))
       options.accessKeys = () => keys
     }
     if (env.DEV_BLOB_SIGNING_KEY && env.APP_ORIGIN) {
-      options.signer = createLocalSigner(env.APP_ORIGIN, env.DEV_BLOB_SIGNING_KEY)
-      options.localBlobSecret = env.DEV_BLOB_SIGNING_KEY
+      const local = await import('./storage/local-blobs')
+      options.signer = local.createLocalSigner(env.APP_ORIGIN, env.DEV_BLOB_SIGNING_KEY)
+      options.localRoutes = {
+        prefix: local.LOCAL_BLOB_PREFIX,
+        app: local.localBlobRoutes(env.BUCKET, env.DEV_BLOB_SIGNING_KEY),
+      }
     }
   }
-  const app = createApp(options)
-  cached = { env, app }
-  return app
+  return createApp(options)
+}
+
+function appFor(env: Env) {
+  if (cached?.env !== env) cached = { env, app: buildApp(env) }
+  return cached.app
 }
 
 export default {
-  fetch(request, env, ctx) {
-    return appFor(env).fetch(request, env, ctx)
+  async fetch(request, env, ctx) {
+    return (await appFor(env)).fetch(request, env, ctx)
   },
 } satisfies ExportedHandler<Env>

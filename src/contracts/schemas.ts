@@ -30,10 +30,7 @@ export const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, 'Expected lowerca
 // ISO 8601 date-time. The offset is optional because EXIF often lacks timezone information.
 export const TakenAtSchema = z
   .string()
-  .regex(
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?$/,
-    'Expected ISO 8601 date-time',
-  )
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?$/, 'Expected ISO 8601 date-time')
   .openapi({ example: '2024-05-01T10:20:30+09:00' })
 
 export const ErrorSchema = z
@@ -72,13 +69,9 @@ export const AssetPageSchema = z
   .object({ items: z.array(AssetSchema), nextCursor: z.string().nullable() })
   .openapi('AssetPage')
 
-export const AssetPatchSchema = z
-  .object({ isFavorite: z.boolean() })
-  .openapi('AssetPatch')
+export const AssetPatchSchema = z.object({ isFavorite: z.boolean() }).openapi('AssetPatch')
 
-export const SignedUrlSchema = z
-  .object({ url: z.url(), expiresAt: z.string() })
-  .openapi('SignedUrl')
+export const SignedUrlSchema = z.object({ url: z.url(), expiresAt: z.string() }).openapi('SignedUrl')
 
 // ---- Uploads ----
 

@@ -22,11 +22,7 @@ async function hmac(secret: string, data: string): Promise<string> {
   return base64UrlEncode(new Uint8Array(sig))
 }
 
-export function createLocalSigner(
-  origin: string,
-  secret: string,
-  now: () => Date = () => new Date(),
-): BlobSigner {
+export function createLocalSigner(origin: string, secret: string, now: () => Date = () => new Date()): BlobSigner {
   async function sign(claims: Claims) {
     const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(claims)))
     const sig = await hmac(secret, payload)

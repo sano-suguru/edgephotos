@@ -1,8 +1,8 @@
 import type { z } from '@hono/zod-openapi'
 import type { UploadReserveSchema } from '../../contracts/schemas'
 import { ApiError } from '../http/errors'
-import { assetObjectKeys } from '../storage/keys'
 import { INSPECT_HEAD_BYTES, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
+import { assetObjectKeys } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import { type AssetRow, getAssetRow, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
@@ -199,10 +199,7 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
   } catch (err) {
     if (!isUniqueViolation(err)) throw err
     // A concurrent upload of the same bytes won the race.
-    const winner = await ctx.db
-      .prepare('SELECT * FROM assets WHERE sha256 = ?')
-      .bind(upload.sha256)
-      .first<AssetRow>()
+    const winner = await ctx.db.prepare('SELECT * FROM assets WHERE sha256 = ?').bind(upload.sha256).first<AssetRow>()
     if (!winner) throw err
     return markDuplicate(ctx, upload, winner)
   }
@@ -215,7 +212,7 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
 async function settledOutcome(ctx: ServiceContext, upload: UploadRow): Promise<FinalizeOutcome> {
   const assetId = upload.status === 'duplicate' ? upload.duplicate_of : upload.asset_id
   const asset = assetId ? await getAssetRow(ctx.db, assetId) : null
-  if (!asset || asset.status !== 'ready') {
+  if (asset?.status !== 'ready') {
     throw new ApiError(410, 'UPLOAD_RESULT_GONE', 'The asset created by this upload no longer exists.')
   }
   return { result: upload.status === 'duplicate' ? 'duplicate' : 'created', asset }
