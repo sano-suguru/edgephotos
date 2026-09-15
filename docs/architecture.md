@@ -144,6 +144,32 @@ Web も将来の Native client も、同じ application API の consumer とし�
 
 `code` は機械可読とし、UI 文言のローカライズは Client 側で行います。
 
+主な resource（詳細は `/api/v1/openapi.json`）:
+
+```text
+GET    /api/v1/me
+POST   /api/v1/uploads                          reserve
+POST   /api/v1/uploads/{uploadId}/finalize      idempotent
+GET    /api/v1/assets?cursor&limit&favorite&trashed
+GET    /api/v1/assets/{assetId}
+PATCH  /api/v1/assets/{assetId}                 { isFavorite }
+GET    /api/v1/assets/{assetId}/original        short-lived URL (owner only)
+POST   /api/v1/assets/{assetId}/trash | /restore
+DELETE /api/v1/assets/{assetId}                 permanent delete (trashed only, resumable)
+GET    /api/v1/albums                  POST /api/v1/albums
+GET|PATCH|DELETE /api/v1/albums/{albumId}
+GET    /api/v1/albums/{albumId}/assets
+PUT|DELETE /api/v1/albums/{albumId}/assets/{assetId}   idempotent
+GET|POST /api/v1/albums/{albumId}/shares
+POST   /api/v1/shares/{shareId}/revoke | /regenerate
+GET    /api/v1/export                           metadata manifest
+GET    /api/v1/diagnostics                      non-sensitive counts
+GET    /share/api/v1/shares/{shareId}           Authorization: Bearer <secret>
+GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
+```
+
+画像 URL は短命な presigned GET を JSON で返します。Worker が画像 byte を中継することはありません。
+
 ## 5. Upload protocol
 
 ```text
@@ -157,6 +183,17 @@ Web も将来の Native client も、同じ application API の consumer とし�
 8. D1 transaction creates/commits asset
 9. asset becomes ready
 ```
+
+finalize での確認内容（[D-012](decisions.md)）:
+
+- 3 object の存在（欠けていれば `409 UPLOAD_OBJECT_MISSING`、upload は `pending` のまま再試行可能）
+- size が reserve 時の申告と一致
+- original の magic bytes が申告 content type と一致
+- thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG（違反は `422 UPLOAD_OBJECT_INVALID`）
+
+D1 への asset 作成と upload 状態更新は 1 つの D1 batch（transaction）で行います。asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。
+
+presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。
 
 不変条件:
 
@@ -221,6 +258,18 @@ D1 には secret の hash のみ保存します。
 
 share session / share Cookie は v1 では作りません。
 
+検証に失敗した場合は、理由を区別せず一律に `404 SHARE_UNAVAILABLE` を返します。share ID の存在確認に使われることを防ぐためです。share から発行する URL の期限は 300 秒以下で、share の残り期限も超えません。album を削除すると、その album の share は revoke されます。
+
+## 7.1 削除と復元
+
+- `trash` は論理削除です。timeline・album・share から見えなくなりますが、original は残ります。
+- `restore` で元に戻せます。album 所属も復帰します。
+- 完全削除は trash 内の asset に対してのみ実行できます。`purging` に遷移して全画面から隠したあと、R2 object を削除し、最後に D1 row を削除します。途中で失敗した場合も、同じ `DELETE` を再実行すれば再開できます。
+
+## 7.2 Export / Restore
+
+`GET /api/v1/export` は asset metadata・album 構成・object manifest・期待 SHA-256 を返します。original 本体を含む backup と空環境への restore・整合性検証は `pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)）。
+
 ## 8. Access routing
 
 同一 Worker の private area と public share area を分けます。
@@ -233,6 +282,8 @@ share session / share Cookie は v1 では作りません。
 Bypass 対象は `/share/*` に限定し、公開部分の認可責任は Worker が持ちます。
 
 Workers Static Assets 利用時の `ctx.access` だけには依存せず、Access assertion を Worker 側で検証します。
+
+静的 JS / CSS は `/share/assets/*` に出力し、共有ページも読み込めるようにします（[D-011](decisions.md)）。Worker は `/api/*`、`/share/*`（`/share/assets/*` を除く）を static assets より先に処理します。
 
 ## 9. Native client への拡張境界
 
