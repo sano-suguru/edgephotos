@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "edgephotos",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-08-15",
+  "observability": { "enabled": true },
+  "assets": {
+    "not_found_handling": "single-page-application",
+    // API, share API/page and the local dev blob endpoint reach the Worker first.
+    // Built JS/CSS lives under /share/assets so the Access bypass can stay limited to /share/*.
+    "run_worker_first": ["/api/*", "/share/*", "!/share/assets/*", "/__local/*"]
+  },
+  "d1_databases": [{ "binding": "DB", "database_name": "edgephotos", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "edgephotos" }],
+  // Empty values make the private API fail closed until they are configured.
+  "vars": {
+    "OWNER_EMAIL": "",
+    "APP_ORIGIN": "",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "R2_ACCOUNT_ID": "",
+    "R2_BUCKET_NAME": "edgephotos"
+  },
+  "env": {
+    "remote-test": {
+      "name": "edgephotos-remote-test",
+      "d1_databases": [
+        { "binding": "DB", "database_name": "edgephotos-remote-test", "migrations_dir": "migrations" }
+      ],
+      "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "edgephotos-remote-test" }],
+      "vars": {
+        "OWNER_EMAIL": "",
+        "APP_ORIGIN": "",
+        "ACCESS_TEAM_DOMAIN": "",
+        "ACCESS_AUD": "",
+        "R2_ACCOUNT_ID": "",
+        "R2_BUCKET_NAME": "edgephotos-remote-test"
+      }
+    }
+  }
+}
