@@ -70,6 +70,7 @@
 
 - ✅ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する（Worker 側の owner check は unit test で担保。Access policy が owner のみ Allow である限り、他 identity は Worker まで到達しないため remote では実測できない）
 - ✅ 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
+- ✅ original の checksum 付き PUT（[D-018](decisions.md)）が実 R2 で機能する（digest 違いは `400 BadDigest` で object なし、正しい bytes は `200`、binding の `head().checksums.sha256` を finalize で照合できる。Browser の CORS 越し）
 - 🟡 スマートフォンで撮影した実写真（orientation・GPS・大きい画素数を含む）を 20〜30 枚 upload し、timeline の向きと表示を確認する（EXIF orientation 1〜8・GPS・JPEG / PNG / WebP・160×120 から 6000×4000 を含む合成 20 枚と、実機由来の JPEG 1 枚で確認済み。カメラロール原本による確認は post-merge verification へ送る）
 
 ## Post-merge verification

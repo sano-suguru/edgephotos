@@ -11,8 +11,9 @@ export type SignedRequest = {
 }
 
 // Issues short-lived bearer URLs for a single operation on a single object key.
+// With sha256 (lowercase hex), storage must reject a PUT whose body has a different digest.
 export interface BlobSigner {
-  signPut(key: string, contentType: string, ttlSeconds: number): Promise<SignedRequest>
+  signPut(key: string, contentType: string, ttlSeconds: number, sha256?: string): Promise<SignedRequest>
   signGet(key: string, ttlSeconds: number): Promise<SignedRequest>
 }
 
@@ -74,9 +75,23 @@ export function createR2Signer(config: R2SignerConfig, now: () => Date = () => n
 
   return {
     // If-None-Match: * makes R2 reject a second PUT, so a still-valid URL cannot overwrite an original.
-    signPut: (key, contentType, ttl) => sign('PUT', key, ttl, { 'content-type': contentType, 'if-none-match': '*' }),
+    signPut: (key, contentType, ttl, sha256) => sign('PUT', key, ttl, putHeaders(contentType, sha256)),
     signGet: (key, ttl) => sign('GET', key, ttl, {}),
   }
+}
+
+// Every header here is signed (allHeaders), so a client cannot drop or alter the checksum.
+export function putHeaders(contentType: string, sha256?: string): Record<string, string> {
+  const headers: Record<string, string> = { 'content-type': contentType, 'if-none-match': '*' }
+  if (sha256) headers['x-amz-checksum-sha256'] = hexToBase64(sha256)
+  return headers
+}
+
+// S3 checksum headers carry the raw digest in standard base64.
+export function hexToBase64(hex: string): string {
+  if (!/^(?:[0-9a-f]{2})+$/.test(hex)) throw new Error('invalid hex digest')
+  const bytes = hex.match(/../g)?.map((b) => String.fromCharCode(Number.parseInt(b, 16))) ?? []
+  return btoa(bytes.join(''))
 }
 
 function toAmzDate(date: Date): string {

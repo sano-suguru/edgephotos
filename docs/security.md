@@ -91,7 +91,7 @@ share GET は最大 300 秒を初期上限とし、share 自体の残り期限�
 
 upload PUT は 600 秒を初期上限とします。
 
-upload PUT は `Content-Type` と `If-None-Match: *` を署名します。期限内の URL を再利用しても、保存済み object は上書きされません。owner 向けの GET URL は 600 秒です。
+upload PUT は `Content-Type` と `If-None-Match: *` を署名します。期限内の URL を再利用しても、保存済み object は上書きされません。original の PUT は申告 SHA-256 も `x-amz-checksum-sha256` として署名し、R2 に body の digest を検証させます。finalize は R2 が記録した SHA-256 と申告値の一致を確認するまで asset を `ready` にしません（[D-018](decisions.md)）。したがって D-018 以降に finalize された asset では、`assets.sha256` は R2 が検証した original の実 byte 列の SHA-256 です。それより前の asset の `sha256` は client の申告値のままで、`pnpm backup verify` で照合するまでこの保証はありません。owner 向けの GET URL は 600 秒です。
 
 ## 7. Metadata leak prevention
 
@@ -173,6 +173,7 @@ D1 に参照がない R2 object を即座に「ゴミ」と判定しません。
 - share から original を取得できない。
 - preview / thumbnail から GPS が除去される。
 - upload finalize 再送で重複 asset が生じない。
+- 申告 SHA-256 と一致しない original を保存しない・`ready` にしない。
 - D1 障害時に upload を成功扱いしない。
 
 上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Browser 上で手動確認しており、自動テストは Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）を対象にしています。

@@ -98,7 +98,7 @@ SSR、RSC、Server Actions を中心要件にせず、vinext や Astro をアプ
 
 ## D-012: finalize の保存確認は「存在・サイズ・形式・派生画像 metadata」とする
 
-**状態:** 採用
+**状態:** 採用（SHA-256 の扱いは [D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で更新）
 
 finalize では Worker が R2 binding で次を確認してから asset を `ready` にします。
 
@@ -113,7 +113,7 @@ original の SHA-256 は Client が reserve 時に申告し、重複判定の索
 
 ## D-013: presigned PUT は `If-None-Match: *` と `Content-Type` を署名対象にする
 
-**状態:** 採用
+**状態:** 採用（original は [D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) の checksum header も署名する）
 
 object key は reserve ごとに新しい asset ID から作るため、別 asset の上書き経路はありません。加えて、有効期限内の PUT URL が finalize 後に再利用されて original が差し替わることを防ぐため、`If-None-Match: *` を署名 header に含めます。R2 の S3 API は PutObject の conditional header をサポートします。
 
@@ -186,3 +186,28 @@ Migration:
 - production DB の再作成は不要
 
 `wrangler` と `readD1Migrations` は `.sql` だけを読むため、`migrations/meta/` は適用対象になりません。
+
+## D-018: original の SHA-256 を R2 に upload 時に検証させる
+
+**状態:** 採用（D-012 の「client-asserted content identity」を更新）
+
+D-012 では `assets.sha256` は client の申告値で、R2 上の byte 列と一致する保証がありませんでした。重複判定・backup・restore はこの値を content identity として使うため、storage 側で一致を保証します。
+
+- reserve は original の presigned PUT に `x-amz-checksum-sha256: base64(申告 SHA-256 の raw digest)` を署名 header として含める（SigV4 の `X-Amz-SignedHeaders` に入る）。Client が header を省略・変更すると署名が合わない
+- R2 は PUT body の SHA-256 がこの値と一致しなければ PUT を `400 BadDigest` で拒否し、object を作らない（S3 PutObject の checksum。R2 は 2023-06-16 の release note で S3 PutObject の sha256 checksum に対応。remote-test で実測済み。operations.md 冒頭）
+- finalize は R2 binding の `head()` が返す `checksums.sha256` を申告値と比較する。R2 は put 時に指定された checksum を object に記録し、S3 API で PUT した object でも binding から読める（remote-test で実測済み）。記録がない・値が違う original は `422 UPLOAD_OBJECT_INVALID`（`checksum_missing` / `checksum_mismatch`）とし、`ready` にしない。何らかの経路で checksum 検証を経ずに置かれた object に対しても fail-closed になる
+- Worker は original を download も hash もしない。確認は HEAD 1 回で済む
+- thumbnail / preview は再生成可能な derivative で、content identity に使わないため checksum を付けない
+
+却下した案:
+
+- finalize で Worker が original 全体を読んで hash する: 最大 100MB を毎回読むのは CPU・時間の面で避けたい。R2 が同じ検証を upload 時に行える
+- `Content-MD5` を使う: R2 は対応するが、MD5 では SHA-256 との一致を保証できない
+- 期待 SHA-256 を `X-Amz-Content-Sha256` に入れる: presigned URL では payload hash を `UNSIGNED-PAYLOAD` として扱うのが S3 の規約で、payload 検証を当てにできない
+
+影響:
+
+- Browser は `x-amz-checksum-sha256` を送るため、R2 CORS の AllowedHeaders に追加が必要（operations.md §6）
+- この変更以前に reserve した upload の PUT URL は checksum を含まない。そのまま finalize すると `checksum_missing` になるため、再 upload が必要（URL の期限は 600 秒）
+- この変更以前に `ready` になった asset の `sha256` は申告値のまま。`pnpm backup verify` が R2 から読み直して照合する
+- local 開発と test では、local blob route が同じ header を検証し、R2 binding の `put(..., { sha256 })` で digest を検証する（Miniflare も不一致を拒否し、`head().checksums.sha256` を返す）

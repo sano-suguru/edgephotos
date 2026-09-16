@@ -187,13 +187,16 @@ GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
 finalize での確認内容（[D-012](decisions.md)）:
 
 - 3 object の存在（欠けていれば `409 UPLOAD_OBJECT_MISSING`、upload は `pending` のまま再試行可能）
+- original について、R2 が記録した SHA-256（binding の `head().checksums.sha256`）が reserve 時の申告と一致（記録がなければ `checksum_missing`、不一致なら `checksum_mismatch`。どちらも `422 UPLOAD_OBJECT_INVALID`）。[D-018](decisions.md)
 - size が reserve 時の申告と一致
 - original の magic bytes が申告 content type と一致
 - thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG（違反は `422 UPLOAD_OBJECT_INVALID`）
 
 D1 への asset 作成と upload 状態更新は 1 つの D1 batch（transaction）で行います。asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。
 
-presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。
+presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw digest の base64）として署名します。R2 は body の digest が一致しない PUT を拒否し、object を作りません。Client はこの header を省略も変更もできません（[D-018](decisions.md)）。
+
+digest 不一致の PUT は R2 が `400` で拒否します。original が存在しないため finalize は `409 UPLOAD_OBJECT_MISSING` を返し、upload は `pending` のままです。URL の期限内なら、正しい bytes を同じ URL へ PUT し直して finalize を再試行できます。
 
 不変条件:
 
@@ -211,7 +214,7 @@ presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済
 - 元 byte 列をそのまま保持
 - 再エンコードしない
 - EXIF / GPS を改変しない
-- SHA-256 を metadata として保持
+- SHA-256 を metadata として保持（D-018 以降に finalize された asset では R2 が upload 時に検証した値。それより前の asset は申告値で、`pnpm backup verify` で照合する。[D-018](decisions.md)）
 - owner のみ取得可能
 - share では配信しない
 
