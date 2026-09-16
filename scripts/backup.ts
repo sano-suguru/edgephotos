@@ -11,7 +11,7 @@
 // and is never written to disk or logs.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import {
   type ApiClient,
   type BlobStore,
@@ -69,7 +69,9 @@ function client(): ApiClient {
 async function main() {
   const [command, dir] = process.argv.slice(2)
   if (!command || !dir) usage()
-  const store = fsStore(join(process.cwd(), dir))
+  // resolve(), not join(): join() would silently rewrite an absolute path into one under cwd,
+  // writing the backup (originals included) inside the repository.
+  const store = fsStore(resolve(process.cwd(), dir))
   switch (command) {
     case 'export': {
       const manifest = await backupLibrary(client(), store)
