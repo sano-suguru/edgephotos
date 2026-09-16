@@ -222,7 +222,9 @@ digest 不一致の PUT は R2 が `400` で拒否します。original が存在
 
 Browser の JPEG encoder が付ける APP1 / APP13（WebKit は Exif の色空間・画素数と空の IPTC を書き出す）は、Client が PUT 前に取り除きます。finalize は引き続き APP1 / APP13 を含む derivative を拒否します（[D-020](decisions.md)）。
 
-original の形式は JPEG / PNG / WebP です。HEIC / HEIF は Client が明示的に拒否し、iPhone では Safari の写真ピッカーによる JPEG 変換に任せます（[D-019](decisions.md)）。
+original の形式は JPEG / PNG / WebP です。HEIC / HEIF は Client が明示的に拒否します。iPhone の通常経路では、Safari の写真ピッカーが HEIC を JPEG に変換して渡す、現在報告されている挙動に任せます。この挙動は Web 標準の保証ではありません。HEIC がそのまま渡された場合は、明示的なエラーになります（[D-019](decisions.md)）。
+
+Web 版が保存する original は「Browser から受け取った byte 列」です。iOS が選択時に JPEG へ変換した場合、カメラロールの HEIC そのものは保存されません。
 
 ### thumbnail
 

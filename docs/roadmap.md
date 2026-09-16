@@ -78,6 +78,14 @@
 merge を止める条件から外し、実際に使い始めてから確認する項目です。新機能の追加は伴いません。
 
 - ⬜ 普段の入力経路でスマートフォン写真を数枚 upload し、timeline の orientation と preview を確認する
+- ⬜ iPhone Safari の実機で、取り込みの memory と lifecycle を確認する（desktop の WebKit では代用できない）
+  - 48MP の HEIC を複数選択する（落ちる場合は前処理の並列数 1 を試す。[D-020](decisions.md)）
+  - iCloud にしかない写真を選ぶ
+  - 100〜200 枚を選ぶ
+  - upload 中に画面をロックする、Safari を background へ移す、Wi-Fi とモバイル回線を切り替える
+  - 10 分を超えて中断し、presigned URL の期限切れを踏む
+  - 選択時の HEIC → JPEG 変換と、位置情報の扱いを確認する
+- ⬜ Android の実機で、同じ項目のうち該当するもの（HEIF 設定の端末を含む）を確認する
 
 実機由来の公開サンプルと合成 fixture による取り込みは、Chromium と WebKit で検証済みです（operations.md 冒頭）。残っているのは iPhone / Android 実機でしか確かめられない点です。具体的には、iOS の写真ピッカーの HEIC → JPEG 変換、mobile Safari の memory 上限、画面ロックで中断した upload の再開です。表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。
 - ✅ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する

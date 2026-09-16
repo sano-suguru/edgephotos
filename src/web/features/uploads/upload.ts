@@ -112,7 +112,7 @@ export async function enqueueFiles(files: FileList | File[]) {
   const items: UploadItem[] = list.map((f) => ({ id: crypto.randomUUID(), name: f.name, state: 'queued' }))
   uploads.value = mergeUploadList(uploads.value, items, 200)
   // Peak memory is dominated by decoded bitmaps (width x height x 4); each extra worker adds one on Chromium.
-  // 2 was measured as the trade-off (docs/decisions.md D-020).
+  // 2 is kept because desktop measurements gave no reason to change it; not verified on iOS (docs/decisions.md D-020).
   const queue = list.map((file, i) => ({ file, item: items[i] }))
   const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
     for (let next = queue.shift(); next; next = queue.shift()) {
