@@ -5,7 +5,18 @@
 > **検証状況（2026-09-16）:**
 > - local（Miniflare / `vite dev` / `vite preview`）: migration 適用、fail-closed、upload → timeline → album → share → revoke、export / restore / verify を確認済み。
 > - remote-test 環境: D1・R2 の作成、remote D1 migration、`CLOUDFLARE_ENV=remote-test` での build と deploy、未設定 Worker が private / share API を `503` で拒否すること、共有ページの header / CSP、`/share/assets/*` の配信を確認済み。
-> - **未検証:** Access application（JWT / AUD / Bypass）、R2 API token による presigned PUT / GET、R2 CORS、実環境での restore。
+> - Access 境界: private path（`/`、`/api/v1/*`）が Access login へ 302、`/share`・`/share/{shareId}`・`/share/api/v1/*`・`/share/assets/*` が Access を通過して Worker に到達することを確認済み。
+> - secret 運用: 7 件を Worker secret 化し、`secrets.required` 未充足時に deploy が不足名を挙げて失敗すること、充足後に fail-closed が解けて share API が `503` から `404 SHARE_UNAVAILABLE` になることを確認済み。
+> - R2 CORS: bucket 限定の rule を適用し、読み戻しを確認済み。
+> - upload 経路: owner が Access login を通したうえで、private API の成功応答、`reserve -> PUT -> finalize` が remote-test で通ることを確認済み。PUT の宛先が `*.r2.cloudflarestorage.com` であること（Worker が本体を中継しないこと）を DevTools で確認。`ACCESS_AUD` と `ACCESS_TEAM_DOMAIN` の正しさもこれで確定。
+> - duplicate handling と完全削除: 同一 original の再 upload が `409 DUPLICATE_ASSET` になること、完全削除後は同じ original を再登録できることを確認済み。
+> - share 経路: album 作成 -> asset 追加 -> share 発行 -> 正しい secret で `200` -> revoke -> 同じ secret で `404` までを確認済み。secret 不正・secret 無しはいずれも `404`。`url` は `/share/{id}#{secret}` の形。share から `original` を要求すると `400`（variant は `thumbnail` / `preview` のみ）。derivative は `*.r2.cloudflarestorage.com` から直接取得。
+> - CSRF 境界: 他 origin からの `POST /api/v1/albums` が `403 ORIGIN_NOT_ALLOWED`。
+> - presigned URL の失効: share の derivative URL が発行 300 秒後に R2 で `403 ExpiredRequest` になることを確認済み。revoke 済み share の既発行 URL が残り TTL の間だけ有効なのは [security.md](security.md) §5 の契約どおり。
+> - backup: remote-test に対する `pnpm backup export` と `verify` が通り、original の SHA-256 照合が一致（`ok: true`）。
+> - **未検証:** trash / restore、複数枚・多様な形式での original SHA-256 保持、別環境への `pnpm backup restore`。
+>
+> owner 以外の identity を Worker が `403` にする経路は、Access policy が owner のみ Allow である限り Worker まで到達しないため、remote-test では実測できません。この検査は多層防御であり、回帰は unit test 側で担保します。
 
 ## 1. セットアップ目標
 
@@ -40,36 +51,52 @@ migration は forward-only です。通常の test command から remote migrati
 
 ## 3. 利用者が明示設定するもの
 
-Vars（`wrangler.jsonc` の `vars`、空文字のままだと private API は `503` で fail-closed）:
+環境固有の値はすべて Worker secret です。`wrangler.jsonc` へ値を書きません。repository は public なので、秘密情報かどうかに関わらず、個人のメールアドレスや Cloudflare 固有の識別値を commit しません。
+
+Secrets（`wrangler secret put <NAME> --env <ENV>`）:
 
 | 名前 | 例 | 用途 |
 | --- | --- | --- |
 | `OWNER_EMAIL` | `you@example.com` | owner として許可する Access identity |
 | `APP_ORIGIN` | `https://photos.example.com` | 共有 URL 生成、Origin check |
-| `ACCESS_TEAM_DOMAIN` | `yourteam.cloudflareaccess.com` | JWT issuer / JWKS |
-| `ACCESS_AUD` | Access application の AUD tag | JWT audience |
+| `ACCESS_TEAM_DOMAIN` | `yourteam.cloudflareaccess.com` | JWT issuer / JWKS（host のみ。URL 不可） |
+| `ACCESS_AUD` | private Access application の AUD tag | JWT audience |
 | `R2_ACCOUNT_ID` | 32 桁 hex | presigned URL の S3 endpoint |
+| `R2_ACCESS_KEY_ID` | R2 API token の Access Key ID | presigned URL の署名 |
+| `R2_SECRET_ACCESS_KEY` | R2 API token の Secret Access Key | presigned URL の署名 |
+
+Vars（`wrangler.jsonc` の `vars`、値が公開されても害がないもののみ）:
+
+| 名前 | 例 | 用途 |
+| --- | --- | --- |
 | `R2_BUCKET_NAME` | `edgephotos` | presigned URL の bucket |
 
-Secrets（`wrangler secret put`）:
+`wrangler.jsonc` は必要な secret 名を `secrets.required` で宣言します。未設定のまま deploy すると、不足している名前を挙げて失敗します。
 
 ```text
-R2_ACCESS_KEY_ID
-R2_SECRET_ACCESS_KEY
+✘ [ERROR] The following required secrets have not been set: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
 ```
+
+secret 未設定の binding は `undefined` になるため、`readAppConfig()` は `null` を返し、private API と share API は `503 SERVER_MISCONFIGURED` で fail-closed のままです。`secrets.required` は deploy を止めるための仕組みであり、fail-closed の根拠ではありません。
 
 R2 credential は対象 bucket だけの Object Read & Write 権限を持つ R2 API token から作成します。Cloudflare account 全体を管理できる token を EdgePhotos へ設定しません。
 
 ## 4. Cloudflare Access
 
-同じ hostname に 2 つの Access application を作ります。
+同じ hostname に 2 つの self-hosted application を作ります。path の指定はいずれも wildcard を付けません。
 
-1. `photos.example.com/*`: Allow policy（owner の identity のみ）
-2. `photos.example.com/share/*`: Bypass policy
+1. `photos.example.com`: Allow policy（owner の identity のみ）
+2. `photos.example.com/share`: Bypass policy（Everyone）
+
+より specific な path の application が優先するため、2 が `/share` 配下を先に処理します。wildcard を使わないのは、`/alpha/*` が親の `/alpha` 自体を含まないからです。`/share` と書けば `/share` と配下の両方が Bypass になります（remote-test で `/share`、`/share/{shareId}`、`/share/api/v1/*`、`/share/assets/*` を実測確認）。
 
 1 の AUD tag を `ACCESS_AUD` に設定します。Access を通過しても `OWNER_EMAIL` と一致しない identity は Worker が `403` にします。
 
-`/share/assets/*`（build 済み JS / CSS）も Bypass 側に含まれます（[D-011](decisions.md)）。
+`/share/assets/*`（build 済み JS / CSS）と share API（`/share/api/v1/*`）はどちらも `/share` 配下なので、Bypass 1 つで公開面が揃います（[D-011](decisions.md)）。
+
+Bypass policy は identity selector を使えず、request log も残りません。`/share/*` の監査は EdgePhotos 側でのみ取得できます。
+
+Access application は API でも作成できます。必要な token 権限は `Access: Apps and Policies Edit`（account scope）だけです。作業後は token を revoke します。
 
 ## 5. APP_ORIGIN
 
@@ -84,22 +111,31 @@ Browser は presigned URL に対して次を送ります。
 - `PUT`（upload）: `Content-Type` と `If-None-Match` header 付き（[D-013](decisions.md)）
 - `GET`（`<img>` による表示、original の取得）
 
+wrangler の `--file` は Dashboard 表示とは別形式です。`rules` 配列でくるみ、フィールドは camelCase にします。PascalCase の配列を渡すと `must contain a 'rules' array` で失敗します。
+
 ```json
-[
-  {
-    "AllowedOrigins": ["https://photos.example.com"],
-    "AllowedMethods": ["GET", "PUT"],
-    "AllowedHeaders": ["content-type", "if-none-match"],
-    "MaxAgeSeconds": 600
-  }
-]
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["https://photos.example.com"],
+        "methods": ["GET", "PUT"],
+        "headers": ["content-type", "if-none-match"]
+      },
+      "maxAgeSeconds": 600
+    }
+  ]
+}
 ```
 
 ```bash
 pnpm wrangler r2 bucket cors set edgephotos-remote-test --file cors.json
+pnpm wrangler r2 bucket cors list edgephotos-remote-test
 ```
 
 `*` は使いません。
+
+`exposeHeaders` は設定しません。`If-None-Match: *` は署名に含める request header であり（[D-013](decisions.md)）、client は PUT 応答の `ETag` を読みません。client が応答 header を読む必要が生じた時点で追加します。
 
 ## 7. Setup verification
 

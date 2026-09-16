@@ -27,13 +27,23 @@
       "name": "edgephotos-remote-test",
       "d1_databases": [{ "binding": "DB", "database_name": "edgephotos-remote-test", "migrations_dir": "migrations" }],
       "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "edgephotos-remote-test" }],
+      // Environment-specific values are Worker secrets, not vars: this repository is public and
+      // OWNER_EMAIL / ACCESS_* / R2_ACCOUNT_ID identify a person and a Cloudflare account.
+      // Unset secrets leave the bindings undefined, so readAppConfig() still fails closed.
       "vars": {
-        "OWNER_EMAIL": "",
-        "APP_ORIGIN": "",
-        "ACCESS_TEAM_DOMAIN": "",
-        "ACCESS_AUD": "",
-        "R2_ACCOUNT_ID": "",
         "R2_BUCKET_NAME": "edgephotos-remote-test"
+      },
+      // Deploy fails if any of these are not set on the Worker.
+      "secrets": {
+        "required": [
+          "OWNER_EMAIL",
+          "APP_ORIGIN",
+          "ACCESS_TEAM_DOMAIN",
+          "ACCESS_AUD",
+          "R2_ACCOUNT_ID",
+          "R2_ACCESS_KEY_ID",
+          "R2_SECRET_ACCESS_KEY"
+        ]
       }
     }
   }

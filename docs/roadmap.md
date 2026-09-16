@@ -16,8 +16,8 @@
 - ✅ OpenAPI を生成できる（`/api/v1/openapi.json`）
 - 🟡 local / remote-test / production が分離されている（remote-test は D1 / R2 / Worker を作成・デプロイ済み。production は未作成）
 - 🟡 shadcn/ui + Base UI の主要 component が Preact production build で成立する（Dialog / Menu は確認済み、Select と touch は未確認）
-- ⬜ `/share/*` の公開経路と private path の Access 保護を実環境で検証できる
-- ⬜ R2 presigned PUT / GET と CORS を実環境で検証できる（署名形式は unit test 済み）
+- ✅ `/share/*` の公開経路と private path の Access 保護を実環境で検証できる
+- ✅ R2 presigned PUT / GET と CORS を実環境で検証できる
 
 ## Feature 1: Upload + Timeline
 
@@ -25,7 +25,7 @@
 
 - ✅ owner が写真を upload できる
 - ✅ upload 完了後に timeline へ表示される
-- 🟡 original / thumbnail / preview が想定した経路で保存・取得できる（local blob 模擬で確認、実 R2 は未検証）
+- ✅ original / thumbnail / preview が想定した経路で保存・取得できる（実 R2 で確認済み。PUT / GET とも Browser から R2 へ直行し、Worker は本体を中継しない）
 - ✅ refresh 後も状態が一貫する
 
 ## Feature 2: Favorite + Albums
@@ -68,11 +68,23 @@
 
 到達点:
 
-- ⬜ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する
-- ⬜ 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
+- ✅ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する
+- ✅ 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
 - ⬜ スマートフォンで撮影した実写真（orientation・GPS・大きい画素数を含む）を 20〜30 枚 upload し、timeline の向きと表示を確認する
-- ⬜ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
-- ⬜ remote で backup export → verify → 別の空環境への restore を 1 回成功させる
+- ✅ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
+- ⬜ remote で backup export → verify → 別の空環境への restore を 1 回成功させる（export と verify は済み、restore が未実施）
+
+実測の詳細は [operations.md](operations.md) 冒頭の検証状況を正本とします。
+
+## 既知の制約
+
+v1 の完成条件には含めませんが、後から迷わないよう記録します。
+
+**失敗した upload の行が残り続ける。** `reserve` 済みで finalize されなかった `uploads` row は削除されません。`expires_at` は書き込まれますが現状どこからも読まれず、期限切れ row を掃除する経路もありません。R2 object が残る場合も同様です。
+
+これはデータの汚れであって、認証やデータ整合性の問題ではありません。`finalizeUpload()` は R2 に object が実在することを確認してから `ready` にするため、期限切れ reserve を後から finalize しようとしても presigned URL が R2 側で失効しており PUT が通りません。
+
+自動 cleanup を始めると Cron / Queues へスコープが広がるため、要求か測定結果が出るまで着手しません（[AGENTS.md](../AGENTS.md) §6）。
 
 ## Release polish
 
