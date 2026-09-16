@@ -34,6 +34,12 @@ export async function getAlbum(db: Db, id: string): Promise<Album> {
   return toAlbum(row)
 }
 
+// Existence check without the member count: counting reads every member row (docs/benchmarks.md).
+export async function requireAlbumId(db: Db, id: string): Promise<void> {
+  const row = await db.select({ id: albums.id }).from(albums).where(eq(albums.id, id)).get()
+  if (!row) throw new ApiError(404, 'ALBUM_NOT_FOUND', 'Album not found.')
+}
+
 export async function createAlbum(ctx: ServiceContext, title: string): Promise<Album> {
   const id = crypto.randomUUID()
   const ts = ctx.now().toISOString()
@@ -49,7 +55,7 @@ export async function renameAlbum(ctx: ServiceContext, id: string, title: string
 
 // Deleting an album revokes its shares and removes memberships. Assets are untouched.
 export async function deleteAlbum(ctx: ServiceContext, id: string): Promise<void> {
-  await getAlbum(ctx.db, id)
+  await requireAlbumId(ctx.db, id)
   const ts = ctx.now().toISOString()
   await ctx.db.batch([
     ctx.db
@@ -62,7 +68,7 @@ export async function deleteAlbum(ctx: ServiceContext, id: string): Promise<void
 }
 
 export async function addAssetToAlbum(ctx: ServiceContext, albumId: string, assetId: string) {
-  await getAlbum(ctx.db, albumId)
+  await requireAlbumId(ctx.db, albumId)
   const asset = await requireReadyAsset(ctx.db, assetId)
   if (asset.trashed_at) throw new ApiError(409, 'ASSET_TRASHED', 'Trashed assets cannot be added to albums.')
   const ts = ctx.now().toISOString()
@@ -73,7 +79,7 @@ export async function addAssetToAlbum(ctx: ServiceContext, albumId: string, asse
 }
 
 export async function removeAssetFromAlbum(ctx: ServiceContext, albumId: string, assetId: string) {
-  await getAlbum(ctx.db, albumId)
+  await requireAlbumId(ctx.db, albumId)
   const ts = ctx.now().toISOString()
   await ctx.db.batch([
     ctx.db.delete(albumAssets).where(and(eq(albumAssets.album_id, albumId), eq(albumAssets.asset_id, assetId))),

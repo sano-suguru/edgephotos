@@ -81,7 +81,9 @@ export async function listAssets(ctx: ServiceContext, query: TimelineQuery) {
   }
   const cursor = decodeCursor(query.cursor)
   if (cursor) {
-    where.push(sql`(a.sort_at < ${cursor.s} OR (a.sort_at = ${cursor.s} AND a.id < ${cursor.i}))`)
+    // Row-value form so D1 seeks assets_timeline. With bound values the equivalent OR form scanned the index
+    // from the start, so rows read grew with page depth (docs/benchmarks.md).
+    where.push(sql`(a.sort_at, a.id) < (${cursor.s}, ${cursor.i})`)
   }
   const results = await ctx.db.all<AssetRow>(
     sql`SELECT a.* FROM ${from} WHERE ${sql.join(where, sql` AND `)}

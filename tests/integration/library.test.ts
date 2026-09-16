@@ -31,6 +31,31 @@ describe('timeline', () => {
     expect(new Set(seen).size).toBe(seen.length)
   })
 
+  it('pages through assets that share a capture time without skipping or repeating any', async () => {
+    const app = await makeApp()
+    const takenAt = '1999-12-31T23:59:59Z'
+    const ids: string[] = []
+    for (let i = 0; i < 5; i++) ids.push((await uploadPhoto(app, undefined, { takenAt })).result.asset.id)
+
+    const seen: string[] = []
+    let cursor: string | null = null
+    do {
+      const qs: string = cursor ? `&cursor=${cursor}` : ''
+      const page: { items: { id: string }[]; nextCursor: string | null } = await callJson(
+        app,
+        'GET',
+        `/api/v1/assets?limit=2${qs}`,
+        { expect: 200 },
+      )
+      seen.push(...page.items.map((i) => i.id))
+      cursor = page.nextCursor
+    } while (cursor)
+
+    // Same sort key: ties are broken by id, descending.
+    expect(seen.filter((id) => ids.includes(id))).toEqual([...ids].sort().reverse())
+    expect(new Set(seen).size).toBe(seen.length)
+  })
+
   it('rejects a tampered cursor', async () => {
     const res = await call(await makeApp(), 'GET', '/api/v1/assets?cursor=%%%')
     expect(res.status).toBe(400)
