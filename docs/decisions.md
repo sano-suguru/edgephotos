@@ -109,6 +109,8 @@ finalize では Worker が R2 binding で次を確認してから asset を `rea
 
 original の SHA-256 は Client が reserve 時に申告し、重複判定の索引として使います。Worker は finalize 時に original 全体を hash しません。Workers の CPU 上限内で大きな original を毎回 hash するのは現実的でないためです。保存済み original の SHA-256 は backup / restore / verify（`pnpm backup`）で R2 から再取得して検証します。
 
+したがって `assets.sha256` は **client-asserted content identity** です。server が byte 列から計算し直した verified identity ではありません。v1 は 1 owner で、脅威は「owner が自分自身に嘘をつく」ことになるため、この区別を許容します。将来 multi-user や untrusted client を扱う場合は、この前提が崩れるため再検討が必要です。
+
 ## D-013: presigned PUT は `If-None-Match: *` と `Content-Type` を署名対象にする
 
 **状態:** 採用
@@ -121,7 +123,7 @@ Browser はこの 2 header を送るため、R2 CORS の AllowedHeaders に `con
 
 **状態:** 採用
 
-`assets.sha256` は UNIQUE です。reserve 時に同じ original が存在すれば `409 DUPLICATE_ASSET` を返します。reserve 後の競合で finalize 時に重複が判明した場合は、既存 asset を返し、その upload 専用の object を D1 記録後に削除します。ゴミ箱内の asset も重複として扱います。
+`assets.sha256` は UNIQUE です（値の出所は client 申告であり、上記 [D-012](#d-012-finalize-の保存確認は存在サイズ形式派生画像-metadataとする) の区別が前提です）。reserve 時に同じ original が存在すれば `409 DUPLICATE_ASSET` を返します。reserve 後の競合で finalize 時に重複が判明した場合は、既存 asset を返し、その upload 専用の object を D1 記録後に削除します。ゴミ箱内の asset も重複として扱います。
 
 ## D-015: restore は公開 HTTP API 経由の再 upload とする
 

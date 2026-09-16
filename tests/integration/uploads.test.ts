@@ -216,6 +216,70 @@ describe('upload finalize', () => {
     expect(replay).toMatchObject({ result: 'duplicate', asset: { id: first.asset.id } })
   })
 
+  it('converges two different uploads of the same bytes finalized concurrently', async () => {
+    const app = await makeApp()
+    const p = await photo()
+    const a = await reserve(app, p)
+    const b = await reserve(app, p)
+    for (const r of [a, b]) {
+      for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
+    }
+    // Both finalize at once: the SHA-256 unique index decides the winner, the loser reports a duplicate.
+    const [first, second] = await Promise.all([
+      callJson(app, 'POST', `/api/v1/uploads/${a.upload.id}/finalize`, { expect: 200 }),
+      callJson(app, 'POST', `/api/v1/uploads/${b.upload.id}/finalize`, { expect: 200 }),
+    ])
+    expect(first.asset.id).toBe(second.asset.id)
+    expect([first.result, second.result].sort()).toEqual(['created', 'duplicate'])
+    expect(await assetCount(p.sha256)).toBe(1)
+    const winner = first.asset.id
+    expect(await env.BUCKET.head(`originals/${winner}`)).not.toBeNull()
+    const loser = [a, b].find((r) => assetIdFromTarget(r.targets.original.url) !== `originals/${winner}`)!
+    expect(await env.BUCKET.head(assetIdFromTarget(loser.targets.original.url))).toBeNull()
+    const statuses = await Promise.all([uploadStatus(a.upload.id), uploadStatus(b.upload.id)])
+    expect(statuses.sort()).toEqual(['duplicate', 'finalized'])
+  })
+
+  it('recovers when another upload of the same bytes commits first (unique constraint race)', async () => {
+    const p = await photo()
+    const other = await photo()
+    let raced = false
+    // Commits a competing asset with the same SHA-256 in the instant between the R2 verification
+    // and this upload's insert, which is the window a concurrent finalize can hit.
+    const racingDb = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        if (prop === 'batch' && !raced) {
+          return async (statements: D1PreparedStatement[]) => {
+            raced = true
+            await target
+              .prepare(
+                `INSERT INTO assets (id, status, sha256, original_size, original_content_type, sort_at, created_at, updated_at)
+                 VALUES (?, 'ready', ?, 1, 'image/jpeg', 0, 'x', 'x')`,
+              )
+              .bind(crypto.randomUUID(), p.sha256)
+              .run()
+            return target.batch(statements)
+          }
+        }
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const app = await makeApp({ env: { DB: racingDb } })
+    const r = await reserve(app, p)
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
+
+    const result = await callJson(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
+    expect(raced).toBe(true)
+    expect(result.result).toBe('duplicate')
+    expect(result.asset.sha256).toBe(p.sha256)
+    expect(await assetCount(p.sha256)).toBe(1)
+    expect(await uploadStatus(r.upload.id)).toBe('duplicate')
+    // The loser's own objects are removed; unrelated assets are untouched.
+    expect(await env.BUCKET.head(assetIdFromTarget(r.targets.original.url))).toBeNull()
+    expect(other.sha256).not.toBe(p.sha256)
+  })
+
   it('does not report success when D1 fails, keeps R2 objects, and recovers on retry', async () => {
     const p = await photo()
     let failBatch = true

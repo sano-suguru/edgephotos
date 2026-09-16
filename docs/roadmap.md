@@ -62,6 +62,18 @@
 
 この段階を外部 alpha の前提とします。
 
+## Remote integration verification
+
+コードではなく、実 Cloudflare 環境で境界を踏むための段階です。ここを通過するまで private alpha を「完成」とは扱いません。
+
+到達点:
+
+- ⬜ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する
+- ⬜ 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
+- ⬜ スマートフォンで撮影した実写真（orientation・GPS・大きい画素数を含む）を 20〜30 枚 upload し、timeline の向きと表示を確認する
+- ⬜ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
+- ⬜ remote で backup export → verify → 別の空環境への restore を 1 回成功させる
+
 ## Release polish
 
 - Deploy to Cloudflare

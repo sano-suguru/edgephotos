@@ -8,7 +8,9 @@ EdgePhotos は、利用者自身の Cloudflare アカウントへデプロイす
 
 ## 状態
 
-**private alpha（実装済み・実環境未検証）**。upload、timeline、favorite、album、期限付き共有と失効、trash と完全削除、export / restore を実装し、local の Workers runtime（Miniflare の D1 / R2）で自動テストしています。Cloudflare Access・R2 presigned URL・CORS を実環境で通した検証はまだです。進捗は [ロードマップ](docs/roadmap.md) を参照してください。
+**private alpha 候補（実装済み・実環境未検証）**。upload、timeline、favorite、album、期限付き共有と失効、trash と完全削除、export / restore を実装し、local の Workers runtime（Miniflare の D1 / R2）で自動テストしています。
+
+ただし中核経路である Client → presigned URL → private R2 と Cloudflare Access の境界は、まだ実環境で踏んでいません。ここを通すまで private alpha として完成扱いにしません。残作業は [ロードマップ](docs/roadmap.md) の Remote integration verification を参照してください。
 
 ## ローカルで試す
 
