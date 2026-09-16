@@ -1,4 +1,5 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
+import { useRef } from 'preact/hooks'
 import type { Album, Asset } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { Dialog } from '../../components/ui/dialog'
@@ -22,6 +23,18 @@ export function AssetViewer(props: {
   const albums = useSignal<Album[]>([])
   const busy = useSignal(false)
   const notice = useSignal<string | null>(null)
+  const renewedFor = useRef<string | null>(null)
+
+  // The preview URL came with the list and may have expired while the page was open. Fetch the asset
+  // again for a fresh URL, once per asset so a missing object cannot loop.
+  function renewPreview() {
+    if (renewedFor.current === asset.id) return
+    renewedFor.current = asset.id
+    api
+      .getAsset(asset.id)
+      .then((fresh) => props.onChanged(fresh))
+      .catch(() => {})
+  }
 
   useSignalEffect(() => {
     if (props.mode !== 'trash') {
@@ -56,7 +69,12 @@ export function AssetViewer(props: {
     <Dialog open onOpenChange={(open) => !open && props.onClose()} title={asset.filename ?? '写真'} wide>
       <div class="flex flex-col gap-4 md:flex-row">
         <div class="flex min-h-64 flex-1 items-center justify-center rounded bg-black/90">
-          <img src={asset.previewUrl} alt={asset.filename ?? ''} class="max-h-[70vh] max-w-full object-contain" />
+          <img
+            src={asset.previewUrl}
+            alt={asset.filename ?? ''}
+            class="max-h-[70vh] max-w-full object-contain"
+            onError={renewPreview}
+          />
         </div>
         <aside class="flex w-full flex-col gap-3 text-sm md:w-64">
           <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">

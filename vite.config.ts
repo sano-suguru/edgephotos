@@ -20,6 +20,8 @@ export default defineConfig(async ({ command }) => {
     tailwindcss(),
     cloudflare({
       config: devVars ? (config) => ({ vars: { ...config.vars, ...devVars } }) : undefined,
+      // Browser E2E runs against its own throwaway local D1/R2 (see playwright.config.ts).
+      persistState: process.env.EDGEPHOTOS_STATE_DIR ? { path: process.env.EDGEPHOTOS_STATE_DIR } : undefined,
     }),
   )
 
