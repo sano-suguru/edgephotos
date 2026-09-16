@@ -1,0 +1,134 @@
+import { describe, expect, it } from 'vitest'
+import {
+  type Check,
+  checkConfig,
+  checkCorsPreflight,
+  checkDeployment,
+  checkMigrations,
+  checkPublicAccess,
+  type Fetch,
+  REQUIRED_SECRETS,
+} from '../../scripts/lib/diagnose'
+import { readR2SignerConfig } from '../../src/worker/storage/signer'
+
+const status = (checks: Check[], name: string) => checks.find((c) => c.name === name)?.status
+
+const goodConfig = {
+  vars: { R2_BUCKET_NAME: 'photos' },
+  secretsRequired: [...REQUIRED_SECRETS],
+  previewUrls: false,
+  bucketName: 'photos',
+}
+
+describe('setup diagnostics', () => {
+  it('requires every value the Worker reads from secrets', () => {
+    // If the Worker starts reading another secret, REQUIRED_SECRETS must follow.
+    const env = Object.fromEntries(REQUIRED_SECRETS.map((n) => [n, n === 'R2_ACCOUNT_ID' ? 'a'.repeat(32) : 'x']))
+    expect(readR2SignerConfig({ ...env, R2_BUCKET_NAME: 'photos' })).not.toBeNull()
+    for (const name of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY']) {
+      expect(readR2SignerConfig({ ...env, R2_BUCKET_NAME: 'photos', [name]: undefined })).toBeNull()
+    }
+  })
+
+  it('flags config mistakes', () => {
+    expect(checkConfig(goodConfig).every((c) => c.status === 'pass')).toBe(true)
+    const bad = checkConfig({
+      vars: { OWNER_EMAIL: '', R2_BUCKET_NAME: 'other' },
+      secretsRequired: ['OWNER_EMAIL'],
+      previewUrls: undefined,
+      bucketName: 'photos',
+    })
+    expect(bad.map((c) => c.status)).toEqual(['fail', 'fail', 'fail', 'fail'])
+    expect(bad[1].detail).toContain('OWNER_EMAIL')
+  })
+
+  it('reports pending migrations and unknown public-access wording', () => {
+    expect(checkMigrations(['0001_initial.sql'], ['0001_initial.sql', '0002_x.sql']).status).toBe('fail')
+    expect(checkMigrations(['0001_initial.sql', '0002_x.sql'], ['0001_initial.sql']).status).toBe('warn')
+    expect(checkMigrations(['0001_initial.sql'], ['0001_initial.sql']).status).toBe('pass')
+    const unknown = checkPublicAccess('something new', 'something new')
+    expect(unknown.map((c) => c.status)).toEqual(['warn', 'warn'])
+    expect(checkPublicAccess('Public access via the r2.dev URL is enabled.', '')[0].status).toBe('fail')
+  })
+
+  it('checks the upload preflight the way a browser would', async () => {
+    const origin = 'https://photos.example.test'
+    const preflight =
+      (headers: Record<string, string>, status = 204): Fetch =>
+      async () =>
+        new Response(null, { status, headers })
+    const ok = {
+      'access-control-allow-origin': origin,
+      'access-control-allow-methods': 'GET, PUT',
+      'access-control-allow-headers': 'content-type, if-none-match, x-amz-checksum-sha256',
+    }
+    expect((await checkCorsPreflight(preflight(ok), 'https://r2/x', origin)).status).toBe('pass')
+    const noChecksum = { ...ok, 'access-control-allow-headers': 'content-type, if-none-match' }
+    expect((await checkCorsPreflight(preflight(noChecksum), 'https://r2/x', origin)).detail).toContain(
+      'x-amz-checksum-sha256',
+    )
+    expect(
+      (await checkCorsPreflight(preflight({ ...ok, 'access-control-allow-origin': '*' }), 'u', origin)).status,
+    ).toBe('fail')
+    expect((await checkCorsPreflight(preflight({}, 403), 'u', origin)).status).toBe('fail')
+  })
+
+  it('never reports success for a deployment without Access in front or with a broken config', async () => {
+    const json = (status: number, code: string) =>
+      new Response(JSON.stringify({ error: { code } }), { status, headers: { 'content-type': 'application/json' } })
+    const unprotected: Fetch = async (path) =>
+      path.startsWith('/share/api') ? json(503, 'SERVER_MISCONFIGURED') : json(503, 'SERVER_MISCONFIGURED')
+    const checks = await checkDeployment({ api: unprotected, blob: unprotected })
+    expect(status(checks, 'access: private path')).toBe('fail')
+    expect(status(checks, 'access: share bypass + worker config')).toBe('fail')
+    expect(status(checks, 'share page')).toBe('fail')
+    expect(status(checks, 'owner API')).toBe('skip')
+
+    const redirect = new Response(null, { status: 302, headers: { location: 'https://team.cloudflareaccess.com/x' } })
+    const shareBehindAccess: Fetch = async () => redirect.clone()
+    const behind = await checkDeployment({ api: shareBehindAccess, blob: shareBehindAccess, token: 't' })
+    expect(status(behind, 'access: private path')).toBe('pass')
+    expect(status(behind, 'access: share bypass + worker config')).toBe('fail')
+    expect(status(behind, 'owner API')).toBe('fail')
+  })
+
+  it('distinguishes owner mismatch, stale schema and bad R2 credentials', async () => {
+    const redirect = () => new Response(null, { status: 302, headers: { location: 'https://t.cloudflareaccess.com/' } })
+    const base = async (path: string, init?: RequestInit): Promise<Response> => {
+      const owner = new Headers(init?.headers).has('cf-access-token')
+      if (path.startsWith('/share/api')) {
+        return new Response(JSON.stringify({ error: { code: 'SHARE_UNAVAILABLE' } }), { status: 404 })
+      }
+      if (path.startsWith('/share/')) {
+        return new Response('<html>', { headers: { 'content-security-policy': "default-src 'self'" } })
+      }
+      if (!owner) return redirect()
+      if (path === '/api/v1/me') return Response.json({ email: 'o@example.test' })
+      if (path === '/api/v1/diagnostics') {
+        return Response.json({ counts: { pendingUploads: 3, purging: 0 }, latestMigration: '0001_initial.sql' })
+      }
+      return Response.json({ items: [{ thumbnailUrl: 'https://r2.example/t' }] })
+    }
+    const denied: Fetch = async () => new Response('<Error><Code>SignatureDoesNotMatch</Code></Error>', { status: 403 })
+    const checks = await checkDeployment({
+      api: base,
+      blob: denied,
+      token: 'token',
+      latestLocalMigration: '0002_next.sql',
+    })
+    expect(status(checks, 'owner API')).toBe('pass')
+    expect(status(checks, 'worker: D1 schema')).toBe('fail')
+    expect(status(checks, 'library')).toBeUndefined()
+    const r2 = checks.find((c) => c.name === 'r2: presigned GET')
+    expect(r2?.status).toBe('fail')
+    expect(r2?.detail).toContain('SignatureDoesNotMatch')
+    expect(r2?.detail).not.toContain('r2.example')
+
+    const notOwner: Fetch = async (path, init) =>
+      path === '/api/v1/me' && new Headers(init?.headers).has('cf-access-token')
+        ? new Response(JSON.stringify({ error: { code: 'FORBIDDEN' } }), { status: 403 })
+        : base(path, init)
+    const forbidden = await checkDeployment({ api: notOwner, blob: denied, token: 'token' })
+    expect(forbidden.find((c) => c.name === 'owner API')?.detail).toContain('OWNER_EMAIL')
+  })
+})

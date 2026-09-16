@@ -25,7 +25,7 @@ import {
 } from '../contracts/schemas'
 import { type AccessKeyResolver, type AppPrincipal, authenticateAccess, remoteAccessKeys } from './auth/access'
 import { createDb } from './db'
-import { type AppConfig, type Env, readAppConfig } from './env'
+import { type AppConfig, appConfigProblems, type Env, readAppConfig } from './env'
 import { ApiError, errorResponse, requestId } from './http/errors'
 import {
   checkWriteOrigin,
@@ -40,7 +40,7 @@ import type { ServiceContext } from './services/context'
 import { buildExport, diagnostics } from './services/export'
 import * as shares from './services/shares'
 import * as uploads from './services/uploads'
-import { type BlobSigner, createR2Signer, readR2SignerConfig } from './storage/signer'
+import { type BlobSigner, createR2Signer, r2SignerConfigProblems, readR2SignerConfig } from './storage/signer'
 
 export type AppOptions = {
   env: Env
@@ -79,7 +79,12 @@ const jsonBody = <T extends z.ZodType>(schema: T) => ({
   content: { 'application/json': { schema } },
 })
 
-const misconfigured = () => new ApiError(503, 'SERVER_MISCONFIGURED', 'Server configuration is incomplete.')
+// The response stays opaque; the log names the settings (never their values) so the operator can fix them.
+function misconfigured(c: Context, env: Env, withSigner: boolean) {
+  const settings = [...appConfigProblems(env), ...(withSigner ? r2SignerConfigProblems(env) : [])]
+  console.warn(JSON.stringify({ level: 'warn', requestId: requestId(c), problem: 'misconfigured', settings }))
+  return new ApiError(503, 'SERVER_MISCONFIGURED', 'Server configuration is incomplete.')
+}
 
 const PageQuery = z.object({
   limit: z.coerce.number().int().min(1).max(LIMITS.pageMax).default(60),
@@ -131,7 +136,7 @@ export function createApp(options: AppOptions) {
   app.use('/api/v1/*', withHeaders(PRIVATE_HEADERS))
   app.use('/api/v1/*', async (c, next) => {
     const config = readAppConfig(env)
-    if (!config) throw misconfigured()
+    if (!config) throw misconfigured(c, env, !options.signer)
     const auth = await authenticateAccess(c.req.header('cf-access-jwt-assertion'), config.access, accessKeys)
     if (!auth.ok) {
       if (auth.reason === 'not_owner') throw new ApiError(403, 'FORBIDDEN', 'Not allowed.')
@@ -139,7 +144,7 @@ export function createApp(options: AppOptions) {
     }
     checkWriteOrigin(c.req.method, c.req.raw.headers, config.appOrigin)
     const signer = resolveSigner()
-    if (!signer) throw misconfigured()
+    if (!signer) throw misconfigured(c, env, true)
     c.set('principal', auth.principal)
     c.set('config', config)
     c.set('services', { db: createDb(env.DB), bucket: env.BUCKET, signer, now })
@@ -379,7 +384,7 @@ export function createApp(options: AppOptions) {
     }),
     async (c) => {
       const { albumId } = c.req.valid('param')
-      await albums.getAlbum(svc(c).db, albumId)
+      await albums.requireAlbumId(svc(c).db, albumId)
       const page = await assets.listAssets(svc(c), { ...c.req.valid('query'), albumId })
       const items = await Promise.all(page.rows.map((r) => assets.toAsset(svc(c), r)))
       return c.json({ items, nextCursor: page.nextCursor }, 200)
@@ -537,7 +542,7 @@ export function createApp(options: AppOptions) {
   shareApp.use('*', withHeaders(SHARE_HEADERS))
   shareApp.use('*', async (c, next) => {
     const signer = resolveSigner()
-    if (!signer) throw misconfigured()
+    if (!signer) throw misconfigured(c, env, true)
     c.set('services', { db: createDb(env.DB), bucket: env.BUCKET, signer, now })
     await next()
   })

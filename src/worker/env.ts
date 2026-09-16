@@ -30,15 +30,25 @@ const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)
 
 // Returns null when any required value is missing or malformed. Callers must fail closed.
 export function readAppConfig(env: Env): AppConfig | null {
-  const ownerEmail = env.OWNER_EMAIL?.trim().toLowerCase()
-  const teamDomain = env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase()
-  const audience = env.ACCESS_AUD?.trim()
-  const appOrigin = normalizeOrigin(env.APP_ORIGIN)
-  if (!ownerEmail?.includes('@')) return null
-  if (!teamDomain || !HOST_RE.test(teamDomain)) return null
-  if (!audience) return null
-  if (!appOrigin) return null
-  return { appOrigin, access: { ownerEmail, teamDomain, audience } }
+  if (appConfigProblems(env).length > 0) return null
+  return {
+    appOrigin: normalizeOrigin(env.APP_ORIGIN) as string,
+    access: {
+      ownerEmail: env.OWNER_EMAIL?.trim().toLowerCase() as string,
+      teamDomain: env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase() as string,
+      audience: env.ACCESS_AUD?.trim() as string,
+    },
+  }
+}
+
+// Names (never values) of the settings that are missing or malformed, for logs and diagnostics.
+export function appConfigProblems(env: Env): string[] {
+  const problems: string[] = []
+  if (!env.OWNER_EMAIL?.trim().includes('@')) problems.push('OWNER_EMAIL')
+  if (!HOST_RE.test(env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase() ?? '')) problems.push('ACCESS_TEAM_DOMAIN')
+  if (!env.ACCESS_AUD?.trim()) problems.push('ACCESS_AUD')
+  if (!normalizeOrigin(env.APP_ORIGIN)) problems.push('APP_ORIGIN')
+  return problems
 }
 
 export function normalizeOrigin(value: string | undefined): string | null {

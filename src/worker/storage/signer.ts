@@ -24,20 +24,31 @@ export type R2SignerConfig = {
   secretAccessKey: string
 }
 
-export function readR2SignerConfig(env: {
+type R2SignerEnv = {
   R2_ACCOUNT_ID?: string
   R2_BUCKET_NAME?: string
   R2_ACCESS_KEY_ID?: string
   R2_SECRET_ACCESS_KEY?: string
-}): R2SignerConfig | null {
-  const accountId = env.R2_ACCOUNT_ID?.trim()
-  const bucketName = env.R2_BUCKET_NAME?.trim()
-  const accessKeyId = env.R2_ACCESS_KEY_ID?.trim()
-  const secretAccessKey = env.R2_SECRET_ACCESS_KEY?.trim()
-  if (!accountId || !/^[0-9a-f]{32}$/.test(accountId)) return null
-  if (!bucketName || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucketName)) return null
-  if (!accessKeyId || !secretAccessKey) return null
-  return { accountId, bucketName, accessKeyId, secretAccessKey }
+}
+
+export function readR2SignerConfig(env: R2SignerEnv): R2SignerConfig | null {
+  if (r2SignerConfigProblems(env).length > 0) return null
+  return {
+    accountId: env.R2_ACCOUNT_ID?.trim() as string,
+    bucketName: env.R2_BUCKET_NAME?.trim() as string,
+    accessKeyId: env.R2_ACCESS_KEY_ID?.trim() as string,
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY?.trim() as string,
+  }
+}
+
+// Names (never values) of the settings that are missing or malformed.
+export function r2SignerConfigProblems(env: R2SignerEnv): string[] {
+  const problems: string[] = []
+  if (!/^[0-9a-f]{32}$/.test(env.R2_ACCOUNT_ID?.trim() ?? '')) problems.push('R2_ACCOUNT_ID')
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(env.R2_BUCKET_NAME?.trim() ?? '')) problems.push('R2_BUCKET_NAME')
+  if (!env.R2_ACCESS_KEY_ID?.trim()) problems.push('R2_ACCESS_KEY_ID')
+  if (!env.R2_SECRET_ACCESS_KEY?.trim()) problems.push('R2_SECRET_ACCESS_KEY')
+  return problems
 }
 
 function encodeKey(key: string): string {

@@ -63,20 +63,33 @@ describe('private API authentication', () => {
   )
 
   it('fails closed when the team domain is malformed', async () => {
-    const r = await status(await makeApp({ env: { ACCESS_TEAM_DOMAIN: 'https://x/y' } }), await assertion())
-    expect(r.status).toBe(503)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const r = await status(await makeApp({ env: { ACCESS_TEAM_DOMAIN: 'https://x/y' } }), await assertion())
+      expect(r.status).toBe(503)
+      // The log names the broken setting for the operator but never carries a value.
+      const logged = warn.mock.calls.map((args) => String(args[0])).join('\n')
+      expect(JSON.parse(logged)).toMatchObject({ problem: 'misconfigured', settings: ['ACCESS_TEAM_DOMAIN'] })
+      expect(logged).not.toContain('https://x/y')
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('fails closed when R2 signing credentials are not configured', async () => {
     const { createLocalJWKSet } = await import('jose')
     const jwks = createLocalJWKSet((await accessKeys()).jwks)
     // No signer override and no R2_* vars: a valid owner request must still get no data.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const app = createApp({ env: testEnv(), accessKeys: () => jwks })
     const res = await app.request(`${APP_ORIGIN}/api/v1/assets`, {
       headers: { 'cf-access-jwt-assertion': await assertion() },
     })
     expect(res.status).toBe(503)
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe('SERVER_MISCONFIGURED')
+    const settings = JSON.parse(String(warn.mock.calls.at(-1)?.[0])).settings
+    expect(settings).toEqual(['R2_ACCOUNT_ID', 'R2_BUCKET_NAME', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'])
+    warn.mockRestore()
   })
 
   it('rejects when the JWKS endpoint cannot be fetched', async () => {
