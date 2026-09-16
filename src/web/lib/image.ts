@@ -1,8 +1,9 @@
 import exifr from 'exifr'
 import { exifDateToIso } from './exif-date'
+import { stripJpegMetadata } from './jpeg-metadata'
 
 // Client-side preprocessing. The original File is uploaded untouched; derivatives are re-rendered
-// through a canvas, which writes a plain JPEG without EXIF/GPS.
+// through a canvas, so they never carry the original's EXIF/GPS (encoder-added segments are stripped).
 
 export const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
 export type SupportedType = (typeof SUPPORTED_TYPES)[number]
@@ -24,6 +25,12 @@ export type PreparedPhoto = {
 }
 
 export class UnsupportedFileError extends Error {}
+
+// HEIC/HEIF is not accepted in v1 (docs/decisions.md D-019). Desktop browsers may report an empty type,
+// so the extension is checked too.
+export function isHeic(file: File): boolean {
+  return /^image\/hei[cf](-sequence)?$/.test(file.type) || /\.(heic|heif|hif)$/i.test(file.name)
+}
 
 export async function sha256Hex(data: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', data)
@@ -58,9 +65,12 @@ async function renderJpeg(bitmap: ImageBitmap, maxEdge: number, quality: number)
   ctx.fillRect(0, 0, width, height)
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(bitmap, 0, 0, width, height)
-  return new Promise((resolve, reject) =>
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('JPEG encoding failed'))), 'image/jpeg', quality),
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('JPEG encoding failed'))), 'image/jpeg', quality),
   )
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  const stripped = stripJpegMetadata(bytes)
+  return stripped === bytes ? blob : new Blob([stripped as Uint8Array<ArrayBuffer>], { type: 'image/jpeg' })
 }
 
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
