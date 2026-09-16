@@ -176,7 +176,7 @@ D1 に参照がない R2 object を即座に「ゴミ」と判定しません。
 - 申告 SHA-256 と一致しない original を保存しない・`ready` にしない。
 - D1 障害時に upload を成功扱いしない。
 
-上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Browser 上で手動確認しており、自動テストは Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）を対象にしています。
+上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Chromium と WebKit で確認しています。WebKit の encoder が付ける APP1 / APP13（撮影 metadata は含まない）は、Client が PUT 前に取り除きます。自動テストの対象は、その除去処理と Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）です。server 側の保証は変わりません（[D-020](decisions.md)）。
 
 ## 12. ローカル開発用の模擬機構
 

@@ -196,6 +196,8 @@ D1 への asset 作成と upload 状態更新は 1 つの D1 batch（transaction
 
 presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw digest の base64）として署名します。R2 は body の digest が一致しない PUT を拒否し、object を作りません。Client はこの header を省略も変更もできません（[D-018](decisions.md)）。
 
+Client は一時的な PUT の失敗（network error、408、429、5xx）を backoff 付きで再試行し、`412` は保存済みとして扱います。`If-None-Match: *` と reserve ごとに固有の key により、`412` になるのは同じ upload の以前の試行が届いていた場合だけです。いずれにしても finalize が size と checksum を確認します（[D-020](decisions.md)）。
+
 digest 不一致の PUT は R2 が `400` で拒否します。original が存在しないため finalize は `409 UPLOAD_OBJECT_MISSING` を返し、upload は `pending` のままです。URL の期限内なら、正しい bytes を同じ URL へ PUT し直して finalize を再試行できます。
 
 不変条件:
@@ -217,6 +219,12 @@ digest 不一致の PUT は R2 が `400` で拒否します。original が存在
 - SHA-256 を metadata として保持（D-018 以降に finalize された asset では R2 が upload 時に検証した値。それより前の asset は申告値で、`pnpm backup verify` で照合する。[D-018](decisions.md)）
 - owner のみ取得可能
 - share では配信しない
+
+Browser の JPEG encoder が付ける APP1 / APP13（WebKit は Exif の色空間・画素数と空の IPTC を書き出す）は、Client が PUT 前に取り除きます。finalize は引き続き APP1 / APP13 を含む derivative を拒否します（[D-020](decisions.md)）。
+
+original の形式は JPEG / PNG / WebP です。HEIC / HEIF は Client が明示的に拒否します。iPhone の通常経路では、Safari の写真ピッカーが HEIC を JPEG に変換して渡す、現在報告されている挙動に任せます。この挙動は Web 標準の保証ではありません。HEIC がそのまま渡された場合は、明示的なエラーになります（[D-019](decisions.md)）。
+
+Web 版が保存する original は「Browser から受け取った byte 列」です。iOS が選択時に JPEG へ変換した場合、カメラロールの HEIC そのものは保存されません。
 
 ### thumbnail
 

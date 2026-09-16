@@ -46,12 +46,16 @@ pnpm check            # typecheck + lint + db:check + test + build
 - 動画
 - Live Photos
 - RAW 現像
-- HEIC 変換
+- HEIC 変換（iPhone の Safari は、選択時に JPEG へ変換して渡すことが報告されている）
 - 顔認識・AI 検索
 - バックグラウンド自動同期
 - 複数オーナー
 - 任意クラウドへの抽象化
 - 課金
+
+### 「original」の意味
+
+EdgePhotos は original を byte 単位で変更せずに保存します。Web 版の original は、Browser から受け取った byte 列です。iPhone の Safari が選択時に HEIC を JPEG へ変換した場合、保存されるのはその JPEG で、カメラロールの HEIC そのものではありません（[D-019](docs/decisions.md)）。
 
 ## アーキテクチャ概要
 
