@@ -15,7 +15,7 @@
 - ✅ D1 migration と private R2 binding が利用できる（local）
 - ✅ OpenAPI を生成できる（`/api/v1/openapi.json`）
 - 🟡 local / remote-test / production が分離されている（remote-test は D1 / R2 / Worker を作成・デプロイ済み。production は未作成）
-- 🟡 shadcn/ui + Base UI の主要 component が Preact production build で成立する（Dialog / Menu は確認済み、Select と touch は未確認）
+- 🟡 shadcn/ui + Base UI の主要 component が Preact production build で成立する（Dialog / Menu の keyboard・focus と、phone 幅の tap は Browser E2E で自動化済み。Select は未使用、touch の実機は未確認）
 - ✅ `/share/*` の公開経路と private path の Access 保護を実環境で検証できる
 - ✅ R2 presigned PUT / GET と CORS を実環境で検証できる
 
@@ -106,6 +106,15 @@ v1 の完成条件には含めませんが、後から迷わないよう記録�
 **WebP の EXIF は読まない。** `exifr` は WebP の EXIF を解析しないため、WebP の `takenAt` は常に `null` です。WebP の EXIF orientation は、WebKit では適用され、Chromium では適用されません。そのため同じ WebP でも、Browser によって width / height と derivative の向きが変わります。カメラが WebP を出力することはまれなので、v1 では扱いません。
 
 **途中で切れた JPEG の扱いが Browser で違う。** Chromium は decode 失敗として拒否します。WebKit は読めた部分だけで derivative を作り、切れた byte 列をそのまま original として保存します。
+
+## Continuous-use hardening（2026-09-17）
+
+private alpha を継続利用に近づけるための段階です。新しい構成は足さず、測って弱点だけを直しました。
+
+- ✅ Browser 固有の経路を Playwright で自動化（[D-021](decisions.md)）。途中で見つけた「期限切れ URL で画像が壊れたまま残る」不具合を修正
+- ✅ read-only の設定診断 `pnpm diagnose`（[operations.md](operations.md) §7）。production 用の top-level 設定が secret と衝突する形だったのを修正
+- ✅ 1,000 / 10,000 件の scale 測定（[benchmarks.md](benchmarks.md)）
+- ✅ Actions の SHA 固定、Dependabot、release / rollback / credential 更新 / 復旧 drill の手順（operations.md §8、§13、§14）
 
 ## Release polish
 

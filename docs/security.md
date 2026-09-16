@@ -139,6 +139,7 @@ private write API は GET で状態変更しません。Origin は明示した `
 - 処理時間
 - 件数
 - 非機密の内部エラーコード
+- `503 SERVER_MISCONFIGURED` の原因になった設定の**名前**（値は出さない）
 
 残してはいけないもの:
 

@@ -49,12 +49,17 @@ migrations/                D1 migrations (forward-only, applied by wrangler)
 drizzle.config.ts          drizzle-kit generate settings (no D1 credentials)
 scripts/
   backup.ts                backup / restore / verify CLI
+  diagnose.ts              read-only setup diagnostics CLI (`pnpm diagnose`)
   db-check.ts              schema vs committed migrations drift check
   lib/backup.ts            API-based export / restore / verify (used by CLI and tests)
+  lib/diagnose.ts          setup checks (used by CLI and tests)
   vite-dev-access.ts       dev server Access emulation
 tests/
-  unit/  integration/  e2e/
+  unit/  integration/  e2e/   workerd tests (`pnpm test`)
+  bench/                   scale measurements (`pnpm bench`, not part of `pnpm check`)
   helpers.ts               test app factory, signed assertions, synthetic image fixtures
+e2e/                       real-browser tests (Playwright, `pnpm test:e2e`)
+playwright.config.ts
 ```
 
 route は現状 `src/worker/app.ts` に集約しています。route 数が増えて見通しが悪くなった時点で `routes/` へ分割します。
@@ -110,9 +115,9 @@ feature 実装前に、少なくとも次の component を Preact の production
 
 確認結果（2026-09、`@base-ui/react` 1.8 + `preact/compat`）:
 
-- Dialog / Menu: production build・TypeScript は成立。`pnpm dev` 上の Chromium で、Dialog の focus 移動・Escape で閉じる・trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore を確認
+- Dialog / Menu: production build・TypeScript は成立。`pnpm dev` 上の Chromium で、Dialog の focus 移動・Escape で閉じる・trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore を確認。`e2e/keyboard.spec.ts` で自動化済み（focus trap、Escape、focus restore、Menu の矢印キー移動、Menu から Dialog を開いて Enter で送信）。Tab 移動の直後、Base UI は不可視の focus guard に一瞬 focus を置いてから Dialog 内へ戻す。trap としては正しく動く
 - Select / Combobox: 現状の UI で未使用のため未確認
-- touch interaction: 実機では未確認
+- touch interaction: iPhone 13 相当の viewport と touch（Playwright WebKit）で tap 操作を自動化済み（`e2e/mobile.spec.ts`）。実機では未確認
 
 ## 5. Hono / OpenAPI
 
@@ -173,7 +178,7 @@ pnpm db:check && pnpm test
 - migration
 - export / restore
 
-### E2E
+### E2E（workerd）
 
 全画面網羅ではなく、重要な縦経路を優先します。
 
@@ -186,12 +191,37 @@ auth
 -> share
 ```
 
-見た目だけの変更へ儀式的なテストを増やしません。
+`tests/e2e/vertical.test.ts` が HTTP だけでこの経路を通します。
+
+### Browser E2E（Playwright）
+
+workerd の test では見えない、Browser 固有の部分だけを対象にします。server の挙動（認可、finalize の検査、share の検証など）は integration test が正本で、Browser E2E では再検査しません。
+
+| spec | 確認すること | project |
+| --- | --- | --- |
+| `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC の拒否表示。presigned URL の期限切れ後に画像が回復すること | chromium, mobile-webkit |
+| `share.spec.ts` | album 作成 → viewer の menu から追加 → 共有リンク → 別 context の guest が閲覧（secret は Authorization header だけ、Cookie なし。thumbnail URL の期限切れから回復）→ revoke 後は無効表示 | chromium |
+| `keyboard.spec.ts` | Base UI の Dialog / Menu の keyboard 操作と focus | chromium |
+| `mobile.spec.ts` | iPhone 相当の viewport で横スクロールがないこと、tap で viewer・共有 dialog が開き、画面内に収まること | mobile-webkit |
+
+```bash
+pnpm exec playwright install --only-shell chromium webkit   # 初回のみ
+pnpm test:e2e
+```
+
+`pnpm dev`（Access と presigned URL の模擬、[D-016](decisions.md)）を `.wrangler/e2e` の使い捨て local D1 / R2 で起動します（`EDGEPHOTOS_STATE_DIR`）。普段の `pnpm dev` の library には触れません。port 5173 を使うため、`pnpm dev` を止めてから実行します。写真は Browser の canvas で毎回ランダムに描くので、fixture を commit しません。
+
+spec を増やすのは、Browser でしか起きない不具合を直したときだけにします。
+
+### Scale benchmark
+
+`pnpm bench` は `tests/bench/scale.bench.ts` を実行し、合成データ 1,000 / 10,000 件で主要 API の時間、SQL の query plan と rows_read、backup / restore の request 数を表示します。assert はしません。結果と判断は [benchmarks.md](benchmarks.md) に記録します。
 
 ### 実行
 
 ```bash
 pnpm test        # unit + integration + e2e（workerd 上、D1 / R2 は Miniflare の local emulation）
+pnpm test:e2e    # Browser E2E（Chromium と WebKit）
 pnpm db:check    # schema.ts と migrations/meta の snapshot が一致するか
 pnpm check       # typecheck + lint + db:check + test + build
 ```
@@ -216,7 +246,7 @@ integration test は `createApp()` に test 用の Access 鍵と local blob sign
 
 original の期待 SHA-256 を fixture metadata として固定します。
 
-現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。実画像の decode・canvas 処理を伴う fixture（orientation、透明 PNG、WebP、壊れた画像など）は、Browser 自動テストの導入時に追加します。
+現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。Browser E2E は canvas で描いた JPEG を使います。orientation、透明 PNG、WebP、壊れた画像などの decode 差は、下記の一度きりの検証で確認済みで、常設の fixture にはしていません。
 
 Browser での取り込み検証（decode、orientation、derivative、memory）は、公開されている実機サンプルと合成画像を使い、scratch 環境で一度きりの Playwright script として実施しました。fixture も script も commit していません。結果は [operations.md](operations.md) 冒頭に記録しています。Browser 差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（`tests/unit/web-image.test.ts`。WebKit が実際に出力した APP1 / APP13 の byte 列を含みます）。
 
@@ -241,8 +271,11 @@ D1、R2、Access application、signing credential を production と共有しま
 - schema と migration の drift check（`pnpm db:check`）
 - unit / integration tests
 - production build
+- Browser E2E（別 job。Chromium と WebKit）
 
-Remote の破壊操作を通常の test command に含めません。
+GitHub Actions は commit SHA で固定し、Dependabot（`.github/dependabot.yml`）が npm と Actions の更新 PR を週 1 回作ります。
+
+Remote の破壊操作を通常の test command に含めません。CI は Cloudflare の credential を持ちません。
 
 ## 11. Documentation rule
 

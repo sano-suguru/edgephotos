@@ -88,7 +88,9 @@ Vars（`wrangler.jsonc` の `vars`、値が公開されても害がないもの�
 | --- | --- | --- |
 | `R2_BUCKET_NAME` | `edgephotos` | presigned URL の bucket |
 
-`wrangler.jsonc` は必要な secret 名を `secrets.required` で宣言します。未設定のまま deploy すると、不足している名前を挙げて失敗します。
+`wrangler.jsonc` は必要な secret 名を `secrets.required` で宣言します（production の top-level と `remote-test` の両方）。未設定のまま deploy すると、不足している名前を挙げて失敗します。
+
+上の 7 つを `vars` に書かないでください。`vars` は deploy のたびに同名の plain text binding として送られます。secret と同じ名前の binding が 2 つになるため、deploy が拒否されるか、空文字の var が secret を隠します。どちらの場合も private API は `503` のままです。以前の top-level 設定は空文字の `vars` を持っていたため、production を手順どおりに作るとこの状態になりました（2026-09-17 に `remote-test` と同じ形へ修正。実際の production deploy では未確認）。`pnpm diagnose --offline` がこの状態を検出します。
 
 ```text
 ✘ [ERROR] The following required secrets have not been set: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
@@ -158,29 +160,72 @@ D-018 より前に CORS を設定した bucket は、`x-amz-checksum-sha256` を
 
 ## 7. Setup verification
 
-アプリを利用可能と判定する前に、少なくとも次を確認します。
+設定ミスは、まず read-only の `pnpm diagnose` で確認します。Cloudflare account への書き込みは一切しません。値そのもの（secret、token、presigned URL）は表示しません。
 
-- `curl https://photos.example.com/api/v1/me`（Access を通さない request）が Access のログイン画面、または Worker の `401` になる
-- owner でログインして `/settings`（ライブラリ画面）を開き、`Migration` に最新の migration 名が表示される
-- 写真を 1 枚 upload して timeline に表示される（R2 credential と CORS の確認）
+```bash
+pnpm diagnose --offline                       # wrangler.jsonc だけ（login 不要）
+pnpm diagnose --env remote-test               # + Worker secret 名、remote D1 migration、R2 の公開設定（wrangler login）
+EDGEPHOTOS_URL=https://photos.example.com \
+EDGEPHOTOS_ACCESS_TOKEN="$(cloudflared access token -app=https://photos.example.com)" \
+pnpm diagnose                                 # + Access、Worker の設定値、D1 schema、R2 CORS と署名
+```
+
+production は `--env` を付けません。確認する内容と、失敗時に疑う設定:
+
+| check | 失敗時に疑うもの |
+| --- | --- |
+| `config: *` | `secrets.required` の不足、secret 名の `vars` 宣言、`R2_BUCKET_NAME` と `BUCKET` binding の不一致、`preview_urls` |
+| `worker: secrets` | `wrangler secret put` の漏れ（名前だけ確認。値の形式は下の probe で分かる） |
+| `d1: migrations` | `wrangler d1 migrations apply --remote` の実行漏れ |
+| `r2: r2.dev URL` / `custom domains` | bucket の公開設定（どちらも無効が正） |
+| `r2: CORS for upload` | Browser と同じ preflight（`PUT` + 3 header）を `EDGEPHOTOS_URL` の origin で送る。AllowedOrigins / AllowedHeaders |
+| `access: private path` | 匿名 request が Access login へ redirect されない（Access application の hostname） |
+| `access: share bypass + worker config` | `/share` の Bypass application。`503` なら secret の欠落か形式違い（`ACCESS_TEAM_DOMAIN` は host のみ、`R2_ACCOUNT_ID` は 32 桁 hex） |
+| `owner API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `OWNER_EMAIL` |
+| `worker: D1 schema` | Worker が見ている D1 の最新 migration と checkout の不一致（別 DB を bind している、migration 未適用） |
+| `r2: presigned GET` | Worker が署名した URL を R2 が拒否（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`）。library が空なら SKIP |
+
+Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠落・不正な設定の**名前**が `{"problem":"misconfigured","settings":[...]}` として出ます（値は出しません）。
+
+`pnpm diagnose` が通ったあと、Browser で次を確認します。
+
+- 写真を 1 枚 upload して timeline に表示される（`pnpm diagnose` は PUT を実行しないため、upload の成立はここで確かめる）
 - 共有リンクを作成し、private window で表示でき、revoke 後は表示できない
 
 設定不足時に写真機能を匿名公開する fallback はありません。設定が欠けていれば `503 SERVER_MISCONFIGURED` です。
 
-## 8. Update
+remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload` が FAIL になることも確認した。
 
-migration は forward-only とします。
+## 8. Update（release と migration）
 
-更新前に少なくとも次を確認します。
+migration は forward-only です。Worker code の rollback と D1 の rollback は別の操作です。
 
-- release notes
-- migration の有無
-- metadata backup（`pnpm backup export`）
-- breaking API / config change
+手順（production は `--env` なし）:
 
-Worker code rollback と D1 rollback は同じ操作ではありません。schema が進んだ後に旧 Worker へ戻すだけで復旧できるとは扱いません。
+```bash
+git pull && pnpm install && pnpm check          # 1. 手元で検証
+pnpm backup export ./backup-$(date +%F)          # 2. backup（original を含む）
+# 3. migration がある場合だけ: 現在の D1 bookmark を控える
+pnpm wrangler d1 time-travel info <database> [--env <env>]
+pnpm wrangler d1 migrations apply <database> [--env <env>] --remote
+# 4. deploy
+[CLOUDFLARE_ENV=<env>] pnpm build
+pnpm wrangler deploy --config dist/<worker>/wrangler.json
+# 5. 確認
+EDGEPHOTOS_URL=... EDGEPHOTOS_ACCESS_TOKEN=... pnpm diagnose [--env <env>]
+```
 
-自動 upstream 更新は v1 の要件にしません。
+最後に Browser で timeline を開き、写真を 1 枚 upload します。
+
+順序は「migration → deploy」です。migration は旧 Worker でも動く形（列・table の追加）で書きます。列の削除や改名のように旧 Worker を壊す変更は、それを使わない Worker を先に deploy し、次の release で migration します。
+
+### 戻す
+
+- **Worker だけ戻す**（migration なしの release、または migration が旧 Worker と互換）: `pnpm wrangler rollback [<version-id>] [--env <env>]`。直近 100 version まで戻せます。
+- **migration が原因で壊れた**: 手順 3 で控えた bookmark に `pnpm wrangler d1 time-travel restore <database> --bookmark=<bookmark>` で戻し、Worker も rollback します。restore は D1 をその場で上書きする破壊的な操作です。戻せるのは直近 30 日以内（Workers Free では 7 日）で、bookmark 以降の D1 の書き込み（upload の登録、album 操作）は失われます。その間に upload された R2 object は D1 から参照されないまま残ります（[security.md](security.md) §10 の方針どおり、自動では消しません）。失った登録は、手順 2 の backup と比較して upload し直します。
+- time travel の期限を過ぎた、または D1 / R2 自体を失った場合は §10 の restore（新しい空環境へ）で戻します。
+
+自動 upstream 更新は v1 の要件にしません。依存関係の更新は Dependabot の PR（週 1 回、group 単位）で受け、CI（`pnpm check` と Browser E2E）が通ったものだけ merge します。drizzle の更新は単独の PR になるので、`pnpm db:check` と試しの `pnpm db:generate` を行ってから merge します。
 
 ## 9. Export / Backup
 
@@ -221,7 +266,9 @@ verify が確認する項目:
 
 restore した環境では過去の share を再有効化しません（share は export に含めません）。asset ID と `createdAt` は変わります。
 
-restore が途中で失敗した場合は、空の環境を作り直して再実行してください（再開機能は未実装）。
+`pnpm backup` は、通信エラー・`408`・`429`・`5xx` を backoff 付きで最大 4 回まで再試行します（album の作成だけは重複を避けるため再試行しません）。10,000 件の backup / restore は、remote で 1 時間以上かかる見積もりです（[benchmarks.md](benchmarks.md)）。
+
+restore が再試行でも回復せず途中で止まった場合は、空の環境を作り直して再実行してください（再開機能は未実装）。
 
 ## 11. Uninstall
 
@@ -255,3 +302,36 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 Worker のエラーログは request ID・route・例外名だけを出し、header・token・URL・body を出しません。
 
 未完了 upload の R2 object は自動削除しません（Cron を置かない方針）。件数は diagnostics で確認できます。
+
+## 13. R2 credential の更新と漏洩対応
+
+R2 API token（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）は presigned URL の署名にだけ使います。対象 bucket だけの Object Read & Write に限定します（§3）。
+
+定期更新、または漏洩の疑いがある場合:
+
+1. Dashboard の R2 → Manage API tokens で、同じ権限（対象 bucket のみ、Object Read & Write）の新しい token を作る
+2. 漏洩の疑いがある場合は、**先に古い token を削除する**。削除した時点で、古い key で署名した URL（未使用の upload URL、表示中の画像 URL）はすべて無効になる。発行済み URL の期限は最大 600 秒なので、定期更新なら 3 → 4 の後に削除してよい
+3. `pnpm wrangler secret put R2_ACCESS_KEY_ID [--env <env>]`、同じく `R2_SECRET_ACCESS_KEY`
+4. `pnpm diagnose` で `r2: presigned GET` が PASS になることを確認する（library が空なら写真を 1 枚 upload）
+
+切り替えの間に upload 中だった写真は PUT が `403` で失敗します。その写真を選び直せば upload されます。途中まで PUT された object は finalize されず、未完了の upload として残ります（roadmap の既知の制約）。
+
+漏洩時に確認すること:
+
+- R2 の古い token で何ができたか: 対象 bucket の読み書き。original を含むすべての写真を読めた可能性があります。上書きは reserve ごとの key と `If-None-Match` に守られません（token を持つ者は条件なしで PUT できる）
+- original の改ざんを疑う場合は `pnpm backup verify <直近の backup>` を実行します。R2 から original を取り直し、SHA-256 を照合します
+- Access の service token や Cloudflare account の API token が漏れた場合は、この節ではなく Cloudflare 側で revoke します。EdgePhotos は owner の email を持たない identity を受け付けません（[security.md](security.md) §3）
+
+share secret が漏れた場合は、その share を revoke するか再発行します（`/api/v1/shares/{id}/revoke`、`/regenerate`）。
+
+## 14. 復旧 drill
+
+年に 1 回程度、または大きな変更の前に、restore できることを確かめます。手順は §2〜§4 で空の環境（例: `restore-test`）を作り、§10 の restore を実行するだけです。2026-09-16 の drill の記録は冒頭にあります。
+
+drill で見るもの:
+
+- `pnpm backup restore` が `ok: true` で終わる
+- restore 先の timeline と album が開き、共有リンクを新しく作れる
+- 所要時間（[benchmarks.md](benchmarks.md) の見積もりと比べる）
+
+終わったら drill 用の Worker、D1、R2 bucket、Access application、R2 API token を削除します。
