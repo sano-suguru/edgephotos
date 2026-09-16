@@ -57,7 +57,7 @@
 到達点:
 
 - ✅ metadata と original manifest を export できる
-- 🟡 別の空環境へ restore できる（local の別 D1 / R2 で自動テスト済み、実環境での実測は未実施）
+- ✅ 別の空環境へ restore できる（local の別 D1 / R2 で自動テスト済み、実環境でも `edgephotos-restore-test` へ実測済み）
 - ✅ restore 後に asset 数、hash、album 関係を検証できる
 
 この段階を外部 alpha の前提とします。
@@ -72,7 +72,7 @@
 - ✅ 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
 - ⬜ スマートフォンで撮影した実写真（orientation・GPS・大きい画素数を含む）を 20〜30 枚 upload し、timeline の向きと表示を確認する
 - ✅ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
-- ⬜ remote で backup export → verify → 別の空環境への restore を 1 回成功させる（export と verify は済み、restore が未実施）
+- ✅ remote で backup export → verify → 別の空環境への restore を 1 回成功させる
 
 実測の詳細は [operations.md](operations.md) 冒頭の検証状況を正本とします。
 

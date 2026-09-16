@@ -14,7 +14,10 @@
 > - CSRF 境界: 他 origin からの `POST /api/v1/albums` が `403 ORIGIN_NOT_ALLOWED`。
 > - presigned URL の失効: share の derivative URL が発行 300 秒後に R2 で `403 ExpiredRequest` になることを確認済み。revoke 済み share の既発行 URL が残り TTL の間だけ有効なのは [security.md](security.md) §5 の契約どおり。
 > - backup: remote-test に対する `pnpm backup export` と `verify` が通り、original の SHA-256 照合が一致（`ok: true`）。
-> - **未検証:** trash / restore、複数枚・多様な形式での original SHA-256 保持、別環境への `pnpm backup restore`。
+> - restore: 空の `edgephotos-restore-test`（D1 / R2 / Access / CORS / secret を別に用意）へ `pnpm backup restore` を実行し、`ok: true` を確認済み。restore 先から export し直して manifest を突き合わせ、asset 数・original の SHA-256・album 構成と membership・主要 metadata（size / content type / filename / width / height / takenAt / isFavorite）が一致することを確認。変わるのは `id` と `createdAt` だけで、[D-015](decisions.md) のとおり。空でない library への restore が拒否されることも確認済み。
+> - **未検証:** trash / restore、複数枚・多様な形式での original SHA-256 保持。
+>
+> preview URL（`<version>-<worker>.<subdomain>.workers.dev`）は hostname 単位の Access application の対象外です。private API はここで Access のリダイレクトを受けず、Worker 自身の JWT 検証だけが `401 UNAUTHENTICATED` で拒否します。有効な JWT は `ACCESS_AUD` 一致かつ owner へのみ発行されるため漏洩はありませんが、「private path は必ず Access が前段にいる」とは言えません。
 >
 > owner 以外の identity を Worker が `403` にする経路は、Access policy が owner のみ Allow である限り Worker まで到達しないため、remote-test では実測できません。この検査は多層防御であり、回帰は unit test 側で担保します。
 
