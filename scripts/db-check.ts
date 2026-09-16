@@ -12,7 +12,8 @@ const tmp = await mkdtemp(join(tmpdir(), 'edgephotos-db-check-'))
 try {
   await cp('migrations', tmp, { recursive: true })
   const before = new Set(await readdir(tmp))
-  // drizzle-kit prefixes `out` with "./", so it must be relative to the working directory.
+  // Passing --out switches drizzle-kit to flags-only mode (drizzle.config.ts is ignored), so the relevant
+  // settings are repeated here. drizzle-kit prefixes `out` with "./", so it must be relative to the cwd.
   const flags = ['--dialect', 'sqlite', '--out', relative(process.cwd(), tmp)]
   const kit = (args: string[]) => execFileSync('node_modules/.bin/drizzle-kit', args, { stdio: 'inherit' })
   kit(['check', ...flags])

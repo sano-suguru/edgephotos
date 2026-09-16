@@ -117,7 +117,8 @@ export function createApp(options: AppOptions) {
 
   app.onError((err, c) => {
     if (err instanceof ApiError) return errorResponse(c, err)
-    // Log only non-sensitive facts: never headers, tokens, URLs or bodies.
+    // Log only non-sensitive facts: never headers, tokens, URLs or bodies. Not err.message either:
+    // DrizzleQueryError messages include bound query parameters.
     console.error(JSON.stringify({ level: 'error', requestId: requestId(c), route: c.req.routePath, name: err.name }))
     return errorResponse(c, new ApiError(500, 'INTERNAL', 'Internal error.'))
   })
