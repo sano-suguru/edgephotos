@@ -1,0 +1,5 @@
+# Not needed for `pnpm dev` (the dev server injects local-only values).
+# Copy to .dev.vars only if you run `wrangler dev` against real R2 credentials.
+# Never commit real values.
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=

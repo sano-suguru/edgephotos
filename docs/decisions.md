@@ -87,3 +87,64 @@ v1 では別 Web BFF / Mobile BFF、Queues、Durable Objects、Cron、multi-clou
 EdgePhotos の主要画面は高い対話性を持つため、アプリ本体は Preact SPA + HTTP API とします。
 
 SSR、RSC、Server Actions を中心要件にせず、vinext や Astro をアプリ本体へ導入しません。将来 landing page / docs site を別途作る場合の技術選定は、この判断とは分離します。
+
+## D-011: build 済み静的ファイルは `/share/assets/*` に配置する
+
+**状態:** 採用
+
+共有ページは Access Bypass された `/share/*` 上で動くため、読み込む JS / CSS も Access 外に置く必要があります。Bypass を `/share/*` に限定したまま成立させるため、Vite の client build 出力先を `share/assets/` にしました。
+
+これにより private app の JS bundle も認証なしで取得できます。bundle は公開ソースと同じコードで secret や写真データを含まないため許容します。一方 `index.html` と SPA 経路、`/api/*` は Access の保護下に残します。共有ページ本体（`/share/{shareId}`）は Worker が返し、share 用 header と CSP を必ず付与します。
+
+## D-012: finalize の保存確認は「存在・サイズ・形式・派生画像 metadata」とする
+
+**状態:** 採用
+
+finalize では Worker が R2 binding で次を確認してから asset を `ready` にします。
+
+- reserve した 3 object がすべて存在する
+- 各 object の size が reserve 時の申告値と一致する
+- original の先頭 byte が申告 content type（JPEG / PNG / WebP）と一致する
+- thumbnail / preview が JPEG で、APP1（EXIF / XMP）・APP13（IPTC）segment を含まない
+
+original の SHA-256 は Client が reserve 時に申告し、重複判定の索引として使います。Worker は finalize 時に original 全体を hash しません。Workers の CPU 上限内で大きな original を毎回 hash するのは現実的でないためです。保存済み original の SHA-256 は backup / restore / verify（`pnpm backup`）で R2 から再取得して検証します。
+
+したがって `assets.sha256` は **client-asserted content identity** です。server が byte 列から計算し直した verified identity ではありません。v1 は 1 owner で、脅威は「owner が自分自身に嘘をつく」ことになるため、この区別を許容します。将来 multi-user や untrusted client を扱う場合は、この前提が崩れるため再検討が必要です。
+
+## D-013: presigned PUT は `If-None-Match: *` と `Content-Type` を署名対象にする
+
+**状態:** 採用
+
+object key は reserve ごとに新しい asset ID から作るため、別 asset の上書き経路はありません。加えて、有効期限内の PUT URL が finalize 後に再利用されて original が差し替わることを防ぐため、`If-None-Match: *` を署名 header に含めます。R2 の S3 API は PutObject の conditional header をサポートします。
+
+Browser はこの 2 header を送るため、R2 CORS の AllowedHeaders に `content-type` と `if-none-match` が必要です。
+
+## D-014: original の SHA-256 ごとに asset は 1 つとする
+
+**状態:** 採用
+
+`assets.sha256` は UNIQUE です（値の出所は client 申告であり、上記 [D-012](#d-012-finalize-の保存確認は存在サイズ形式派生画像-metadataとする) の区別が前提です）。reserve 時に同じ original が存在すれば `409 DUPLICATE_ASSET` を返します。reserve 後の競合で finalize 時に重複が判明した場合は、既存 asset を返し、その upload 専用の object を D1 記録後に削除します。ゴミ箱内の asset も重複として扱います。
+
+## D-015: restore は公開 HTTP API 経由の再 upload とする
+
+**状態:** 採用
+
+特権的な import endpoint は作りません。backup CLI は export manifest と original / derivative を取得し、restore では空の環境へ通常の `reserve -> PUT -> finalize` で再 upload したうえで、favorite・trash・album 構成を API で再現します。
+
+- asset ID は変わる。同一性は original の SHA-256 で判定する
+- `createdAt` は restore 時刻になる。`takenAt` は保持する
+- share は復元しない（operations.md の方針どおり）
+- 対象 library が空でなければ restore を拒否する
+
+Native client と同じ API 境界だけで backup / restore が成立することを優先しました。
+
+## D-016: ローカル開発では Access と presigned URL を dev server 内で模擬する
+
+**状態:** 採用
+
+Miniflare の R2 には S3 endpoint がなく、ローカルに Access もありません。`vite dev` の間だけ次を有効にします。
+
+- dev server が起動ごとに RS256 鍵を生成し、`Cf-Access-Jwt-Assertion` を付与する。Worker は本番と同じ検証コード（署名・issuer・audience・期限・owner）で検証する
+- Worker が HMAC 署名付きの短命 URL（`/__local/blobs/*`）を発行し、local R2 binding へ読み書きする
+
+どちらも `import.meta.env.DEV` の分岐と dynamic import に閉じ込めます。production build からは除去され、除去されていることを build 出力で確認します。test では同じ部品を明示的に注入します。

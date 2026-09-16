@@ -4,3 +4,5 @@ node_modules/
 .dev.vars*
 .env*
 dist/
+.playwright-mcp/
+!.dev.vars.example

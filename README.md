@@ -8,7 +8,25 @@ EdgePhotos は、利用者自身の Cloudflare アカウントへデプロイす
 
 ## 状態
 
-現在は **実装開始前** です。アーキテクチャと初期スコープを確定し、実装に着手できる状態までドキュメントを整理しています。
+**private alpha 候補（実装済み・実環境未検証）**。upload、timeline、favorite、album、期限付き共有と失効、trash と完全削除、export / restore を実装し、local の Workers runtime（Miniflare の D1 / R2）で自動テストしています。
+
+ただし中核経路である Client → presigned URL → private R2 と Cloudflare Access の境界は、まだ実環境で踏んでいません。ここを通すまで private alpha として完成扱いにしません。残作業は [ロードマップ](docs/roadmap.md) の Remote integration verification を参照してください。
+
+## ローカルで試す
+
+Node.js 22.18 以上と pnpm が必要です。
+
+```bash
+pnpm install
+pnpm db:migrate:local
+pnpm dev              # http://localhost:5173 （Access を模擬した owner として動作）
+```
+
+```bash
+pnpm check            # typecheck + lint + test + build
+```
+
+デプロイ手順と必要な設定は [運用・デプロイ・復元](docs/operations.md) を参照してください。
 
 ## 初期スコープ
 

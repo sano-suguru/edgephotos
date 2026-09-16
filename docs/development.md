@@ -16,49 +16,42 @@ Issue、PR、ADR を変更ごとに義務化しません。
 
 ## 2. Repository layout
 
-初期構成は次を基準とします。
-
 ```text
+index.html                 private app entry
+share.html                 public share page entry
 src/
   web/
-    app.tsx
-    components/
-      ui/
+    app.tsx                shell + routing
+    main.tsx
+    components/ui/         shadcn/ui-style wrappers (Button, Dialog, DropdownMenu on Base UI)
     features/
-      uploads/
-      timeline/
-      albums/
-      shares/
+      uploads/  timeline/  albums/  shares/  settings/
     lib/
-      api/
-    state/
-
+      api/client.ts        fetch client for /api/v1
+      image.ts             SHA-256, EXIF, canvas derivatives
+    share/main.tsx         share page (no private app code)
+    state/router.ts
   worker/
-    index.ts
-    auth/
-    routes/
-      uploads/
-      assets/
-      albums/
-      shares/
-      export/
-    services/
-    storage/
-    db/
-
+    index.ts               Worker entry (dev-only wiring behind import.meta.env.DEV)
+    app.ts                 Hono app: middleware + all route contracts (OpenAPI)
+    auth/access.ts         Access assertion -> AppPrincipal
+    http/                  errors, Origin check, security headers
+    services/              uploads / assets / albums / shares / export (explicit SQL)
+    storage/               object keys, R2 presigner, finalize inspection, local blob emulation
   contracts/
-    schemas/
+    schemas.ts             zod schemas shared by Worker (runtime + OpenAPI) and Web (types only)
     errors.ts
-
-migrations/
+migrations/                D1 schema (forward-only)
+scripts/
+  backup.ts                backup / restore / verify CLI
+  lib/backup.ts            API-based export / restore / verify (used by CLI and tests)
+  vite-dev-access.ts       dev server Access emulation
 tests/
-  unit/
-  integration/
-  e2e/
-  fixtures/
-
-docs/
+  unit/  integration/  e2e/
+  helpers.ts               test app factory, signed assertions, synthetic image fixtures
 ```
+
+route は現状 `src/worker/app.ts` に集約しています。route 数が増えて見通しが悪くなった時点で `routes/` へ分割します。
 
 `contracts/` には Browser bundle に公開してよい API schema / type だけを置きます。server secret 型や storage credential 実装を置きません。
 
@@ -78,6 +71,18 @@ Server state の正しさまで Signals に背負わせません。保存完了�
 
 v1 は `fetch` を使う小さな API client から始めます。data-fetching framework は cache invalidation が実際に複雑になった場合のみ追加判断します。
 
+## 3.1 ローカル開発
+
+```bash
+pnpm install
+pnpm db:migrate:local      # local D1 (.wrangler/state) に migration を適用
+pnpm dev                   # http://localhost:5173
+```
+
+`pnpm dev` は Access を模擬し、`DEV_OWNER_EMAIL`（既定 `owner@localhost.test`）の owner として API を呼べます（[D-016](decisions.md)）。`APP_ORIGIN` は `http://localhost:5173` 固定です。`127.0.0.1` で開くと Origin check で書き込みが拒否されます。
+
+`pnpm build && pnpm preview` は production build を local で起動します。Access や R2 の設定がないため、private API は `503` を返します。
+
 ## 4. shadcn/ui + Base UI qualification
 
 feature 実装前に、少なくとも次の component を Preact の production build で確認します。
@@ -96,6 +101,12 @@ feature 実装前に、少なくとも次の component を Preact の production
 - TypeScript errors がない
 
 不成立の場合は、feature code を積む前に UI primitive のみ再選定します。
+
+確認結果（2026-09、`@base-ui/react` 1.8 + `preact/compat`）:
+
+- Dialog / Menu: production build・TypeScript は成立。`pnpm dev` 上の Chromium で、Dialog の focus 移動・Escape で閉じる・trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore を確認
+- Select / Combobox: 現状の UI で未使用のため未確認
+- touch interaction: 実機では未確認
 
 ## 5. Hono / OpenAPI
 
@@ -154,6 +165,15 @@ auth
 
 見た目だけの変更へ儀式的なテストを増やしません。
 
+### 実行
+
+```bash
+pnpm test        # unit + integration + e2e（workerd 上、D1 / R2 は Miniflare の local emulation）
+pnpm check       # typecheck + lint + test + build
+```
+
+integration test は `createApp()` に test 用の Access 鍵と local blob signer を注入し、実際の migration を適用した D1 と R2 binding を使います。D1 / R2 の障害は binding を Proxy で包んで再現します。
+
 ## 8. Test fixtures
 
 実人物・実位置情報を使いません。
@@ -171,6 +191,8 @@ auth
 - 上限付近のサイズ / 画素数
 
 original の期待 SHA-256 を fixture metadata として固定します。
+
+現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。実画像の decode・canvas 処理を伴う fixture（orientation、透明 PNG、WebP、壊れた画像など）は、Browser 自動テストの導入時に追加します。
 
 ## 9. 環境分離
 
