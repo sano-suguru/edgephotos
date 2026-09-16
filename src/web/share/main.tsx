@@ -15,7 +15,8 @@ const viewing = signal<{ id: string; url: string | null } | null>(null)
 // When the first page arrived (performance.now(), independent of the device clock).
 let loadedAt = 0
 let refreshing = false
-// Thumbnails already displayed keep their URL on refresh, so they are not downloaded again.
+// Thumbnails already displayed keep their URL on refresh, so they are not downloaded again. One that fails
+// is removed first, so it does get a new URL.
 const shown = new Set<string>()
 
 async function shareApi<T>(path: string): Promise<T> {
@@ -100,7 +101,10 @@ function SharePage() {
                 referrerPolicy="no-referrer"
                 class="h-full w-full object-cover"
                 onLoad={() => shown.add(item.id)}
-                onError={() => void refreshExpired()}
+                onError={() => {
+                  shown.delete(item.id)
+                  void refreshExpired()
+                }}
               />
             </button>
           </li>

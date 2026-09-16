@@ -1,6 +1,6 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
 import { useRef } from 'preact/hooks'
-import type { Asset, AssetPage } from '../../../contracts/schemas'
+import type { AssetPage, AssetSummary } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { libraryVersion } from '../uploads/upload'
 import { AssetViewer } from './AssetViewer'
@@ -14,17 +14,17 @@ export type AssetGridProps = {
 }
 
 export function AssetGrid(props: AssetGridProps) {
-  const items = useSignal<Asset[]>([])
+  const items = useSignal<AssetSummary[]>([])
   const cursor = useSignal<string | null>(null)
   const loading = useSignal(false)
   const error = useSignal<string | null>(null)
-  const selected = useSignal<Asset | null>(null)
+  const selected = useSignal<AssetSummary | null>(null)
   const version = useSignal(0)
   // When the first loaded page arrived (performance.now(), so a wrong device clock does not matter).
   const loadedAt = useRef(0)
   const refreshing = useRef(false)
   // Thumbnails already on screen keep their (now expired) URL: the bytes are loaded, and a new URL would
-  // download every one of them again.
+  // download every one of them again. A thumbnail that fails leaves this set, so it does get a new URL.
   const shown = useRef(new Set<string>())
 
   async function loadPage(reset: boolean) {
@@ -59,7 +59,7 @@ export function AssetGrid(props: AssetGridProps) {
     if (refreshing.current || performance.now() - loadedAt.current < 60_000) return
     refreshing.current = true
     try {
-      const fresh: Asset[] = []
+      const fresh: AssetSummary[] = []
       let next: string | null = null
       do {
         const page = await props.load(next)
@@ -105,7 +105,10 @@ export function AssetGrid(props: AssetGridProps) {
                 loading="lazy"
                 class="h-full w-full object-cover"
                 onLoad={() => shown.current.add(asset.id)}
-                onError={() => void refreshUrls()}
+                onError={() => {
+                  shown.current.delete(asset.id)
+                  void refreshUrls()
+                }}
               />
             </button>
             {asset.isFavorite && (

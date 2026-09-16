@@ -64,6 +64,13 @@ test('a guest opens a shared album and loses access after revoke', async ({ page
   await expectImageLoaded(thumbnail)
   expect(await thumbnail.getAttribute('src')).not.toBe(stale)
 
+  // A thumbnail that was already shown and fails later also gets a fresh URL.
+  await guest.clock.fastForward('06:00')
+  const shownUrl = await thumbnail.getAttribute('src')
+  await thumbnail.evaluate((img) => img.dispatchEvent(new Event('error')))
+  await expect.poll(() => thumbnail.getAttribute('src')).not.toBe(shownUrl)
+  await expectImageLoaded(thumbnail)
+
   await guest.getByRole('button', { name: '拡大表示' }).click()
   const preview = guest.getByRole('dialog', { name: '写真' }).locator('img')
   await expectImageLoaded(preview)

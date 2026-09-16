@@ -47,7 +47,7 @@ async function withRetry(client: ApiClient, send: () => Promise<Response>): Prom
   }
 }
 
-// `once`: the request creates something new each time (POST /albums), so it is never repeated.
+// `once`: the request creates something new each time (POST /uploads, POST /albums), so it is never repeated.
 async function apiJson<T>(client: ApiClient, path: string, init?: RequestInit & { once?: boolean }): Promise<T> {
   const headers = new Headers(init?.headers)
   if (init?.body) headers.set('content-type', 'application/json')
@@ -129,8 +129,10 @@ export async function restoreLibrary(client: ApiClient, store: BlobStore): Promi
     const thumbnail = await requireBytes(store, derivativePath(asset.sha256, 'thumbnail'))
     const preview = await requireBytes(store, derivativePath(asset.sha256, 'preview'))
 
+    // Not repeated: each reserve creates a new upload, so a lost response would leave a stray reservation.
     const reservation = await apiJson<UploadReservation>(client, '/api/v1/uploads', {
       method: 'POST',
+      once: true,
       body: JSON.stringify({
         original: { size: original.byteLength, contentType: asset.contentType, sha256: asset.sha256 },
         thumbnail: { size: thumbnail.byteLength },

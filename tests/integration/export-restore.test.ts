@@ -96,9 +96,10 @@ describe('export and restore to an empty environment', () => {
         injected,
         client: {
           retryDelayMs: () => 0,
-          // Every third API call fails before reaching the Worker (POST /albums is never repeated, so spare it).
+          // Every third API call fails before reaching the Worker. Creating POSTs are never repeated, so spare them.
           api: async (path: string, init?: RequestInit) => {
-            if (++calls % 3 === 0 && !(path === '/api/v1/albums' && init?.method === 'POST')) {
+            const creates = init?.method === 'POST' && (path === '/api/v1/albums' || path === '/api/v1/uploads')
+            if (++calls % 3 === 0 && !creates) {
               injected.unavailable++
               return new Response('unavailable', { status: 503 })
             }
@@ -129,6 +130,36 @@ describe('export and restore to an empty environment', () => {
     expect(report.assets).toBe(manifest.assets.length)
     // Lost PUT responses were retried into 412 and accepted; nothing was duplicated.
     expect(await verifyLibrary(apiClient(await makeApp({ which: 'restore' })), manifest)).toMatchObject({ ok: true })
+  })
+
+  it('does not repeat an upload reservation whose response was lost', async () => {
+    await env.RESTORE_DB.batch(
+      ['album_assets', 'albums', 'shares', 'uploads', 'assets', 'settings'].map((t) =>
+        env.RESTORE_DB.prepare(`DELETE FROM ${t}`),
+      ),
+    )
+    const store = memoryStore()
+    await backupLibrary(apiClient(await makeApp({ which: 'primary' })), store)
+
+    const inner = apiClient(await makeApp({ which: 'restore' }))
+    let reserves = 0
+    const client = {
+      ...inner,
+      retryDelayMs: () => 0,
+      // The reservation is created, then the response is lost.
+      api: async (path: string, init?: RequestInit) => {
+        const res = await inner.api(path, init)
+        if (path === '/api/v1/uploads' && init?.method === 'POST') {
+          reserves++
+          throw new TypeError('network connection lost')
+        }
+        return res
+      },
+    }
+    await expect(restoreLibrary(client, store)).rejects.toThrow('network connection lost')
+    expect(reserves).toBe(1)
+    const pending = await env.RESTORE_DB.prepare('SELECT COUNT(*) AS n FROM uploads').first<{ n: number }>()
+    expect(pending?.n).toBe(1)
   })
 
   it('verification detects missing assets, changed membership and corrupted originals', async () => {
