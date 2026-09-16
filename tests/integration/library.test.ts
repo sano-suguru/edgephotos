@@ -232,7 +232,10 @@ describe('trash, restore and permanent delete', () => {
   it('reports diagnostics without sensitive data', async () => {
     const app = await makeApp()
     const diag = await callJson(app, 'GET', '/api/v1/diagnostics', { expect: 200 })
-    expect(diag.latestMigration).toBe('0001_initial.sql')
+    // The migration harness and the d1_migrations table are independent sources for the same fact.
+    const latest = env.TEST_MIGRATIONS.at(-1)?.name
+    expect(latest).toMatch(/^\d{4}_.+\.sql$/)
+    expect(diag.latestMigration).toBe(latest)
     expect(Object.keys(diag.counts).sort()).toEqual(['albums', 'assets', 'pendingUploads', 'purging', 'trashed'])
   })
 })

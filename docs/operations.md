@@ -56,7 +56,7 @@ pnpm wrangler deploy --config dist/edgephotos/wrangler.json
 
 R2 bucket は public access（r2.dev / custom domain）を有効にしません。
 
-migration は forward-only です。通常の test command から remote migration は実行しません。
+migration は forward-only です。通常の test command から remote migration は実行しません。適用は `wrangler d1 migrations apply` だけで行い、`drizzle-kit push` / `migrate` は使いません。`migrations/meta/` は drizzle-kit 用の snapshot で、wrangler は `.sql` だけを適用します。
 
 ## 3. 利用者が明示設定するもの
 

@@ -1,4 +1,7 @@
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import type { Share, SharedAlbum } from '../../contracts/schemas'
+import type { Db } from '../db'
+import { albums, type ShareRow, shares } from '../db/schema'
 import { ApiError } from '../http/errors'
 import { randomBase64Url, sha256Hex, timingSafeEqualString } from '../lib/crypto'
 import { objectKey } from '../storage/keys'
@@ -6,15 +9,6 @@ import { SHARE_GET_URL_TTL_SECONDS } from '../storage/signer'
 import { getAlbum } from './albums'
 import { listAssets } from './assets'
 import type { ServiceContext } from './context'
-
-type ShareRow = {
-  id: string
-  album_id: string
-  secret_hash: string
-  created_at: string
-  expires_at: string
-  revoked_at: string | null
-}
 
 function toShare(row: ShareRow, now: Date): Share {
   const status = row.revoked_at ? 'revoked' : Date.parse(row.expires_at) <= now.getTime() ? 'expired' : 'active'
@@ -44,18 +38,17 @@ async function insertShare(ctx: ServiceContext, albumId: string, expiresAt: Date
     expires_at: expiresAt.toISOString(),
     revoked_at: null,
   }
-  const stmt = ctx.db
-    .prepare('INSERT INTO shares (id, album_id, secret_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(row.id, row.album_id, row.secret_hash, row.created_at, row.expires_at)
+  const stmt = ctx.db.insert(shares).values(row)
   return { row, secret, stmt }
 }
 
 export async function listShares(ctx: ServiceContext, albumId: string): Promise<Share[]> {
   await getAlbum(ctx.db, albumId)
-  const { results } = await ctx.db
-    .prepare('SELECT * FROM shares WHERE album_id = ? ORDER BY created_at DESC')
-    .bind(albumId)
-    .all<ShareRow>()
+  const results = await ctx.db
+    .select()
+    .from(shares)
+    .where(eq(shares.album_id, albumId))
+    .orderBy(desc(shares.created_at))
   const now = ctx.now()
   return results.map((r) => toShare(r, now))
 }
@@ -68,8 +61,12 @@ export async function createShare(ctx: ServiceContext, appOrigin: string, albumI
   return { share: toShare(row, ctx.now()), secret, url: shareUrl(appOrigin, row.id, secret) }
 }
 
-async function requireShareRow(db: D1Database, shareId: string): Promise<ShareRow> {
-  const row = await db.prepare('SELECT * FROM shares WHERE id = ?').bind(shareId).first<ShareRow>()
+function getShareRow(db: Db, shareId: string): Promise<ShareRow | undefined> {
+  return db.select().from(shares).where(eq(shares.id, shareId)).get()
+}
+
+async function requireShareRow(db: Db, shareId: string): Promise<ShareRow> {
+  const row = await getShareRow(db, shareId)
   if (!row) throw new ApiError(404, 'SHARE_NOT_FOUND', 'Share not found.')
   return row
 }
@@ -78,10 +75,17 @@ export async function revokeShare(ctx: ServiceContext, shareId: string): Promise
   const row = await requireShareRow(ctx.db, shareId)
   if (!row.revoked_at) {
     const ts = ctx.now().toISOString()
-    await ctx.db.prepare('UPDATE shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').bind(ts, shareId).run()
+    await revokeStatement(ctx.db, shareId, ts)
     row.revoked_at = ts
   }
   return toShare(row, ctx.now())
+}
+
+function revokeStatement(db: Db, shareId: string, ts: string) {
+  return db
+    .update(shares)
+    .set({ revoked_at: ts })
+    .where(and(eq(shares.id, shareId), isNull(shares.revoked_at)))
 }
 
 // Revokes the old link and issues a new one for the same album with the same expiry.
@@ -94,12 +98,7 @@ export async function regenerateShare(ctx: ServiceContext, appOrigin: string, sh
     throw new ApiError(409, 'SHARE_UNAVAILABLE', 'Expired shares cannot be regenerated. Create a new share.')
   }
   const { row, secret, stmt } = await insertShare(ctx, old.album_id, expiresAt)
-  await ctx.db.batch([
-    ctx.db
-      .prepare('UPDATE shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
-      .bind(now.toISOString(), old.id),
-    stmt,
-  ])
+  await ctx.db.batch([revokeStatement(ctx.db, old.id, now.toISOString()), stmt])
   return { share: toShare(row, now), secret, url: shareUrl(appOrigin, row.id, secret) }
 }
 
@@ -112,16 +111,17 @@ const BEARER_RE = /^Bearer ([A-Za-z0-9_-]{43})$/
 export async function authorizeShare(ctx: ServiceContext, shareId: string, authorization: string | undefined) {
   const unavailable = new ApiError(404, 'SHARE_UNAVAILABLE', 'Share link is invalid or no longer available.')
   const match = authorization ? BEARER_RE.exec(authorization) : null
-  const row = await ctx.db.prepare('SELECT * FROM shares WHERE id = ?').bind(shareId).first<ShareRow>()
+  const row = await getShareRow(ctx.db, shareId)
   const presentedHash = await sha256Hex(match ? match[1] : '')
   if (!row || !match) throw unavailable
   if (!timingSafeEqualString(presentedHash, row.secret_hash)) throw unavailable
   const now = ctx.now()
   if (row.revoked_at || Date.parse(row.expires_at) <= now.getTime()) throw unavailable
-  const album = await ctx.db.prepare('SELECT id, title FROM albums WHERE id = ?').bind(row.album_id).first<{
-    id: string
-    title: string
-  }>()
+  const album = await ctx.db
+    .select({ id: albums.id, title: albums.title })
+    .from(albums)
+    .where(eq(albums.id, row.album_id))
+    .get()
   if (!album) throw unavailable
   return { share: row, album }
 }
@@ -159,13 +159,10 @@ export async function sharedVariantUrl(
   variant: 'thumbnail' | 'preview',
 ) {
   const { share, album } = await authorizeShare(ctx, shareId, authorization)
-  const member = await ctx.db
-    .prepare(
-      `SELECT a.id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
-       WHERE aa.album_id = ? AND aa.asset_id = ? AND a.status = 'ready' AND a.trashed_at IS NULL`,
-    )
-    .bind(album.id, assetId)
-    .first<{ id: string }>()
+  const member = await ctx.db.get<{ id: string } | undefined>(
+    sql`SELECT a.id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
+        WHERE aa.album_id = ${album.id} AND aa.asset_id = ${assetId} AND a.status = 'ready' AND a.trashed_at IS NULL`,
+  )
   if (!member) throw new ApiError(404, 'ASSET_NOT_FOUND', 'Asset not found.')
   // Variant is restricted to derivatives by the route schema; this guard keeps originals out regardless.
   if (variant !== 'thumbnail' && variant !== 'preview') throw new ApiError(404, 'ASSET_NOT_FOUND', 'Asset not found.')

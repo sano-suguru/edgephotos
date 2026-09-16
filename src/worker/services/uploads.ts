@@ -1,32 +1,16 @@
 import type { z } from '@hono/zod-openapi'
+import { and, eq, ne } from 'drizzle-orm'
 import type { UploadReserveSchema } from '../../contracts/schemas'
+import type { Db } from '../db'
+import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
 import { INSPECT_HEAD_BYTES, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
 import { assetObjectKeys } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
-import { type AssetRow, getAssetRow, sortAtFor } from './assets'
+import { getAssetRow, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
 
 type ReserveInput = z.infer<typeof UploadReserveSchema>
-
-export type UploadRow = {
-  id: string
-  asset_id: string
-  status: 'pending' | 'finalized' | 'duplicate'
-  sha256: string
-  original_size: number
-  original_content_type: AssetRow['original_content_type']
-  thumbnail_size: number
-  preview_size: number
-  original_filename: string | null
-  width: number | null
-  height: number | null
-  taken_at: string | null
-  duplicate_of: string | null
-  created_at: string
-  expires_at: string
-  finalized_at: string | null
-}
 
 function duplicateError(existing: AssetRow) {
   return new ApiError(409, 'DUPLICATE_ASSET', 'An asset with the same original already exists.', {
@@ -37,10 +21,7 @@ function duplicateError(existing: AssetRow) {
 
 // Step 1 of reserve -> presigned PUT -> finalize. The server chooses ids and object keys.
 export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
-  const existing = await ctx.db
-    .prepare('SELECT * FROM assets WHERE sha256 = ?')
-    .bind(input.original.sha256)
-    .first<AssetRow>()
+  const existing = await getAssetBySha256(ctx.db, input.original.sha256)
   if (existing) throw duplicateError(existing)
 
   const now = ctx.now()
@@ -49,28 +30,22 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
   const expiresAt = new Date(now.getTime() + UPLOAD_URL_TTL_SECONDS * 1000)
   const meta = input.metadata
 
-  await ctx.db
-    .prepare(
-      `INSERT INTO uploads (id, asset_id, status, sha256, original_size, original_content_type,
-         thumbnail_size, preview_size, original_filename, width, height, taken_at, created_at, expires_at)
-       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      uploadId,
-      assetId,
-      input.original.sha256,
-      input.original.size,
-      input.original.contentType,
-      input.thumbnail.size,
-      input.preview.size,
-      meta.filename ?? null,
-      meta.width ?? null,
-      meta.height ?? null,
-      meta.takenAt ?? null,
-      now.toISOString(),
-      expiresAt.toISOString(),
-    )
-    .run()
+  await ctx.db.insert(uploads).values({
+    id: uploadId,
+    asset_id: assetId,
+    status: 'pending',
+    sha256: input.original.sha256,
+    original_size: input.original.size,
+    original_content_type: input.original.contentType,
+    thumbnail_size: input.thumbnail.size,
+    preview_size: input.preview.size,
+    original_filename: meta.filename ?? null,
+    width: meta.width ?? null,
+    height: meta.height ?? null,
+    taken_at: meta.takenAt ?? null,
+    created_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+  })
 
   const keys = assetObjectKeys(assetId)
   const [original, thumbnail, preview] = await Promise.all([
@@ -146,8 +121,20 @@ async function verifyObjects(ctx: ServiceContext, upload: UploadRow) {
   }
 }
 
+// Query-builder errors arrive wrapped (DrizzleQueryError) with the D1 error as `cause`.
 function isUniqueViolation(err: unknown): boolean {
-  return err instanceof Error && /UNIQUE constraint failed/i.test(err.message)
+  for (let e = err; e instanceof Error; e = e.cause) {
+    if (/UNIQUE constraint failed/i.test(e.message)) return true
+  }
+  return false
+}
+
+function getAssetBySha256(db: Db, sha256: string): Promise<AssetRow | undefined> {
+  return db.select().from(assets).where(eq(assets.sha256, sha256)).get()
+}
+
+function getUploadRow(db: Db, id: string): Promise<UploadRow | undefined> {
+  return db.select().from(uploads).where(eq(uploads.id, id)).get()
 }
 
 export type FinalizeOutcome = { result: 'created' | 'duplicate'; asset: AssetRow }
@@ -155,7 +142,7 @@ export type FinalizeOutcome = { result: 'created' | 'duplicate'; asset: AssetRow
 // Step 3. Idempotent: replays converge on the same asset. D1 and R2 are not one transaction;
 // on any D1 failure the upload stays pending and objects are left in place for a retry.
 export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Promise<FinalizeOutcome> {
-  const upload = await ctx.db.prepare('SELECT * FROM uploads WHERE id = ?').bind(uploadId).first<UploadRow>()
+  const upload = await getUploadRow(ctx.db, uploadId)
   if (!upload) throw new ApiError(404, 'UPLOAD_NOT_FOUND', 'Upload not found.')
 
   if (upload.status !== 'pending') return settledOutcome(ctx, upload)
@@ -163,9 +150,10 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
   await verifyObjects(ctx, upload)
 
   const existing = await ctx.db
-    .prepare('SELECT * FROM assets WHERE sha256 = ? AND id != ?')
-    .bind(upload.sha256, upload.asset_id)
-    .first<AssetRow>()
+    .select()
+    .from(assets)
+    .where(and(eq(assets.sha256, upload.sha256), ne(assets.id, upload.asset_id)))
+    .get()
   if (existing) return markDuplicate(ctx, upload, existing)
 
   const now = ctx.now()
@@ -173,38 +161,38 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
   try {
     await ctx.db.batch([
       ctx.db
-        .prepare(
-          `INSERT INTO assets (id, status, sha256, original_size, original_content_type, original_filename,
-             width, height, taken_at, sort_at, is_favorite, trashed_at, created_at, updated_at)
-           VALUES (?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
-           ON CONFLICT (id) DO NOTHING`,
-        )
-        .bind(
-          upload.asset_id,
-          upload.sha256,
-          upload.original_size,
-          upload.original_content_type,
-          upload.original_filename,
-          upload.width,
-          upload.height,
-          upload.taken_at,
-          sortAtFor(upload.taken_at, now),
-          ts,
-          ts,
-        ),
+        .insert(assets)
+        .values({
+          id: upload.asset_id,
+          status: 'ready',
+          sha256: upload.sha256,
+          original_size: upload.original_size,
+          original_content_type: upload.original_content_type,
+          original_filename: upload.original_filename,
+          width: upload.width,
+          height: upload.height,
+          taken_at: upload.taken_at,
+          sort_at: sortAtFor(upload.taken_at, now),
+          is_favorite: 0,
+          trashed_at: null,
+          created_at: ts,
+          updated_at: ts,
+        })
+        .onConflictDoNothing({ target: assets.id }),
       ctx.db
-        .prepare("UPDATE uploads SET status = 'finalized', finalized_at = ? WHERE id = ? AND status = 'pending'")
-        .bind(ts, upload.id),
+        .update(uploads)
+        .set({ status: 'finalized', finalized_at: ts })
+        .where(and(eq(uploads.id, upload.id), eq(uploads.status, 'pending'))),
     ])
   } catch (err) {
     if (!isUniqueViolation(err)) throw err
     // A concurrent upload of the same bytes won the race.
-    const winner = await ctx.db.prepare('SELECT * FROM assets WHERE sha256 = ?').bind(upload.sha256).first<AssetRow>()
+    const winner = await getAssetBySha256(ctx.db, upload.sha256)
     if (!winner) throw err
     return markDuplicate(ctx, upload, winner)
   }
 
-  const fresh = await ctx.db.prepare('SELECT * FROM uploads WHERE id = ?').bind(uploadId).first<UploadRow>()
+  const fresh = await getUploadRow(ctx.db, uploadId)
   if (!fresh) throw new ApiError(404, 'UPLOAD_NOT_FOUND', 'Upload not found.')
   return settledOutcome(ctx, fresh)
 }
@@ -220,11 +208,9 @@ async function settledOutcome(ctx: ServiceContext, upload: UploadRow): Promise<F
 
 async function markDuplicate(ctx: ServiceContext, upload: UploadRow, existing: AssetRow): Promise<FinalizeOutcome> {
   await ctx.db
-    .prepare(
-      "UPDATE uploads SET status = 'duplicate', duplicate_of = ?, finalized_at = ? WHERE id = ? AND status = 'pending'",
-    )
-    .bind(existing.id, ctx.now().toISOString(), upload.id)
-    .run()
+    .update(uploads)
+    .set({ status: 'duplicate', duplicate_of: existing.id, finalized_at: ctx.now().toISOString() })
+    .where(and(eq(uploads.id, upload.id), eq(uploads.status, 'pending')))
   // Only after D1 recorded the duplicate: the reserved keys belong to this upload alone and no asset
   // references them, so removing them is safe. Best effort; leftovers are harmless.
   const keys = assetObjectKeys(upload.asset_id)
@@ -233,6 +219,6 @@ async function markDuplicate(ctx: ServiceContext, upload: UploadRow, existing: A
   } catch {
     // ignore
   }
-  const fresh = await ctx.db.prepare('SELECT * FROM uploads WHERE id = ?').bind(upload.id).first<UploadRow>()
+  const fresh = await getUploadRow(ctx.db, upload.id)
   return settledOutcome(ctx, fresh ?? upload)
 }

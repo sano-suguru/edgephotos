@@ -66,7 +66,7 @@ share secret は URL fragment に置き、D1 には hash のみ保存します�
 
 ## D-008: D1 は explicit SQL + migration で扱う
 
-**状態:** 採用
+**状態:** [D-017](#d-017-drizzle-を-d1-の-schema型migration-生成に薄く使う) で更新
 
 v1 の D1 access は prepared SQL と明示的な migration を使用します。現時点の data model 規模では ORM を必須にしません。
 
@@ -148,3 +148,41 @@ Miniflare の R2 には S3 endpoint がなく、ローカルに Access もあり
 - Worker が HMAC 署名付きの短命 URL（`/__local/blobs/*`）を発行し、local R2 binding へ読み書きする
 
 どちらも `import.meta.env.DEV` の分岐と dynamic import に閉じ込めます。production build からは除去され、除去されていることを build 出力で確認します。test では同じ部品を明示的に注入します。
+
+## D-017: Drizzle を D1 の schema・型・migration 生成に薄く使う
+
+**状態:** 採用（D-008 を更新）
+
+D1 の schema を `src/worker/db/schema.ts` に TypeScript で定義し、Drizzle ORM / Drizzle Kit を次の用途に限って使います。
+
+- DB row / insert 型を schema から導出する（`$inferSelect` / `$inferInsert`）。手書きの row 型を持たない
+- 単純な CRUD（1 table の select / insert / update / delete、単純な JOIN）は query builder で書く
+- migration SQL を `drizzle-kit generate` で生成する
+
+SQL の隠蔽は目的にしません。
+
+- 相関 subquery、動的 filter、keyset pagination、集計などは、SQL の方が読みやすければ `sql` テンプレートで明示的な SQL のまま書く。値は bind parameter になる
+- Repository / DAO / Active Record / relational query API（`drizzle(d1, { schema })`）は導入しない。service 関数から直接 `ctx.db` を使う
+- schema の property 名は column 名（snake_case）と同じにし、ORM 側の値変換（`mode: 'boolean'` など）を使わない。明示的な SQL の結果（`SELECT a.* ...`）と `$inferSelect` を同じ型として扱えるようにするため
+- API DTO / zod schema と DB row 型は統合しない。row から DTO への変換は service に置く
+
+Migration:
+
+- 適用される正本は、review して commit した `migrations/*.sql` のまま。適用は従来どおり `wrangler d1 migrations apply`
+- 流れは `schema.ts` 変更 → `pnpm db:generate <name>` → 生成 SQL を review（必要なら手で直す）→ `.sql` と `migrations/meta/` を commit
+- `drizzle-kit push` と `drizzle-kit migrate` は使わない。`drizzle.config.ts` に D1 credential を置かないため、そもそも実行できない
+- `pnpm db:check` が schema と `migrations/meta/` の snapshot のずれを検出する。`tests/integration/migrations.test.ts` が、migration 適用後の D1 と `schema.ts` の一致を検証する
+
+既存 migration の扱い（baseline）:
+
+- `0001_initial.sql` は手書きのまま変更しない。production の `d1_migrations` は file 名で記録されているため、改名や再生成はしない
+- `migrations/meta/0001_snapshot.json` は、同じ schema を drizzle-kit で生成したときの snapshot。journal の entry は `idx: 1` / `tag: 0001_initial` とした。drizzle-kit は次の番号を「最後の idx + 1」で決めるため、以後の生成 migration は `0002_*` から始まる。この journal を `idx: 0` へ「直さない」こと
+- `0001_initial.sql` と snapshot の差は次の 2 点だけで、どちらも既存データに影響しない
+  - SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
+  - `uploads.asset_id` の UNIQUE は SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
+- この差が原因で生成 SQL が誤っていれば、CI で検出される。test の setup は本番と同じく空の D1 へ `0001` から順に全 migration を適用し、そのあと drift test が `schema.ts` と比較する。つまり生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通る
+  - この rehearsal が保証するのは DDL として適用できることだけ。table は空なので、既存データの保存（table 作り直し時の列の対応、値の変換、NOT NULL や CHECK の強化）は検証しない。データを変換する migration を初めて書くときは、その migration 用の fixture を追加する
+  - 確認済みの例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗する。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通る
+- production DB の再作成は不要
+
+`wrangler` と `readD1Migrations` は `.sql` だけを読むため、`migrations/meta/` は適用対象になりません。

@@ -87,7 +87,7 @@ D1 は状態と索引を保持します。
 - shares
 - settings
 
-写真 binary、R2 credential、Access token、share secret 平文は保存しません。正確な schema は migration を正本とします。
+写真 binary、R2 credential、Access token、share secret 平文は保存しません。正確な schema は migration を正本とし、`src/worker/db/schema.ts`（Drizzle）はそれと一致することを test で確認した型・query 用の定義です（[D-017](decisions.md)）。
 
 ### private R2
 
