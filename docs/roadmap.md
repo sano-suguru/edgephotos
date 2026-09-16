@@ -79,7 +79,7 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 
 - ⬜ 普段の入力経路でスマートフォン写真を数枚 upload し、timeline の orientation と preview を確認する
 
-合成画像では実機エンコーダ固有の EXIF 配置（`MakerNote`、orientation 6 の縦位置撮影、HEIC 変換 JPEG）を再現できないため残しています。表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。
+実機由来の公開サンプルと合成 fixture による取り込みは、Chromium と WebKit で検証済みです（operations.md 冒頭）。残っているのは iPhone / Android 実機でしか確かめられない点です。具体的には、iOS の写真ピッカーの HEIC → JPEG 変換、mobile Safari の memory 上限、画面ロックで中断した upload の再開です。表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。
 - ✅ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
 - ✅ remote で backup export → verify → 別の空環境への restore を 1 回成功させる
 
@@ -95,6 +95,10 @@ v1 の完成条件には含めませんが、後から迷わないよう記録�
 
 自動 cleanup を始めると Cron / Queues へスコープが広がるため、要求か測定結果が出るまで着手しません（[AGENTS.md](../AGENTS.md) §6）。
 
+**WebP の EXIF は読まない。** `exifr` は WebP の EXIF を解析しないため、WebP の `takenAt` は常に `null` です。WebP の EXIF orientation は、WebKit では適用され、Chromium では適用されません。そのため同じ WebP でも、Browser によって width / height と derivative の向きが変わります。カメラが WebP を出力することはまれなので、v1 では扱いません。
+
+**途中で切れた JPEG の扱いが Browser で違う。** Chromium は decode 失敗として拒否します。WebKit は読めた部分だけで derivative を作り、切れた byte 列をそのまま original として保存します。
+
 ## Release polish
 
 - Deploy to Cloudflare
@@ -102,7 +106,7 @@ v1 の完成条件には含めませんが、後から迷わないよう記録�
 - update / uninstall procedure
 - screenshots / demo
 - accessibility の基本確認
-- 実機での client-side image processing 計測
+- 実機での client-side image processing 計測（desktop の Chromium / WebKit では計測済み。operations.md 冒頭）
 
 ## Future
 

@@ -218,6 +218,8 @@ original の期待 SHA-256 を fixture metadata として固定します。
 
 現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。実画像の decode・canvas 処理を伴う fixture（orientation、透明 PNG、WebP、壊れた画像など）は、Browser 自動テストの導入時に追加します。
 
+Browser での取り込み検証（decode、orientation、derivative、memory）は、公開されている実機サンプルと合成画像を使い、scratch 環境で一度きりの Playwright script として実施しました。fixture も script も commit していません。結果は [operations.md](operations.md) 冒頭に記録しています。Browser 差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（`tests/unit/web-image.test.ts`。WebKit が実際に出力した APP1 / APP13 の byte 列を含みます）。
+
 ## 9. 環境分離
 
 最低限次を分離します。

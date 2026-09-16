@@ -211,3 +211,44 @@ D-012 では `assets.sha256` は client の申告値で、R2 上の byte 列と�
 - この変更以前に reserve した upload の PUT URL は checksum を含まない。そのまま finalize すると `checksum_missing` になるため、再 upload が必要（URL の期限は 600 秒）
 - この変更以前に `ready` になった asset の `sha256` は申告値のまま。`pnpm backup verify` が R2 から読み直して照合する
 - local 開発と test では、local blob route が同じ header を検証し、R2 binding の `put(..., { sha256 })` で digest を検証する（Miniflare も不一致を拒否し、`head().checksums.sha256` を返す）
+
+## D-019: v1 は HEIC / HEIF を受け付けず、iPhone は Safari の JPEG 変換に任せる
+
+**状態:** 採用
+
+v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Client が明示的に拒否し、「HEIC は未対応です（JPEG で書き出してから選んでください）」と表示します。拡張子（`.heic` / `.heif` / `.hif`）でも判定します。desktop Browser は type を空で渡すことがあるためです。
+
+前提になる事実（2026-09 時点）:
+
+- iPhone の Safari では、`<input type=file>` の `accept` が HEIC を含まない場合、写真ピッカーの既定（「自動」）が HEIC を JPEG に変換して渡す（Apple Developer Forums の報告。実機では未確認）。EdgePhotos の `accept` は `image/jpeg,image/png,image/webp` なので、iPhone の通常操作では JPEG が届く。`accept` に `image/heic` を足すと、Safari 17 以降は HEIC のまま渡し、JPEG まで HEIC へ変換することがある（同フォーラムの報告）。そのため `image/heic` は足さない
+- 変換後の JPEG は ImageIO が書き出すと推定している（iOS 上では未確認）。macOS の `sips`（同じ ImageIO）で iPhone の HEIC を変換すると、`DateTimeOriginal`・`OffsetTimeOriginal`・MakerNote は残った。EdgePhotos での取り込み結果も正しかった（width / height / takenAt）
+- 手元の WebKit（Playwright WebKit 26.5）は `createImageBitmap` で HEIC を decode できる。Chromium はできない（`InvalidStateError`）
+- Cloudflare Images は HEIC を入力にでき、Worker から binding で呼べる（入力は 20MB まで、変換は月 5,000 件まで無料、以降は 1,000 件あたり $0.50）
+
+比較した案:
+
+| 案 | 依存・bundle | memory | original の保持 | iPhone / Safari の UX | Cloudflare の費用・構成 |
+| --- | --- | --- | --- | --- | --- |
+| 1. 非対応を明示（採用） | なし | 変化なし | 保存するのは Browser から受け取った byte 列（iPhone では iOS が作った JPEG）。受け取った byte 列は改変しない | 通常操作では意識しない。「現在の形式」を選んだ場合と、Android の HEIF はエラーになり、書き出しが必要 | なし |
+| 2. HEIC を original として保存し、derivative だけ別経路で作る | server に content type と magic（`ftyp` box）の追加。Safari なら現行の canvas 経路で derivative を作れる | Safari では JPEG と同程度（decode 後の bitmap が支配的） | カメラの HEIC byte 列をそのまま保てる | `accept` に HEIC を足す必要があり、上記の Safari の変換挙動に巻き込まれる。Chrome / Firefox では derivative を作れず、別経路が必要 | 別経路を 3 か 4 で作るなら、その費用がかかる |
+| 3. Browser 側で変換（libheif の WASM など） | WASM 数 MB を bundle へ追加し、更新も追う | WASM heap に加えて decode 後の bitmap。mobile Safari で最も危うい | 変換結果を original にすると元の byte 列を失う。derivative 専用にすれば案 2 と同じ | Safari は native で decode できるので不要。恩恵を受けるのは desktop Chrome / Firefox だけ | なし |
+| 4. Server / Cloudflare 側で変換（Images binding） | Worker に Images binding を追加。Worker 内の WASM decode は CPU とメモリの上限から不採用 | Client の負担は小さい | original は HEIC のまま保持できる | 最も透過的 | 1 枚あたり変換 2 回（thumbnail / preview）。finalize の中で呼べば遅延と失敗経路が増え、非同期化すれば Queues が要る（D-009） |
+
+採用理由: personal photo appliance としては、iPhone の通常経路（Safari → JPEG）が追加コードなしで成立します。v1 で解くべき HEIC 固有の問題は「黙って失敗しないこと」だけです。案 2〜4 はどれも upload 形式か derivative 生成の経路を増やし、original の定義（どの byte 列を保存するか）も変わります。
+
+影響と制約:
+
+- iPhone の Safari 経由で保存される original は、iOS が変換した JPEG の byte 列です。カメラが記録した HEIC そのものではありません。「original は byte-for-byte immutable」は「Browser から受け取った byte 列を変えない」という意味で維持されます
+- iOS の写真ピッカーの「オプション」で位置情報を外すと、GPS は original にも残りません（EdgePhotos の外の挙動）
+- 再検討する条件: Native client を作るとき（OS の decoder で derivative を作りつつ HEIC original を送れる）、または「カメラの HEIC byte 列を残したい」という要求が出たとき。その場合は、まず案 2（Safari / Native に限って HEIC original を受け付ける）を検討する
+
+## D-020: 取り込みの頑健性は Client 側の最小修正で担保する
+
+**状態:** 採用
+
+実機由来の公開サンプル写真と合成 fixture を使い、Chromium と WebKit で取り込みを検証しました（結果は operations.md 冒頭）。見つかった問題は、server の契約を変えずに Client 側で直しています。
+
+- **WebKit の canvas JPEG には APP1 / APP13 が付く。** WebKit の `canvas.toBlob('image/jpeg')` は、APP1（Exif: ColorSpace と PixelX/YDimension）と APP13（空の Photoshop IRB）を書き出す。finalize はこれを `metadata_segment` として拒否するため、Safari からの upload が全件 `422 UPLOAD_OBJECT_INVALID` になっていた。Client が PUT 前に APP1 / APP13 を取り除く（`src/web/lib/jpeg-metadata.ts`）。finalize の検査は緩めない。撮影 metadata がないことは、引き続き server が保証する
+- **PUT を再試行する。** 3 回の PUT のどれかが一時的に失敗すると、その写真全体が失敗していた。network error、408、429、5xx は、backoff を挟んで最大 4 回まで試す。`412` は保存済みとして扱う（`src/web/lib/storage-put.ts`）。key は reserve ごとに固有で、`If-None-Match: *` で署名しているため、`412` になるのは同じ upload の以前の試行が R2 に届き、応答だけが失われた場合に限られる。finalize は引き続き size と、original については R2 が検証した SHA-256 を確認する。`400`（BadDigest）と `403`（期限切れ）は再試行しない
+- **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らなかった。300 枚を選ぶと、100 件近くを残したまま完了表示になっていた。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削る（`src/web/features/uploads/upload-list.ts`）
+- **前処理の並列数は 2 のままにする。** 1 枚分の peak memory は、ほぼ decode 後の bitmap（幅 × 高さ × 4 byte）で決まる。ArrayBuffer を早く手放す案、canvas を 0×0 にして解放する案は、測定の揺れを超える差が出なかったため入れない。Chromium では並列数を 1 増やすごとに peak が bitmap 1 枚分増え、1 → 2 で時間が約 2 割縮んだ。WebKit では peak も時間もほぼ変わらなかった。bitmap は PUT の前に close されるため、転送中に保持するのは File と小さな derivative だけになる。Web Worker は導入しない
