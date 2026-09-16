@@ -66,6 +66,8 @@ pnpm wrangler deploy --config dist/edgephotos/wrangler.json
 
 R2 bucket は public access（r2.dev / custom domain）を有効にしません。
 
+初回の deploy は、deploy の成功で終わりにしません。§7 の `pnpm diagnose` と、Browser での写真 1 枚の upload までを一続きの作業として行います。
+
 migration は forward-only です。通常の test command から remote migration は実行しません。適用は `wrangler d1 migrations apply` だけで行い、`drizzle-kit push` / `migrate` は使いません。`migrations/meta/` は drizzle-kit 用の snapshot で、wrangler は `.sql` だけを適用します。
 
 ## 3. 利用者が明示設定するもの
@@ -272,7 +274,7 @@ verify が確認する項目:
 
 restore した環境では過去の share を再有効化しません（share は export に含めません）。asset ID と `createdAt` は変わります。
 
-`pnpm backup` は、通信エラー・`408`・`429`・`5xx` を backoff 付きで最大 4 回まで再試行します（album の作成だけは重複を避けるため再試行しません）。10,000 件の backup / restore は、remote で 1 時間以上かかる見積もりです（[benchmarks.md](benchmarks.md)）。
+`pnpm backup` は、通信エラー・`408`・`429`・`5xx` を backoff 付きで最大 4 回まで再試行します（作成系の request である upload の予約と album の作成は、重複を避けるため再試行しません）。10,000 件の backup / restore は、remote で 1 時間以上かかる見積もりです（[benchmarks.md](benchmarks.md)）。
 
 restore が再試行でも回復せず途中で止まった場合は、空の環境を作り直して再実行してください（再開機能は未実装）。
 
