@@ -222,7 +222,7 @@ export function createApp(options: AppOptions) {
     async (c) => {
       const q = c.req.valid('query')
       const page = await assets.listAssets(svc(c), q)
-      const items = await Promise.all(page.rows.map((r) => assets.toAsset(svc(c), r)))
+      const items = await Promise.all(page.rows.map((r) => assets.toAssetSummary(svc(c), r)))
       return c.json({ items, nextCursor: page.nextCursor }, 200)
     },
   )
@@ -386,7 +386,7 @@ export function createApp(options: AppOptions) {
       const { albumId } = c.req.valid('param')
       await albums.requireAlbumId(svc(c).db, albumId)
       const page = await assets.listAssets(svc(c), { ...c.req.valid('query'), albumId })
-      const items = await Promise.all(page.rows.map((r) => assets.toAsset(svc(c), r)))
+      const items = await Promise.all(page.rows.map((r) => assets.toAssetSummary(svc(c), r)))
       return c.json({ items, nextCursor: page.nextCursor }, 200)
     },
   )

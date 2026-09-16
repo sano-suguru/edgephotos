@@ -48,6 +48,8 @@
 
 Deploy to Cloudflare ボタンは Release polish の範囲です（roadmap）。
 
+Cloudflare の plan は、試用・評価なら Workers Free、継続して使うなら Workers Paid（月 $5 から）を推奨します。Free の CPU 上限は 1 request 10 ms で、数千枚以上の library では timeline や export が上限に近づきます（[benchmarks.md](benchmarks.md)）。Paid の上限は既定で 30 秒です。D1 の time travel も、Free の 7 日に対して Paid は 30 日です。
+
 ## 2. リソース作成とデプロイ
 
 環境ごとに D1・R2・Access application・R2 credential を分けます。以下は `remote-test` の例です。production は `--env` を外し、`wrangler.jsonc` の top-level 設定を使います。
@@ -200,29 +202,33 @@ remote-test に対する実行結果（2026-09-17）: owner token ありで 15 �
 
 migration は forward-only です。Worker code の rollback と D1 の rollback は別の操作です。
 
-手順（production は `--env` なし）:
+release の手順は、migration の有無と種類で変えます（production は `--env` なし）。
+
+| release | 手順 |
+| --- | --- |
+| migration なし | check → deploy → diagnose → smoke |
+| 追加だけの migration（列・table・index の追加） | check → bookmark を控える → migration → deploy → diagnose → smoke |
+| 破壊的な migration、またはデータを変換する migration | 上に加えて、**先に full backup**（`pnpm backup export`） |
 
 ```bash
-git pull && pnpm install && pnpm check          # 1. 手元で検証
-pnpm backup export ./backup-$(date +%F)          # 2. backup（original を含む）
-# 3. migration がある場合だけ: 現在の D1 bookmark を控える
-pnpm wrangler d1 time-travel info <database> [--env <env>]
+git pull && pnpm install && pnpm check                          # check
+pnpm wrangler d1 time-travel info <database> [--env <env>]       # bookmark を控える（migration がある場合）
 pnpm wrangler d1 migrations apply <database> [--env <env>] --remote
-# 4. deploy
-[CLOUDFLARE_ENV=<env>] pnpm build
+[CLOUDFLARE_ENV=<env>] pnpm build                                # deploy
 pnpm wrangler deploy --config dist/<worker>/wrangler.json
-# 5. 確認
 EDGEPHOTOS_URL=... EDGEPHOTOS_ACCESS_TOKEN=... pnpm diagnose [--env <env>]
 ```
 
-最後に Browser で timeline を開き、写真を 1 枚 upload します。
+smoke は、Browser で timeline を開き、写真を 1 枚 upload するだけです。
+
+release のたびに full backup は取りません。original は R2 上で変更されず、通常の migration は写真の byte に触れません。D1 は time travel で戻せます。10,000 枚の full backup は remote で 1 時間以上かかり、original が 1 枚 3 MB なら 30 GB になります（[benchmarks.md](benchmarks.md)）。full backup は定期的に、または破壊的な変更の前に取ります。
 
 順序は「migration → deploy」です。migration は旧 Worker でも動く形（列・table の追加）で書きます。列の削除や改名のように旧 Worker を壊す変更は、それを使わない Worker を先に deploy し、次の release で migration します。
 
 ### 戻す
 
 - **Worker だけ戻す**（migration なしの release、または migration が旧 Worker と互換）: `pnpm wrangler rollback [<version-id>] [--env <env>]`。直近 100 version まで戻せます。
-- **migration が原因で壊れた**: 手順 3 で控えた bookmark に `pnpm wrangler d1 time-travel restore <database> --bookmark=<bookmark>` で戻し、Worker も rollback します。restore は D1 をその場で上書きする破壊的な操作です。戻せるのは直近 30 日以内（Workers Free では 7 日）で、bookmark 以降の D1 の書き込み（upload の登録、album 操作）は失われます。その間に upload された R2 object は D1 から参照されないまま残ります（[security.md](security.md) §10 の方針どおり、自動では消しません）。失った登録は、手順 2 の backup と比較して upload し直します。
+- **migration が原因で壊れた**: 控えておいた bookmark に `pnpm wrangler d1 time-travel restore <database> --bookmark=<bookmark>` で戻し、Worker も rollback します。restore は D1 をその場で上書きする破壊的な操作です。戻せるのは直近 30 日以内（Workers Free では 7 日）で、bookmark 以降の D1 の書き込み（upload の登録、album 操作）は失われます。その間に upload された R2 object は D1 から参照されないまま残ります（[security.md](security.md) §10 の方針どおり、自動では消しません）。失った登録は、直近の backup と比較して upload し直します。
 - time travel の期限を過ぎた、または D1 / R2 自体を失った場合は §10 の restore（新しい空環境へ）で戻します。
 
 自動 upstream 更新は v1 の要件にしません。依存関係の更新は Dependabot の PR（週 1 回、group 単位）で受け、CI（`pnpm check` と Browser E2E）が通ったものだけ merge します。drizzle の更新は単独の PR になるので、`pnpm db:check` と試しの `pnpm db:generate` を行ってから merge します。

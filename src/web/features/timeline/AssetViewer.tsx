@@ -1,6 +1,6 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
-import { useRef } from 'preact/hooks'
-import type { Album, Asset } from '../../../contracts/schemas'
+import { useEffect } from 'preact/hooks'
+import type { Album, AssetSummary } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { Dialog } from '../../components/ui/dialog'
 import { DropdownMenu } from '../../components/ui/menu'
@@ -12,29 +12,34 @@ function formatBytes(n: number) {
 }
 
 export function AssetViewer(props: {
-  asset: Asset
+  asset: AssetSummary
   mode: 'library' | 'trash' | 'album'
   albumId?: string
   onClose: () => void
   // Called with the updated asset, or with null when it left the current view.
-  onChanged: (asset: Asset | null) => void
+  onChanged: (asset: AssetSummary | null) => void
 }) {
   const { asset } = props
   const albums = useSignal<Album[]>([])
   const busy = useSignal(false)
   const notice = useSignal<string | null>(null)
-  const renewedFor = useRef<string | null>(null)
+  // List items carry no preview URL. Fetch it on open, so it is always fresh; the cached thumbnail stands in
+  // meanwhile. If the preview still fails (e.g. it expired before loading), fetch once more.
+  const preview = useSignal<{ id: string; url: string; retried: boolean } | null>(null)
 
-  // The preview URL came with the list and may have expired while the page was open. Fetch the asset
-  // again for a fresh URL, once per asset so a missing object cannot loop.
-  function renewPreview() {
-    if (renewedFor.current === asset.id) return
-    renewedFor.current = asset.id
+  function loadPreview(retried: boolean) {
+    const id = asset.id
     api
-      .getAsset(asset.id)
-      .then((fresh) => props.onChanged(fresh))
+      .getAsset(id)
+      .then((fresh) => {
+        if (props.asset.id === id) preview.value = { id, url: fresh.previewUrl, retried }
+      })
       .catch(() => {})
   }
+
+  useEffect(() => loadPreview(false), [asset.id])
+
+  const shownPreview = preview.value?.id === asset.id ? preview.value : null
 
   useSignalEffect(() => {
     if (props.mode !== 'trash') {
@@ -70,10 +75,12 @@ export function AssetViewer(props: {
       <div class="flex flex-col gap-4 md:flex-row">
         <div class="flex min-h-64 flex-1 items-center justify-center rounded bg-black/90">
           <img
-            src={asset.previewUrl}
+            src={shownPreview?.url ?? asset.thumbnailUrl}
             alt={asset.filename ?? ''}
             class="max-h-[70vh] max-w-full object-contain"
-            onError={renewPreview}
+            onError={() => {
+              if (shownPreview && !shownPreview.retried) loadPreview(true)
+            }}
           />
         </div>
         <aside class="flex w-full flex-col gap-3 text-sm md:w-64">

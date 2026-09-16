@@ -268,6 +268,22 @@ workerd の test（`pnpm test`）は server の契約を検証しますが、Bro
 **期限切れの presigned URL（同時に修正）:** API が返す画像 URL は 600 秒（共有ページは最大 300 秒）で失効します。timeline は `loading="lazy"` なので、ページを開いたまま 10 分を過ぎてから scroll すると、まだ読み込んでいない thumbnail が `403` で壊れたまま残りました。viewer の preview も同じでした。Client は画像の読み込み失敗時に URL を取り直します。
 
 - timeline / album / 共有ページ: 最初のページの取得から 60 秒以上経っていれば、読み込み済みの範囲を先頭から取り直す（1 分に 1 回まで）
-- viewer: その asset を 1 回だけ取り直す
+- 取り直しても、表示済みの thumbnail の URL は差し替えない（差し替えると全件を再 download する）。ただし読み込みに失敗した thumbnail は表示済みの扱いから外し、新しい URL にする。一度表示できた画像が、後で再取得されて `403` になる場合があるため
+- viewer: 開くたびに asset を取得して preview の URL を得る（[D-022](#d-022-一覧では-thumbnail-の-url-だけを署名する)）。それでも preview が失敗したら 1 回だけ取り直す
 - 経過時間は `performance.now()` で測る。端末の時計のずれに左右されず、object が本当に欠けている場合も再取得は上の頻度で止まる
 - URL の有効期限（security.md §6）と server の契約は変えない。URL を長くする案は、bearer capability を長く生かすことになるため採らない
+
+## D-022: 一覧では thumbnail の URL だけを署名する
+
+**状態:** 採用（API の一覧 response から `previewUrl` を除く）
+
+一覧 API（`GET /api/v1/assets`、`GET /api/v1/albums/{albumId}/assets`）は、item ごとに thumbnail と preview の 2 つの URL を署名していました。60 件の timeline で 120 回です。preview は viewer を開くまで使いません。署名は Worker の CPU を使い、Workers Free の上限は 1 request 10 ms です（[benchmarks.md](benchmarks.md)）。
+
+- 一覧の item は `AssetSummary`（`Asset` から `previewUrl` を除いた schema）とする
+- `previewUrl` は、1 件の asset を返す response（`GET /api/v1/assets/{assetId}`、PATCH、trash / restore、finalize）にだけ含める
+- Web の viewer は開いたときに asset を取得する。取得までは cache 済みの thumbnail を表示する。preview の URL は常に開いた時点のものになり、期限切れの心配がない
+- backup CLI はもともと個別の asset から preview の URL を得ていたので、影響しない
+
+却下した案: 一覧で preview の URL を返したまま、署名を速くする（署名鍵の cache など）。問題は回数そのもので、使わない URL を発行しないほうが単純です。
+
+影響: 一覧 response の `previewUrl` を使う Client は、個別の asset を取得する必要があります。現時点の Client は Web と backup CLI だけで、どちらも対応済みです。

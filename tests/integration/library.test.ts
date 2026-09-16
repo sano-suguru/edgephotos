@@ -66,8 +66,15 @@ describe('timeline', () => {
     const { result } = await uploadPhoto(app)
     const asset = await callJson(app, 'GET', `/api/v1/assets/${result.asset.id}`, { expect: 200 })
     expect(asset.thumbnailUrl).toMatch(/^https:\/\//)
+    expect(asset.previewUrl).toMatch(/^https:\/\//)
     expect(Date.parse(asset.urlsExpireAt) - Date.now()).toBeLessThanOrEqual(600_000)
     expect(JSON.stringify(asset)).not.toContain('originals/')
+
+    // Lists sign only thumbnails; the preview URL comes with the single asset.
+    const page = await callJson(app, 'GET', '/api/v1/assets?limit=200', { expect: 200 })
+    const item = page.items.find((i: { id: string }) => i.id === result.asset.id)
+    expect(item.thumbnailUrl).toMatch(/^https:\/\//)
+    expect(item).not.toHaveProperty('previewUrl')
   })
 
   it('does not show pending uploads', async () => {

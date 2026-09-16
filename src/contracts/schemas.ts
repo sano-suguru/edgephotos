@@ -46,7 +46,8 @@ export const ErrorSchema = z
 
 // ---- Assets ----
 
-export const AssetSchema = z
+// List items carry only the thumbnail URL; the preview URL is signed when one asset is requested.
+export const AssetSummarySchema = z
   .object({
     id: IdSchema,
     sha256: Sha256Schema,
@@ -60,13 +61,14 @@ export const AssetSchema = z
     trashedAt: z.string().nullable(),
     createdAt: z.string(),
     thumbnailUrl: z.url(),
-    previewUrl: z.url(),
     urlsExpireAt: z.string(),
   })
-  .openapi('Asset')
+  .openapi('AssetSummary')
+
+export const AssetSchema = AssetSummarySchema.extend({ previewUrl: z.url() }).openapi('Asset')
 
 export const AssetPageSchema = z
-  .object({ items: z.array(AssetSchema), nextCursor: z.string().nullable() })
+  .object({ items: z.array(AssetSummarySchema), nextCursor: z.string().nullable() })
   .openapi('AssetPage')
 
 export const AssetPatchSchema = z.object({ isFavorite: z.boolean() }).openapi('AssetPatch')
@@ -230,6 +232,7 @@ export const ExportManifestSchema = z
   })
   .openapi('ExportManifest')
 
+export type AssetSummary = z.infer<typeof AssetSummarySchema>
 export type Asset = z.infer<typeof AssetSchema>
 export type AssetPage = z.infer<typeof AssetPageSchema>
 export type UploadReserve = z.input<typeof UploadReserveSchema>

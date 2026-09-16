@@ -1,5 +1,5 @@
 import { and, eq, isNull, or, type SQL, sql } from 'drizzle-orm'
-import type { Asset } from '../../contracts/schemas'
+import type { Asset, AssetSummary } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, albumAssets, assets, uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
@@ -8,11 +8,10 @@ import { assetObjectKeys, objectKey } from '../storage/keys'
 import { OWNER_GET_URL_TTL_SECONDS } from '../storage/signer'
 import type { ServiceContext } from './context'
 
-export async function toAsset(ctx: ServiceContext, row: AssetRow): Promise<Asset> {
-  const [thumbnail, preview] = await Promise.all([
-    ctx.signer.signGet(objectKey(row.id, 'thumbnail'), OWNER_GET_URL_TTL_SECONDS),
-    ctx.signer.signGet(objectKey(row.id, 'preview'), OWNER_GET_URL_TTL_SECONDS),
-  ])
+// List responses sign only the thumbnail: the preview is needed once an asset is opened, and each signature
+// costs Worker CPU (docs/benchmarks.md).
+export async function toAssetSummary(ctx: ServiceContext, row: AssetRow): Promise<AssetSummary> {
+  const thumbnail = await ctx.signer.signGet(objectKey(row.id, 'thumbnail'), OWNER_GET_URL_TTL_SECONDS)
   return {
     id: row.id,
     sha256: row.sha256,
@@ -26,9 +25,16 @@ export async function toAsset(ctx: ServiceContext, row: AssetRow): Promise<Asset
     trashedAt: row.trashed_at,
     createdAt: row.created_at,
     thumbnailUrl: thumbnail.url,
-    previewUrl: preview.url,
     urlsExpireAt: thumbnail.expiresAt.toISOString(),
   }
+}
+
+export async function toAsset(ctx: ServiceContext, row: AssetRow): Promise<Asset> {
+  const [summary, preview] = await Promise.all([
+    toAssetSummary(ctx, row),
+    ctx.signer.signGet(objectKey(row.id, 'preview'), OWNER_GET_URL_TTL_SECONDS),
+  ])
+  return { ...summary, previewUrl: preview.url }
 }
 
 // Timeline ordering key: capture time when known, otherwise upload time.

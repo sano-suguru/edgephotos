@@ -30,9 +30,9 @@ remote-test の往復時間（中央値、東京から）:
 
 | 操作 | 1,000 件 | 10,000 件 | rows_read（10,000 件） |
 | --- | --- | --- | --- |
-| timeline 1 ページ目（60） | 5 ms | 5 ms | 64 |
-| timeline 1 ページ目（200 = 上限） | 14 ms | 15 ms | 212 |
-| timeline 最終ページ（60） | 4 ms | 4 ms | 9,959 → **65**（修正後） |
+| timeline 1 ページ目（60） | 5 → **3** ms | 5 → **4** ms（69 → 45 KiB） | 64 |
+| timeline 1 ページ目（200 = 上限） | 14 → **8** ms | 15 → **9** ms（229 → 149 KiB） | 212 |
+| timeline 最終ページ（60） | 4 → 2 ms | 4 → 3 ms | 9,959 → **65**（修正後） |
 | timeline を 200 件ずつ全件 | 68 ms | 693 ms（48 ページ） | |
 | favorites 1 ページ目（1%） | 1 ms | 6 ms | 6,001 |
 | trash 1 ページ目（5%） | 4 ms | 5 ms | 1,211 |
@@ -44,12 +44,18 @@ remote-test の往復時間（中央値、東京から）:
 | export manifest | 11 ms / 600 KiB | 84 ms / 5.8 MiB | 37,042 |
 | diagnostics | 1 ms | 3 ms | 30,022 |
 
-CPU だけの cost（Node、同じ V8）:
+矢印の左は修正前、右は一覧で thumbnail だけを署名する修正（[D-022](decisions.md)）の後です。
+
+### 署名の cost
+
+CPU だけの cost（Node、同じ V8。warm-up 後の中央値、2 回測定）:
 
 | 処理 | ms |
 | --- | --- |
-| SigV4 の presign 120 回（timeline の 60 件分） | 約 15（初回の warm-up を含む） |
-| SigV4 の presign 400 回（limit=200） | 約 26 |
+| 最初の 1 回（isolate の起動直後） | 16〜41 |
+| SigV4 の presign 60 回（修正後の timeline 1 ページ） | 3.5〜4.2 |
+| SigV4 の presign 120 回（修正前の timeline 1 ページ） | 7.8〜8.3 |
+| SigV4 の presign 400 回（修正前の limit=200） | 約 20 |
 | export の `JSON.stringify`（1,000 / 10,000 件） | 1.1 / 10.6 |
 
 ## Query plan
@@ -113,8 +119,9 @@ production build の bundle（gzip）: app 83 KB、共通 CSS / JS 14 KB、共�
 | --- | --- | --- |
 | timeline の cursor | 本番 D1 の plan が `SCAN`。rows_read が page の深さに比例（10,000 件の最終ページで 9,959 行）。D1 は rows read で課金・制限される | row value の比較に書き換え（index は追加していない）。最終ページは 65 行 |
 | album の存在確認 | 追加・削除・page 取得・共有の作成のたびに member 数を数えていた（5,000 枚の album で 1 回 10,004 行）。restore で 5,000 枚を album に入れると、合計約 2,500 万行になる | 主キーでの存在確認に置き換え（1 行）。件数が必要な album 取得・一覧はそのまま |
-| 期限切れ URL の回復 | 1,020 件表示時に 1,021 枚を再取得していた | 表示済みの thumbnail は URL を差し替えない |
-| backup / restore の再試行 | 10,000 件で約 6 万回の逐次 request。1 回の通信失敗で全体が止まり、restore は空の環境を作り直す必要があった | 冪等な request だけを backoff 付きで最大 4 回試す（D-020 と同じ基準。`412` は保存済み）。`POST /albums` は繰り返さない |
+| 期限切れ URL の回復 | 1,020 件表示時に 1,021 枚を再取得していた | 表示済みの thumbnail は URL を差し替えない。読み込みに失敗した thumbnail だけ新しい URL にする |
+| backup / restore の再試行 | 10,000 件で約 6 万回の逐次 request。1 回の通信失敗で全体が止まり、restore は空の環境を作り直す必要があった | 冪等な request だけを backoff 付きで最大 4 回試す（D-020 と同じ基準。`412` は保存済み）。作成する request（`POST /uploads`、`POST /albums`）は繰り返さない。応答が失われた reservation を繰り返すと、未完了の upload が増えるため |
+| 一覧での preview URL の署名 | timeline 60 件で 120 回署名していた。preview は viewer を開くまで使わない | 一覧では thumbnail だけを署名する（[D-022](decisions.md)）。下の「署名の cost」 |
 
 ### 測って、変更しなかったもの
 
@@ -133,6 +140,8 @@ production build の bundle（gzip）: app 83 KB、共通 CSS / JS 14 KB、共�
 
 ### plan に依存する注意
 
-Workers Free の CPU 上限は 1 request 10 ms です。timeline の 1 ページ（60 件 = 120 URL の署名）は CPU だけで 10 ms 前後、10,000 件の export は `JSON.stringify` だけで約 11 ms かかります。数千件以上を Free で使うと、上限に当たる可能性があります。Workers Paid（既定 30 秒）では問題になりません。どちらの plan で使うかは運用者が決めます。コードは変更していません。
+Workers Free の CPU 上限は 1 request 10 ms です。timeline の 1 ページの署名は、修正前の約 8 ms から約 4 ms になりました。ただし isolate の起動直後の最初の署名は、それだけで 16〜41 ms かかります。10,000 件の export は `JSON.stringify` だけで約 11 ms です。Node での測定なので、本番の CPU 時間と同じではありません。ただし Free の 10 ms に収まる根拠にもなりません。
+
+継続して使う場合は Workers Paid（月 $5 から、CPU 上限は既定 30 秒）を推奨します（[operations.md](operations.md) §1）。Free でしか使えないことが要件になった場合は、export を分割するなどの対応を、そのとき測って決めます。
 
 D1 の rows read も plan で上限が違います（Free は 1 日 500 万行）。修正後、timeline を 1 ページ読む cost は page の深さによらず約 60 行です。album 一覧と album の page は、album の大きさに比例します。

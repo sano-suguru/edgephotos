@@ -29,8 +29,8 @@ test('uploads a photo with browser-made derivatives and rejects HEIC', async ({ 
   await tile(page, name).click()
   const viewer = page.getByRole('dialog', { name })
   await expect(viewer).toContainText('3000×2000')
-  await expectImageLoaded(viewer.locator('img'))
-  expect(await naturalSize(viewer.locator('img'))).toEqual({ width: 2048, height: 1365 })
+  // The cached thumbnail shows first; the preview replaces it once its URL is fetched.
+  await expect.poll(() => naturalSize(viewer.locator('img'))).toEqual({ width: 2048, height: 1365 })
 
   await page.reload()
   await expectImageLoaded(tile(page, name).locator('img'))
@@ -84,11 +84,22 @@ test('recovers after the presigned image URLs expire', async ({ page }) => {
   await expectImageLoaded(tile(page, name).locator('img'))
   expect(stale.has((await tile(page, name).locator('img').getAttribute('src')) ?? '')).toBe(false)
 
-  // Leave the loaded page open past expiry once more; the viewer's preview URL is now stale.
+  // Past expiry once more. A thumbnail that was already shown fails later (e.g. the browser dropped the
+  // decoded image and refetched its old URL): it alone must get a fresh URL.
+  stale = new Set(issued)
+  await page.clock.fastForward('11:00')
+  const shownThumbnail = tile(page, name).locator('img')
+  const before = await shownThumbnail.getAttribute('src')
+  await shownThumbnail.evaluate((img) => img.dispatchEvent(new Event('error')))
+  await expect.poll(() => shownThumbnail.getAttribute('src')).not.toBe(before)
+  await expectImageLoaded(shownThumbnail)
+  expect(stale.has((await shownThumbnail.getAttribute('src')) ?? '')).toBe(false)
+
+  // The viewer signs its preview URL when it opens, so it is fresh even after the page sat idle.
   stale = new Set(issued)
   await page.clock.fastForward('11:00')
   await tile(page, name).click()
   const viewer = page.getByRole('dialog', { name })
-  await expectImageLoaded(viewer.locator('img'))
+  await expect.poll(() => naturalSize(viewer.locator('img'))).toEqual({ width: 800, height: 600 })
   expect(stale.has((await viewer.locator('img').getAttribute('src')) ?? '')).toBe(false)
 })
