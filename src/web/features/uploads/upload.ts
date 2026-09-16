@@ -1,19 +1,19 @@
 import { computed, signal } from '@preact/signals'
 import type { UploadReservation } from '../../../contracts/schemas'
 import { ApiRequestError, api } from '../../lib/api/client'
-import { preparePhoto, UnsupportedFileError } from '../../lib/image'
+import { isHeic, preparePhoto, UnsupportedFileError } from '../../lib/image'
+import { putOutcome } from '../../lib/storage-put'
+import { isActiveUpload, mergeUploadList, type UploadState } from './upload-list'
 
 export type UploadItem = {
   id: string
   name: string
-  state: 'queued' | 'preparing' | 'uploading' | 'finalizing' | 'done' | 'duplicate' | 'error'
+  state: UploadState
   message?: string
 }
 
 export const uploads = signal<UploadItem[]>([])
-export const activeUploads = computed(
-  () => uploads.value.filter((u) => !['done', 'duplicate', 'error'].includes(u.state)).length,
-)
+export const activeUploads = computed(() => uploads.value.filter(isActiveUpload).length)
 // Incremented whenever an asset becomes ready so views can refetch.
 export const libraryVersion = signal(0)
 
@@ -21,10 +21,25 @@ function update(id: string, patch: Partial<UploadItem>) {
   uploads.value = uploads.value.map((u) => (u.id === id ? { ...u, ...patch } : u))
 }
 
+const PUT_ATTEMPTS = 4
+
 async function put(target: UploadReservation['targets']['original'], body: Blob) {
-  // Direct to storage with only the signed headers. Never send cookies or Access credentials.
-  const res = await fetch(target.url, { method: 'PUT', headers: target.headers, body, credentials: 'omit' })
-  if (!res.ok) throw new Error(`Storage upload failed (${res.status})`)
+  for (let attempt = 1; ; attempt++) {
+    let status: number | 'network'
+    try {
+      // Direct to storage with only the signed headers. Never send cookies or Access credentials.
+      const res = await fetch(target.url, { method: 'PUT', headers: target.headers, body, credentials: 'omit' })
+      status = res.status
+    } catch {
+      status = 'network'
+    }
+    const outcome = putOutcome(status)
+    if (outcome === 'stored') return
+    if (outcome === 'fail' || attempt === PUT_ATTEMPTS) {
+      throw new Error(status === 'network' ? 'Storage upload failed (network)' : `Storage upload failed (${status})`)
+    }
+    await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)))
+  }
 }
 
 async function uploadOne(item: UploadItem, file: File) {
@@ -80,7 +95,9 @@ async function uploadOne(item: UploadItem, file: File) {
   } catch (err) {
     const message =
       err instanceof UnsupportedFileError
-        ? '対応していない形式です'
+        ? isHeic(file)
+          ? 'HEIC は未対応です（JPEG で書き出してから選んでください）'
+          : '対応していない形式です'
         : err instanceof ApiRequestError
           ? err.code
           : err instanceof Error
@@ -92,9 +109,10 @@ async function uploadOne(item: UploadItem, file: File) {
 
 export async function enqueueFiles(files: FileList | File[]) {
   const list = [...files]
-  const items = list.map((f) => ({ id: crypto.randomUUID(), name: f.name, state: 'queued' as const }))
-  uploads.value = [...items, ...uploads.value].slice(0, 200)
-  // Small concurrency keeps memory bounded while decoding large images.
+  const items: UploadItem[] = list.map((f) => ({ id: crypto.randomUUID(), name: f.name, state: 'queued' }))
+  uploads.value = mergeUploadList(uploads.value, items, 200)
+  // Peak memory is dominated by decoded bitmaps (width x height x 4); each extra worker adds one on Chromium.
+  // 2 was measured as the trade-off (docs/decisions.md D-020).
   const queue = list.map((file, i) => ({ file, item: items[i] }))
   const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
     for (let next = queue.shift(); next; next = queue.shift()) {
