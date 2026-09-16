@@ -7,7 +7,8 @@
 > - remote-test 環境: D1・R2 の作成、remote D1 migration、`CLOUDFLARE_ENV=remote-test` での build と deploy、未設定 Worker が private / share API を `503` で拒否すること、共有ページの header / CSP、`/share/assets/*` の配信を確認済み。
 > - Access 境界: private path（`/`、`/api/v1/*`）が Access login へ 302、`/share`・`/share/{shareId}`・`/share/api/v1/*`・`/share/assets/*` が Access を通過して Worker に到達することを確認済み。
 > - secret 運用: 7 件を Worker secret 化し、`secrets.required` 未充足時に deploy が不足名を挙げて失敗すること、充足後に fail-closed が解けて share API が `503` から `404 SHARE_UNAVAILABLE` になることを確認済み。
-> - R2 CORS: bucket 限定の rule を適用し、読み戻しを確認済み。
+> - R2 CORS: bucket 限定の rule を適用し、読み戻しを確認済み。ただしこの確認は `x-amz-checksum-sha256` を AllowedHeaders に加える前（[D-018](decisions.md) 以前）の rule です。
+> - **未検証（D-018）:** original の checksum 付き presigned PUT を実 R2 で踏んでいません。正しい bytes で `200`、digest が違う bytes で `400` になり object が作られないこと、S3 API で PUT した object の `checksums.sha256` が binding の `head()` から読めることを remote-test で確認するまで、この変更を本番へ deploy しないでください。finalize は checksum の記録がなければ fail-closed で拒否するため、読めなかった場合は全 upload が `422 checksum_missing` になります。
 > - upload 経路: owner が Access login を通したうえで、private API の成功応答、`reserve -> PUT -> finalize` が remote-test で通ることを確認済み。PUT の宛先が `*.r2.cloudflarestorage.com` であること（Worker が本体を中継しないこと）を DevTools で確認。`ACCESS_AUD` と `ACCESS_TEAM_DOMAIN` の正しさもこれで確定。
 > - duplicate handling と完全削除: 同一 original の再 upload が `409 DUPLICATE_ASSET` になること、完全削除後は同じ original を再登録できることを確認済み。
 > - share 経路: album 作成 -> asset 追加 -> share 発行 -> 正しい secret で `200` -> revoke -> 同じ secret で `404` までを確認済み。secret 不正・secret 無しはいずれも `404`。`url` は `/share/{id}#{secret}` の形。share から `original` を要求すると `400`（variant は `thumbnail` / `preview` のみ）。derivative は `*.r2.cloudflarestorage.com` から直接取得。
@@ -117,7 +118,7 @@ Custom domain は v1 の必須条件ではありません。custom domain を追
 
 Browser は presigned URL に対して次を送ります。
 
-- `PUT`（upload）: `Content-Type` と `If-None-Match` header 付き（[D-013](decisions.md)）
+- `PUT`（upload）: `Content-Type` と `If-None-Match` header 付き（[D-013](decisions.md)）。original はさらに `x-amz-checksum-sha256` 付き（[D-018](decisions.md)）
 - `GET`（`<img>` による表示、original の取得）
 
 wrangler の `--file` は Dashboard 表示とは別形式です。`rules` 配列でくるみ、フィールドは camelCase にします。PascalCase の配列を渡すと `must contain a 'rules' array` で失敗します。
@@ -129,7 +130,7 @@ wrangler の `--file` は Dashboard 表示とは別形式です。`rules` 配列
       "allowed": {
         "origins": ["https://photos.example.com"],
         "methods": ["GET", "PUT"],
-        "headers": ["content-type", "if-none-match"]
+        "headers": ["content-type", "if-none-match", "x-amz-checksum-sha256"]
       },
       "maxAgeSeconds": 600
     }
@@ -144,7 +145,9 @@ pnpm wrangler r2 bucket cors list edgephotos-remote-test
 
 `*` は使いません。
 
-`exposeHeaders` は設定しません。`If-None-Match: *` は署名に含める request header であり（[D-013](decisions.md)）、client は PUT 応答の `ETag` を読みません。client が応答 header を読む必要が生じた時点で追加します。
+`exposeHeaders` は設定しません。`If-None-Match: *` と `x-amz-checksum-sha256` は署名に含める request header であり（[D-013](decisions.md)、[D-018](decisions.md)）、client は PUT 応答の `ETag` や checksum を読みません。
+
+D-018 より前に CORS を設定した bucket は、`x-amz-checksum-sha256` を追加して `cors set` し直してください。追加しないと Browser の preflight で original の PUT が失敗します（CLI の `pnpm backup restore` は CORS の影響を受けません）。client が応答 header を読む必要が生じた時点で追加します。
 
 ## 7. Setup verification
 

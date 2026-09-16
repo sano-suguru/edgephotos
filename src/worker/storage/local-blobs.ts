@@ -1,14 +1,15 @@
 import { Hono } from 'hono'
 import { base64UrlDecode, base64UrlEncode, timingSafeEqualString } from '../lib/crypto'
-import type { BlobSigner } from './signer'
+import { type BlobSigner, putHeaders } from './signer'
 
 // Local-development stand-in for R2 presigned URLs. Miniflare's R2 binding has no S3 endpoint,
 // so the dev Worker serves HMAC-signed, single-key, short-lived URLs itself.
 // Only wired up when import.meta.env.DEV is true (and in tests); production builds use R2 SigV4.
+// Like R2, a PUT signed with a SHA-256 is rejected unless the body has exactly that digest.
 
 export const LOCAL_BLOB_PREFIX = '/__local/blobs'
 
-type Claims = { m: 'GET' | 'PUT'; k: string; e: number; t?: string }
+type Claims = { m: 'GET' | 'PUT'; k: string; e: number; t?: string; s?: string }
 
 async function hmac(secret: string, data: string): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -29,10 +30,10 @@ export function createLocalSigner(origin: string, secret: string, now: () => Dat
     return `${origin}${LOCAL_BLOB_PREFIX}/${payload}.${sig}`
   }
   return {
-    async signPut(key, contentType, ttl) {
+    async signPut(key, contentType, ttl, sha256) {
       const expiresAt = new Date(now().getTime() + ttl * 1000)
-      const url = await sign({ m: 'PUT', k: key, e: expiresAt.getTime(), t: contentType })
-      return { url, headers: { 'content-type': contentType, 'if-none-match': '*' }, expiresAt }
+      const url = await sign({ m: 'PUT', k: key, e: expiresAt.getTime(), t: contentType, s: sha256 })
+      return { url, headers: putHeaders(contentType, sha256), expiresAt }
     },
     async signGet(key, ttl) {
       const expiresAt = new Date(now().getTime() + ttl * 1000)
@@ -69,11 +70,23 @@ export function localBlobRoutes(bucket: R2Bucket, secret: string, now: () => Dat
     if (!claims) return c.text('Forbidden', 403)
     if (c.req.header('content-type') !== claims.t) return c.text('Forbidden', 403)
     if (c.req.header('if-none-match') !== '*') return c.text('Forbidden', 403)
+    // Stands in for SigV4: the checksum header is signed, so it must be exactly as issued.
+    if (c.req.header('x-amz-checksum-sha256') !== putHeaders(claims.t ?? '', claims.s)['x-amz-checksum-sha256']) {
+      return c.text('Forbidden', 403)
+    }
     const body = await c.req.arrayBuffer()
-    const stored = await bucket.put(claims.k, body, {
-      httpMetadata: { contentType: claims.t },
-      onlyIf: new Headers({ 'if-none-match': '*' }),
-    })
+    let stored: R2Object | null
+    try {
+      stored = await bucket.put(claims.k, body, {
+        httpMetadata: { contentType: claims.t },
+        onlyIf: new Headers({ 'if-none-match': '*' }),
+        ...(claims.s ? { sha256: claims.s } : {}),
+      })
+    } catch (err) {
+      // R2 answers a digest mismatch with 400 BadDigest and stores nothing.
+      if (claims.s && err instanceof Error && /checksum/i.test(err.message)) return c.text('Bad Digest', 400)
+      throw err
+    }
     // R2 returns null when the precondition fails (object already exists).
     if (!stored) return c.text('Precondition Failed', 412)
     return c.body(null, 200)

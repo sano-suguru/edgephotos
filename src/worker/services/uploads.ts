@@ -4,6 +4,7 @@ import type { UploadReserveSchema } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
+import { toHex } from '../lib/crypto'
 import { INSPECT_HEAD_BYTES, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
 import { assetObjectKeys } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
@@ -49,7 +50,7 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
 
   const keys = assetObjectKeys(assetId)
   const [original, thumbnail, preview] = await Promise.all([
-    ctx.signer.signPut(keys.original, input.original.contentType, UPLOAD_URL_TTL_SECONDS),
+    ctx.signer.signPut(keys.original, input.original.contentType, UPLOAD_URL_TTL_SECONDS, input.original.sha256),
     ctx.signer.signPut(keys.thumbnail, 'image/jpeg', UPLOAD_URL_TTL_SECONDS),
     ctx.signer.signPut(keys.preview, 'image/jpeg', UPLOAD_URL_TTL_SECONDS),
   ])
@@ -93,6 +94,11 @@ async function verifyObjects(ctx: ServiceContext, upload: UploadRow) {
   }
 
   const problems: ObjectProblem[] = []
+  // R2 verified the body against the signed x-amz-checksum-sha256 and recorded the digest. Requiring it
+  // here fails closed for any original that reached the key without that check.
+  const storedSha256 = original?.checksums.sha256
+  if (!storedSha256) problems.push({ object: 'original', problem: 'checksum_missing' })
+  else if (toHex(storedSha256) !== upload.sha256) problems.push({ object: 'original', problem: 'checksum_mismatch' })
   if (original?.size !== upload.original_size) problems.push({ object: 'original', problem: 'size_mismatch' })
   if (thumbnail?.size !== upload.thumbnail_size) problems.push({ object: 'thumbnail', problem: 'size_mismatch' })
   if (preview?.size !== upload.preview_size) problems.push({ object: 'preview', problem: 'size_mismatch' })

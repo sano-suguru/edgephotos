@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
+import { toHex } from '../../src/worker/lib/crypto'
+import { hexToBase64 } from '../../src/worker/storage/signer'
 import {
   assetIdFromTarget,
   call,
@@ -11,6 +13,7 @@ import {
   sha256,
   syntheticJpeg,
   syntheticPng,
+  syntheticWebp,
   uploadPhoto,
 } from '../helpers'
 
@@ -47,7 +50,13 @@ describe('upload reservation', () => {
       expect(k).not.toMatch(/IMG|owner|example|2024|@/)
     }
     expect(r.targets.original.method).toBe('PUT')
-    expect(r.targets.original.headers).toEqual({ 'content-type': 'image/jpeg', 'if-none-match': '*' })
+    // The declared digest travels as a signed S3 checksum header (base64 of the raw bytes).
+    expect(r.targets.original.headers).toEqual({
+      'content-type': 'image/jpeg',
+      'if-none-match': '*',
+      'x-amz-checksum-sha256': hexToBase64(p.sha256),
+    })
+    expect(r.targets.thumbnail.headers).toEqual({ 'content-type': 'image/jpeg', 'if-none-match': '*' })
     expect(await assetCount(p.sha256)).toBe(0)
   })
 
@@ -130,11 +139,13 @@ describe('upload finalize', () => {
     const app = await makeApp()
     const p = await photo()
     const r = await reserve(app, p)
-    await putObject(app, r.targets.original, syntheticJpeg({ padding: 5 }))
-    await putObject(app, r.targets.thumbnail, p.thumbnail)
+    await putObject(app, r.targets.original, p.original)
+    await putObject(app, r.targets.thumbnail, syntheticJpeg({ padding: 5 }))
     await putObject(app, r.targets.preview, p.preview)
     const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
     expect(res.status).toBe(422)
+    const body = (await res.json()) as { error: { details: { problems: { object: string; problem: string }[] } } }
+    expect(body.error.details.problems).toContainEqual({ object: 'thumbnail', problem: 'size_mismatch' })
     expect(await assetCount(p.sha256)).toBe(0)
   })
 
@@ -149,13 +160,21 @@ describe('upload finalize', () => {
     expect(body.error.details.problems).toContainEqual({ object: 'original', problem: 'content_type_mismatch' })
   })
 
-  it('accepts PNG originals', async () => {
+  it.each([
+    ['image/jpeg', () => syntheticJpeg({ exif: true })],
+    ['image/png', () => syntheticPng()],
+    ['image/webp', () => syntheticWebp()],
+  ] as const)('accepts %s originals with a verified checksum', async (contentType, make) => {
     const app = await makeApp()
-    const p = await photo({ original: syntheticPng() })
-    const r = await reserve(app, p, {}, 'image/png')
-    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
+    const p = await photo({ original: make() })
+    const r = await reserve(app, p, {}, contentType)
+    for (const v of ['original', 'thumbnail', 'preview'] as const) {
+      expect((await putObject(app, r.targets[v], p[v])).status).toBe(200)
+    }
     const res = await callJson(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
-    expect(res.asset.contentType).toBe('image/png')
+    expect(res.asset.contentType).toBe(contentType)
+    const stored = await env.BUCKET.head(`originals/${res.asset.id}`)
+    expect(toHex(stored!.checksums.sha256!)).toBe(p.sha256)
   })
 
   it('rejects derivatives that carry EXIF/GPS metadata', async () => {
@@ -318,10 +337,84 @@ describe('upload finalize', () => {
     const r = await reserve(app, p)
     for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
     await callJson(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
+    expect((await putObject(app, r.targets.original, p.original)).status).toBe(412)
+    // Different bytes fail on the checksum or the precondition; either way nothing is replaced.
     const overwrite = await putObject(app, r.targets.original, syntheticJpeg({ padding: 128 }))
-    expect(overwrite.status).toBe(412)
+    expect([400, 412]).toContain(overwrite.status)
     const stored = await env.BUCKET.get(assetIdFromTarget(r.targets.original.url))
     expect(await sha256(new Uint8Array(await stored!.arrayBuffer()))).toBe(p.sha256)
+  })
+
+  it('never stores an original whose bytes differ from the declared SHA-256, and stays retryable', async () => {
+    const app = await makeApp()
+    const p = await photo()
+    const r = await reserve(app, p)
+    // Same size and still a JPEG, one byte changed: only the digest can tell.
+    const tampered = p.original.slice()
+    tampered[tampered.length - 3] ^= 0x01
+    const rejected = await putObject(app, r.targets.original, tampered)
+    expect(rejected.status).toBe(400)
+    const originalKey = assetIdFromTarget(r.targets.original.url)
+    expect(await env.BUCKET.head(originalKey)).toBeNull()
+    await putObject(app, r.targets.thumbnail, p.thumbnail)
+    await putObject(app, r.targets.preview, p.preview)
+
+    const missing = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
+    expect(missing.status).toBe(409)
+    const body = (await missing.json()) as { error: { code: string; details: { missing: string[] } } }
+    expect(body.error.code).toBe('UPLOAD_OBJECT_MISSING')
+    expect(body.error.details.missing).toEqual(['original'])
+    expect(await uploadStatus(r.upload.id)).toBe('pending')
+    expect(await assetCount(p.sha256)).toBe(0)
+
+    // The same URL still accepts the declared bytes.
+    expect((await putObject(app, r.targets.original, p.original)).status).toBe(200)
+    const ok = await callJson(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
+    expect(ok.result).toBe('created')
+    const stored = await env.BUCKET.get(originalKey)
+    expect(await sha256(new Uint8Array(await stored!.arrayBuffer()))).toBe(p.sha256)
+  })
+
+  it('rejects a PUT whose checksum header was dropped or altered', async () => {
+    const app = await makeApp()
+    const p = await photo()
+    const r = await reserve(app, p)
+    const { 'x-amz-checksum-sha256': _, ...withoutChecksum } = r.targets.original.headers
+    const other = await sha256(syntheticJpeg({ padding: 7 }))
+    for (const headers of [withoutChecksum, { ...withoutChecksum, 'x-amz-checksum-sha256': hexToBase64(other) }]) {
+      const res = await app.request(r.targets.original.url, {
+        method: 'PUT',
+        headers,
+        body: p.original as Uint8Array<ArrayBuffer>,
+      })
+      expect(res.status).toBe(403)
+    }
+    expect(await env.BUCKET.head(assetIdFromTarget(r.targets.original.url))).toBeNull()
+  })
+
+  it.each([
+    ['checksum_missing', undefined],
+    ['checksum_mismatch', 'other'],
+  ] as const)('fails closed with %s when R2 does not vouch for the declared digest', async (problem, recorded) => {
+    const app = await makeApp()
+    const p = await photo()
+    const r = await reserve(app, p)
+    // Simulates an original that reached the key without the signed checksum check.
+    const other = syntheticJpeg({ exif: true, padding: 128 })
+    expect(other.byteLength).toBe(p.original.byteLength)
+    const bytes = recorded ? other : p.original
+    await env.BUCKET.put(assetIdFromTarget(r.targets.original.url), bytes, {
+      ...(recorded ? { sha256: await sha256(other) } : {}),
+    })
+    await putObject(app, r.targets.thumbnail, p.thumbnail)
+    await putObject(app, r.targets.preview, p.preview)
+
+    const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
+    expect(res.status).toBe(422)
+    const body = (await res.json()) as { error: { details: { problems: { object: string; problem: string }[] } } }
+    expect(body.error.details.problems).toContainEqual({ object: 'original', problem })
+    expect(await uploadStatus(r.upload.id)).toBe('pending')
+    expect(await assetCount(p.sha256)).toBe(0)
   })
 
   it('returns 404 for unknown uploads', async () => {

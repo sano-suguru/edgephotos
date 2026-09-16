@@ -171,6 +171,11 @@ export function syntheticPng(seed = ++counter): Uint8Array {
   return concat(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), new Uint8Array(40).fill(seed & 0xff))
 }
 
+export function syntheticWebp(seed = ++counter): Uint8Array {
+  const riff = new TextEncoder().encode('RIFF\u0000\u0000\u0000\u0000WEBPVP8 ')
+  return concat(riff, new Uint8Array(40).fill(seed & 0xff))
+}
+
 export async function sha256(bytes: Uint8Array): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('')

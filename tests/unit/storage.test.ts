@@ -4,7 +4,7 @@ import { checkWriteOrigin } from '../../src/worker/http/security'
 import { decodeCursor, encodeCursor, sortAtFor } from '../../src/worker/services/assets'
 import { scanJpegForMetadata, sniffImageType } from '../../src/worker/storage/inspect'
 import { objectKey } from '../../src/worker/storage/keys'
-import { createR2Signer, readR2SignerConfig } from '../../src/worker/storage/signer'
+import { createR2Signer, hexToBase64, readR2SignerConfig } from '../../src/worker/storage/signer'
 import { syntheticJpeg, syntheticPng } from '../helpers'
 
 const ACCOUNT = '0123456789abcdef0123456789abcdef'
@@ -79,6 +79,18 @@ describe('R2 presigner', () => {
     expect(put.url).not.toContain('test-secret-not-real')
     expect(put.headers).toEqual({ 'content-type': 'image/jpeg', 'if-none-match': '*' })
     expect(put.expiresAt.toISOString()).toBe('2026-01-01T00:10:00.000Z')
+  })
+
+  it('binds a declared SHA-256 to the PUT as a signed S3 checksum header', async () => {
+    const signer = createR2Signer(config!)
+    const empty = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    const put = await signer.signPut('originals/x', 'image/png', 600, empty)
+    const url = new URL(put.url)
+    expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('content-type;host;if-none-match;x-amz-checksum-sha256')
+    // Stays a request header: R2 must see it on the PUT itself, not only in the query.
+    expect(url.searchParams.has('x-amz-checksum-sha256')).toBe(false)
+    expect(put.headers['x-amz-checksum-sha256']).toBe('47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=')
+    expect(() => hexToBase64('xyz')).toThrow()
   })
 
   it('signs GET without extra headers', async () => {
