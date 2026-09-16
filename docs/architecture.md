@@ -214,7 +214,7 @@ digest 不一致の PUT は R2 が `400` で拒否します。original が存在
 - 元 byte 列をそのまま保持
 - 再エンコードしない
 - EXIF / GPS を改変しない
-- SHA-256 を metadata として保持（R2 が upload 時に検証した値。[D-018](decisions.md)）
+- SHA-256 を metadata として保持（D-018 以降に finalize された asset では R2 が upload 時に検証した値。それより前の asset は申告値で、`pnpm backup verify` で照合する。[D-018](decisions.md)）
 - owner のみ取得可能
 - share では配信しない
 
