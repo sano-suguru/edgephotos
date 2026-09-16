@@ -194,8 +194,8 @@ Migration:
 D-012 では `assets.sha256` は client の申告値で、R2 上の byte 列と一致する保証がありませんでした。重複判定・backup・restore はこの値を content identity として使うため、storage 側で一致を保証します。
 
 - reserve は original の presigned PUT に `x-amz-checksum-sha256: base64(申告 SHA-256 の raw digest)` を署名 header として含める（SigV4 の `X-Amz-SignedHeaders` に入る）。Client が header を省略・変更すると署名が合わない
-- R2 は PUT body の SHA-256 がこの値と一致しなければ PUT を拒否し、object を作らない（S3 PutObject の checksum。R2 は 2023-06-16 の release note で S3 PutObject の sha256 checksum に対応）
-- finalize は R2 binding の `head()` が返す `checksums.sha256` を申告値と比較する。R2 は put 時に指定された checksum を object に記録する。記録がない・値が違う original は `422 UPLOAD_OBJECT_INVALID`（`checksum_missing` / `checksum_mismatch`）とし、`ready` にしない。何らかの経路で checksum 検証を経ずに置かれた object に対しても fail-closed になる
+- R2 は PUT body の SHA-256 がこの値と一致しなければ PUT を `400 BadDigest` で拒否し、object を作らない（S3 PutObject の checksum。R2 は 2023-06-16 の release note で S3 PutObject の sha256 checksum に対応。remote-test で実測済み。operations.md 冒頭）
+- finalize は R2 binding の `head()` が返す `checksums.sha256` を申告値と比較する。R2 は put 時に指定された checksum を object に記録し、S3 API で PUT した object でも binding から読める（remote-test で実測済み）。記録がない・値が違う original は `422 UPLOAD_OBJECT_INVALID`（`checksum_missing` / `checksum_mismatch`）とし、`ready` にしない。何らかの経路で checksum 検証を経ずに置かれた object に対しても fail-closed になる
 - Worker は original を download も hash もしない。確認は HEAD 1 回で済む
 - thumbnail / preview は再生成可能な derivative で、content identity に使わないため checksum を付けない
 
