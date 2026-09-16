@@ -181,6 +181,7 @@ Migration:
   - SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
   - `uploads.asset_id` の UNIQUE は SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
 - この差が原因で生成 SQL が誤っていれば、CI で検出される。test の setup は本番と同じく空の D1 へ `0001` から順に全 migration を適用し、そのあと drift test が `schema.ts` と比較する。つまり生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通る
+  - この rehearsal が保証するのは DDL として適用できることだけ。table は空なので、既存データの保存（table 作り直し時の列の対応、値の変換、NOT NULL や CHECK の強化）は検証しない。データを変換する migration を初めて書くときは、その migration 用の fixture を追加する
   - 確認済みの例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗する。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通る
 - production DB の再作成は不要
 
