@@ -6,7 +6,7 @@ import { ApiError } from '../http/errors'
 import { randomBase64Url, sha256Hex, timingSafeEqualString } from '../lib/crypto'
 import { objectKey } from '../storage/keys'
 import { SHARE_GET_URL_TTL_SECONDS } from '../storage/signer'
-import { getAlbum } from './albums'
+import { requireAlbumId } from './albums'
 import { listAssets } from './assets'
 import type { ServiceContext } from './context'
 
@@ -43,7 +43,7 @@ async function insertShare(ctx: ServiceContext, albumId: string, expiresAt: Date
 }
 
 export async function listShares(ctx: ServiceContext, albumId: string): Promise<Share[]> {
-  await getAlbum(ctx.db, albumId)
+  await requireAlbumId(ctx.db, albumId)
   const results = await ctx.db
     .select()
     .from(shares)
@@ -54,7 +54,7 @@ export async function listShares(ctx: ServiceContext, albumId: string): Promise<
 }
 
 export async function createShare(ctx: ServiceContext, appOrigin: string, albumId: string, expiresInDays: number) {
-  await getAlbum(ctx.db, albumId)
+  await requireAlbumId(ctx.db, albumId)
   const expiresAt = new Date(ctx.now().getTime() + expiresInDays * 86_400_000)
   const { row, secret, stmt } = await insertShare(ctx, albumId, expiresAt)
   await stmt.run()
@@ -91,7 +91,7 @@ function revokeStatement(db: Db, shareId: string, ts: string) {
 // Revokes the old link and issues a new one for the same album with the same expiry.
 export async function regenerateShare(ctx: ServiceContext, appOrigin: string, shareId: string) {
   const old = await requireShareRow(ctx.db, shareId)
-  await getAlbum(ctx.db, old.album_id)
+  await requireAlbumId(ctx.db, old.album_id)
   const now = ctx.now()
   const expiresAt = new Date(old.expires_at)
   if (expiresAt.getTime() <= now.getTime()) {

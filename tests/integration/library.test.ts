@@ -31,6 +31,31 @@ describe('timeline', () => {
     expect(new Set(seen).size).toBe(seen.length)
   })
 
+  it('pages through assets that share a capture time without skipping or repeating any', async () => {
+    const app = await makeApp()
+    const takenAt = '1999-12-31T23:59:59Z'
+    const ids: string[] = []
+    for (let i = 0; i < 5; i++) ids.push((await uploadPhoto(app, undefined, { takenAt })).result.asset.id)
+
+    const seen: string[] = []
+    let cursor: string | null = null
+    do {
+      const qs: string = cursor ? `&cursor=${cursor}` : ''
+      const page: { items: { id: string }[]; nextCursor: string | null } = await callJson(
+        app,
+        'GET',
+        `/api/v1/assets?limit=2${qs}`,
+        { expect: 200 },
+      )
+      seen.push(...page.items.map((i) => i.id))
+      cursor = page.nextCursor
+    } while (cursor)
+
+    // Same sort key: ties are broken by id, descending.
+    expect(seen.filter((id) => ids.includes(id))).toEqual([...ids].sort().reverse())
+    expect(new Set(seen).size).toBe(seen.length)
+  })
+
   it('rejects a tampered cursor', async () => {
     const res = await call(await makeApp(), 'GET', '/api/v1/assets?cursor=%%%')
     expect(res.status).toBe(400)
@@ -41,8 +66,15 @@ describe('timeline', () => {
     const { result } = await uploadPhoto(app)
     const asset = await callJson(app, 'GET', `/api/v1/assets/${result.asset.id}`, { expect: 200 })
     expect(asset.thumbnailUrl).toMatch(/^https:\/\//)
+    expect(asset.previewUrl).toMatch(/^https:\/\//)
     expect(Date.parse(asset.urlsExpireAt) - Date.now()).toBeLessThanOrEqual(600_000)
     expect(JSON.stringify(asset)).not.toContain('originals/')
+
+    // Lists sign only thumbnails; the preview URL comes with the single asset.
+    const page = await callJson(app, 'GET', '/api/v1/assets?limit=200', { expect: 200 })
+    const item = page.items.find((i: { id: string }) => i.id === result.asset.id)
+    expect(item.thumbnailUrl).toMatch(/^https:\/\//)
+    expect(item).not.toHaveProperty('previewUrl')
   })
 
   it('does not show pending uploads', async () => {

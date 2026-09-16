@@ -11,6 +11,8 @@ export type ApiClient = {
   api: Fetch
   // Fetches presigned URLs. Must NOT attach EdgePhotos / Access credentials.
   blob: Fetch
+  // Wait before retry `attempt` (1-based). Defaults to 1 s, 2 s, 4 s.
+  retryDelayMs?: (attempt: number) => number
 }
 
 export interface BlobStore {
@@ -25,10 +27,32 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-async function apiJson<T>(client: ApiClient, path: string, init?: RequestInit): Promise<T> {
+const ATTEMPTS = 4
+const transient = (status: number) => status === 408 || status === 429 || status >= 500
+
+// A backup or restore of a large library is tens of thousands of sequential requests, so one network
+// blip must not abort it. Same policy as the Web client (docs/decisions.md D-020). Only for requests that
+// are safe to repeat.
+async function withRetry(client: ApiClient, send: () => Promise<Response>): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    let res: Response | undefined
+    try {
+      res = await send()
+    } catch (err) {
+      if (attempt === ATTEMPTS) throw err
+    }
+    if (res && (!transient(res.status) || attempt === ATTEMPTS)) return res
+    await res?.body?.cancel()
+    await new Promise((r) => setTimeout(r, client.retryDelayMs?.(attempt) ?? 1000 * 2 ** (attempt - 1)))
+  }
+}
+
+// `once`: the request creates something new each time (POST /uploads, POST /albums), so it is never repeated.
+async function apiJson<T>(client: ApiClient, path: string, init?: RequestInit & { once?: boolean }): Promise<T> {
   const headers = new Headers(init?.headers)
   if (init?.body) headers.set('content-type', 'application/json')
-  const res = await client.api(path, { ...init, headers })
+  const send = () => client.api(path, { ...init, headers })
+  const res = init?.once ? await send() : await withRetry(client, send)
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null
     throw new BackupError(`${init?.method ?? 'GET'} ${path} failed: ${res.status} ${body?.error?.code ?? ''}`.trim())
@@ -37,7 +61,7 @@ async function apiJson<T>(client: ApiClient, path: string, init?: RequestInit): 
 }
 
 async function download(client: ApiClient, url: string): Promise<Uint8Array> {
-  const res = await client.blob(url)
+  const res = await withRetry(client, () => client.blob(url))
   if (!res.ok) throw new BackupError(`object download failed: ${res.status}`)
   return new Uint8Array(await res.arrayBuffer())
 }
@@ -79,11 +103,11 @@ async function requireBytes(store: BlobStore, path: string): Promise<Uint8Array>
 }
 
 async function putTarget(client: ApiClient, target: UploadReservation['targets']['original'], bytes: Uint8Array) {
-  const res = await client.blob(target.url, {
-    method: 'PUT',
-    headers: target.headers,
-    body: bytes as Uint8Array<ArrayBuffer>,
-  })
+  const res = await withRetry(client, () =>
+    client.blob(target.url, { method: 'PUT', headers: target.headers, body: bytes as Uint8Array<ArrayBuffer> }),
+  )
+  // 412: an earlier attempt stored the object and only the response was lost (If-None-Match: *).
+  if (res.status === 412) return
   if (!res.ok) throw new BackupError(`object upload failed: ${res.status}`)
 }
 
@@ -105,8 +129,10 @@ export async function restoreLibrary(client: ApiClient, store: BlobStore): Promi
     const thumbnail = await requireBytes(store, derivativePath(asset.sha256, 'thumbnail'))
     const preview = await requireBytes(store, derivativePath(asset.sha256, 'preview'))
 
+    // Not repeated: each reserve creates a new upload, so a lost response would leave a stray reservation.
     const reservation = await apiJson<UploadReservation>(client, '/api/v1/uploads', {
       method: 'POST',
+      once: true,
       body: JSON.stringify({
         original: { size: original.byteLength, contentType: asset.contentType, sha256: asset.sha256 },
         thumbnail: { size: thumbnail.byteLength },
@@ -136,6 +162,7 @@ export async function restoreLibrary(client: ApiClient, store: BlobStore): Promi
     const created = await apiJson<{ id: string }>(client, '/api/v1/albums', {
       method: 'POST',
       body: JSON.stringify({ title: album.title }),
+      once: true,
     })
     for (const oldAssetId of album.assetIds) {
       const newAssetId = idMap.get(oldAssetId)

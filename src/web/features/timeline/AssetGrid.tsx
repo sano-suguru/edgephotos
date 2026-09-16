@@ -1,5 +1,6 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
-import type { Asset, AssetPage } from '../../../contracts/schemas'
+import { useRef } from 'preact/hooks'
+import type { AssetPage, AssetSummary } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { libraryVersion } from '../uploads/upload'
 import { AssetViewer } from './AssetViewer'
@@ -13,12 +14,18 @@ export type AssetGridProps = {
 }
 
 export function AssetGrid(props: AssetGridProps) {
-  const items = useSignal<Asset[]>([])
+  const items = useSignal<AssetSummary[]>([])
   const cursor = useSignal<string | null>(null)
   const loading = useSignal(false)
   const error = useSignal<string | null>(null)
-  const selected = useSignal<Asset | null>(null)
+  const selected = useSignal<AssetSummary | null>(null)
   const version = useSignal(0)
+  // When the first loaded page arrived (performance.now(), so a wrong device clock does not matter).
+  const loadedAt = useRef(0)
+  const refreshing = useRef(false)
+  // Thumbnails already on screen keep their (now expired) URL: the bytes are loaded, and a new URL would
+  // download every one of them again. A thumbnail that fails leaves this set, so it does get a new URL.
+  const shown = useRef(new Set<string>())
 
   async function loadPage(reset: boolean) {
     loading.value = true
@@ -27,6 +34,7 @@ export function AssetGrid(props: AssetGridProps) {
       const page = await props.load(reset ? null : cursor.value)
       items.value = reset ? page.items : [...items.value, ...page.items]
       cursor.value = page.nextCursor
+      if (reset) loadedAt.current = performance.now()
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -43,6 +51,33 @@ export function AssetGrid(props: AssetGridProps) {
 
   const refresh = () => {
     version.value++
+  }
+
+  // Image URLs are presigned and expire (docs/security.md §6), so a thumbnail that starts loading late
+  // (lazy loading, a tab left open) gets 403. Re-fetch the loaded range for fresh URLs, at most once a minute.
+  async function refreshUrls() {
+    if (refreshing.current || performance.now() - loadedAt.current < 60_000) return
+    refreshing.current = true
+    try {
+      const fresh: AssetSummary[] = []
+      let next: string | null = null
+      do {
+        const page = await props.load(next)
+        fresh.push(...page.items)
+        next = page.nextCursor
+      } while (next && fresh.length < items.value.length)
+      const current = new Map(items.value.map((a) => [a.id, a]))
+      items.value = fresh.map((a) => {
+        const old = current.get(a.id)
+        return old && shown.current.has(a.id) ? { ...a, thumbnailUrl: old.thumbnailUrl } : a
+      })
+      cursor.value = next
+      loadedAt.current = performance.now()
+    } catch {
+      // Leave the broken images; the next image error retries.
+    } finally {
+      refreshing.current = false
+    }
   }
 
   return (
@@ -64,7 +99,17 @@ export function AssetGrid(props: AssetGridProps) {
               }}
               aria-label={asset.filename ?? '写真を開く'}
             >
-              <img src={asset.thumbnailUrl} alt="" loading="lazy" class="h-full w-full object-cover" />
+              <img
+                src={asset.thumbnailUrl}
+                alt=""
+                loading="lazy"
+                class="h-full w-full object-cover"
+                onLoad={() => shown.current.add(asset.id)}
+                onError={() => {
+                  shown.current.delete(asset.id)
+                  void refreshUrls()
+                }}
+              />
             </button>
             {asset.isFavorite && (
               <span

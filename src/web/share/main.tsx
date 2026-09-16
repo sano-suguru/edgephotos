@@ -12,6 +12,12 @@ const secret = window.location.hash.slice(1)
 const album = signal<SharedAlbum | null>(null)
 const failed = signal(false)
 const viewing = signal<{ id: string; url: string | null } | null>(null)
+// When the first page arrived (performance.now(), independent of the device clock).
+let loadedAt = 0
+let refreshing = false
+// Thumbnails already displayed keep their URL on refresh, so they are not downloaded again. One that fails
+// is removed first, so it does get a new URL.
+const shown = new Set<string>()
 
 async function shareApi<T>(path: string): Promise<T> {
   const res = await fetch(`/share/api/v1/shares/${encodeURIComponent(shareId)}${path}`, {
@@ -24,12 +30,42 @@ async function shareApi<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+const albumPage = (cursor?: string | null) =>
+  shareApi<SharedAlbum>(`?limit=120${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+
 async function loadAlbum(cursor?: string) {
   try {
-    const page = await shareApi<SharedAlbum>(`?limit=120${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+    const page = await albumPage(cursor)
     album.value = cursor && album.value ? { ...page, items: [...album.value.items, ...page.items] } : page
+    if (!cursor) loadedAt = performance.now()
   } catch {
     failed.value = true
+  }
+}
+
+// Thumbnail URLs expire after at most 300 s. A thumbnail that starts loading later gets 403, so fetch the
+// loaded range again (at most once a minute). A revoked or expired share then shows the unavailable page.
+async function refreshExpired() {
+  const current = album.value
+  if (!current || refreshing || performance.now() - loadedAt < 60_000) return
+  refreshing = true
+  try {
+    let page = await albumPage()
+    const items = [...page.items]
+    while (page.nextCursor && items.length < current.items.length) {
+      page = await albumPage(page.nextCursor)
+      items.push(...page.items)
+    }
+    const old = new Map(current.items.map((i) => [i.id, i.thumbnailUrl]))
+    album.value = {
+      ...page,
+      items: items.map((i) => (shown.has(i.id) && old.has(i.id) ? { ...i, thumbnailUrl: old.get(i.id) as string } : i)),
+    }
+    loadedAt = performance.now()
+  } catch (err) {
+    if (err instanceof Error && err.message === '404') failed.value = true
+  } finally {
+    refreshing = false
   }
 }
 
@@ -64,6 +100,11 @@ function SharePage() {
                 loading="lazy"
                 referrerPolicy="no-referrer"
                 class="h-full w-full object-cover"
+                onLoad={() => shown.add(item.id)}
+                onError={() => {
+                  shown.delete(item.id)
+                  void refreshExpired()
+                }}
               />
             </button>
           </li>

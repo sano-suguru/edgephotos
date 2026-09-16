@@ -168,7 +168,7 @@ GET    /share/api/v1/shares/{shareId}           Authorization: Bearer <secret>
 GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
 ```
 
-画像 URL は短命な presigned GET を JSON で返します。Worker が画像 byte を中継することはありません。
+画像 URL は短命な presigned GET を JSON で返します。Worker が画像 byte を中継することはありません。一覧（`GET /api/v1/assets`、album の assets）は thumbnail の URL だけを返し、preview の URL は個別の asset（`GET /api/v1/assets/{assetId}` など）で返します（[D-022](decisions.md)）。
 
 ## 5. Upload protocol
 

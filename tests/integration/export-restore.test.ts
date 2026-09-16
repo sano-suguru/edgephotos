@@ -78,6 +78,90 @@ describe('export and restore to an empty environment', () => {
     await expect(restoreLibrary(apiClient(target), store)).rejects.toThrow(/not empty/)
   })
 
+  it('backup and restore survive transient failures and lost responses', async () => {
+    // Start from an empty restore target again.
+    await env.RESTORE_DB.batch(
+      ['album_assets', 'albums', 'shares', 'uploads', 'assets', 'settings'].map((t) =>
+        env.RESTORE_DB.prepare(`DELETE FROM ${t}`),
+      ),
+    )
+    const listed = await env.RESTORE_BUCKET.list()
+    if (listed.objects.length > 0) await env.RESTORE_BUCKET.delete(listed.objects.map((o) => o.key))
+
+    const flaky = (app: Awaited<ReturnType<typeof makeApp>>) => {
+      const inner = apiClient(app)
+      const injected = { unavailable: 0, lost: 0 }
+      let calls = 0
+      return {
+        injected,
+        client: {
+          retryDelayMs: () => 0,
+          // Every third API call fails before reaching the Worker. Creating POSTs are never repeated, so spare them.
+          api: async (path: string, init?: RequestInit) => {
+            const creates = init?.method === 'POST' && (path === '/api/v1/albums' || path === '/api/v1/uploads')
+            if (++calls % 3 === 0 && !creates) {
+              injected.unavailable++
+              return new Response('unavailable', { status: 503 })
+            }
+            return inner.api(path, init)
+          },
+          // Every fourth storage request reaches storage, but the response is lost.
+          blob: async (url: string, init?: RequestInit) => {
+            const res = await inner.blob(url, init)
+            if (++calls % 4 === 0) {
+              injected.lost++
+              throw new TypeError('network connection lost')
+            }
+            return res
+          },
+        },
+      }
+    }
+
+    const source = await makeApp({ which: 'primary' })
+    const store = memoryStore()
+    const backup = flaky(source)
+    const manifest = await backupLibrary(backup.client, store)
+    expect(backup.injected.unavailable + backup.injected.lost).toBeGreaterThan(0)
+
+    const target = flaky(await makeApp({ which: 'restore' }))
+    const report = await restoreLibrary(target.client, store)
+    expect(target.injected.lost).toBeGreaterThan(0)
+    expect(report.assets).toBe(manifest.assets.length)
+    // Lost PUT responses were retried into 412 and accepted; nothing was duplicated.
+    expect(await verifyLibrary(apiClient(await makeApp({ which: 'restore' })), manifest)).toMatchObject({ ok: true })
+  })
+
+  it('does not repeat an upload reservation whose response was lost', async () => {
+    await env.RESTORE_DB.batch(
+      ['album_assets', 'albums', 'shares', 'uploads', 'assets', 'settings'].map((t) =>
+        env.RESTORE_DB.prepare(`DELETE FROM ${t}`),
+      ),
+    )
+    const store = memoryStore()
+    await backupLibrary(apiClient(await makeApp({ which: 'primary' })), store)
+
+    const inner = apiClient(await makeApp({ which: 'restore' }))
+    let reserves = 0
+    const client = {
+      ...inner,
+      retryDelayMs: () => 0,
+      // The reservation is created, then the response is lost.
+      api: async (path: string, init?: RequestInit) => {
+        const res = await inner.api(path, init)
+        if (path === '/api/v1/uploads' && init?.method === 'POST') {
+          reserves++
+          throw new TypeError('network connection lost')
+        }
+        return res
+      },
+    }
+    await expect(restoreLibrary(client, store)).rejects.toThrow('network connection lost')
+    expect(reserves).toBe(1)
+    const pending = await env.RESTORE_DB.prepare('SELECT COUNT(*) AS n FROM uploads').first<{ n: number }>()
+    expect(pending?.n).toBe(1)
+  })
+
   it('verification detects missing assets, changed membership and corrupted originals', async () => {
     const source = await makeApp({ which: 'primary' })
     const store = memoryStore()

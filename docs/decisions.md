@@ -252,3 +252,38 @@ v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Cl
 - **PUT を再試行する。** 3 回の PUT のどれかが一時的に失敗すると、その写真全体が失敗していた。network error、408、429、5xx は、backoff を挟んで最大 4 回まで試す。`412` は保存済みとして扱う（`src/web/lib/storage-put.ts`）。key は reserve ごとに固有で、`If-None-Match: *` で署名しているため、`412` になるのは同じ upload の以前の試行が R2 に届き、応答だけが失われた場合に限られる。finalize は引き続き size と、original については R2 が検証した SHA-256 を確認する。実 R2 の `412` が CORS 越しに status として読めることは、remote-test で確認済み（operations.md 冒頭）。`400`（BadDigest）と `403`（期限切れ）は再試行しない
 - **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らなかった。300 枚を選ぶと、100 件近くを残したまま完了表示になっていた。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削る（`src/web/features/uploads/upload-list.ts`）
 - **前処理の並列数は 2 のままにする。** 2 が最適だと示したわけではない。desktop の Browser では、変えるだけの根拠が得られなかった。 1 枚分の peak memory は、ほぼ decode 後の bitmap（幅 × 高さ × 4 byte）で決まる。ArrayBuffer を早く手放す案、canvas を 0×0 にして解放する案は、測定の揺れを超える差が出なかったため入れない。Chromium では並列数を 1 増やすごとに peak が bitmap 1 枚分増え、1 → 2 で時間が約 2 割縮んだ。WebKit では peak も時間もほぼ変わらなかった。bitmap は PUT の前に close されるため、転送中に保持するのは File と小さな derivative だけになる。Web Worker は導入しない。mobile では、1 → 2 の速度差（約 2 割）より peak の増分（48MP で bitmap 約 190MB）の方が重い可能性がある。iPhone の実機で 48MP を数枚続けて取り込み、Safari が落ちる場合は、まず並列数 1 を試す
+
+## D-021: Browser 固有の経路だけを Playwright で自動化する
+
+**状態:** 採用
+
+workerd の test（`pnpm test`）は server の契約を検証しますが、Browser でしか起きない不具合は見えません。D-020 の WebKit の APP1 / APP13 と、期限切れの presigned URL で画像が壊れたまま残る不具合（下記）がその例です。`@playwright/test` を devDependency に加え、少数の spec（`e2e/`）だけを置きます。
+
+- 対象: canvas での derivative 生成と finalize の成立、file input、共有ページ、Base UI の keyboard / focus、phone 幅の layout と tap
+- 対象外: server の認可・検査・share の検証。integration test が正本で、Browser では再検査しない
+- 実行環境: `vite dev`（D-016 の Access / presigned URL 模擬）を、使い捨ての local D1 / R2（`.wrangler/e2e`）で起動する。remote には触れない
+- Browser: Chromium（desktop）と WebKit（iPhone 13 相当）。WebKit は iOS Safari の代わりにはならないが、D-020 の不具合は WebKit で再現した
+- `pnpm check` には含めず、CI の別 job で実行する。bundle と Worker には影響しない
+
+**期限切れの presigned URL（同時に修正）:** API が返す画像 URL は 600 秒（共有ページは最大 300 秒）で失効します。timeline は `loading="lazy"` なので、ページを開いたまま 10 分を過ぎてから scroll すると、まだ読み込んでいない thumbnail が `403` で壊れたまま残りました。viewer の preview も同じでした。Client は画像の読み込み失敗時に URL を取り直します。
+
+- timeline / album / 共有ページ: 最初のページの取得から 60 秒以上経っていれば、読み込み済みの範囲を先頭から取り直す（1 分に 1 回まで）
+- 取り直しても、表示済みの thumbnail の URL は差し替えない（差し替えると全件を再 download する）。ただし読み込みに失敗した thumbnail は表示済みの扱いから外し、新しい URL にする。一度表示できた画像が、後で再取得されて `403` になる場合があるため
+- viewer: 開くたびに asset を取得して preview の URL を得る（[D-022](#d-022-一覧では-thumbnail-の-url-だけを署名する)）。それでも preview が失敗したら 1 回だけ取り直す
+- 経過時間は `performance.now()` で測る。端末の時計のずれに左右されず、object が本当に欠けている場合も再取得は上の頻度で止まる
+- URL の有効期限（security.md §6）と server の契約は変えない。URL を長くする案は、bearer capability を長く生かすことになるため採らない
+
+## D-022: 一覧では thumbnail の URL だけを署名する
+
+**状態:** 採用（API の一覧 response から `previewUrl` を除く）
+
+一覧 API（`GET /api/v1/assets`、`GET /api/v1/albums/{albumId}/assets`）は、item ごとに thumbnail と preview の 2 つの URL を署名していました。60 件の timeline で 120 回です。preview は viewer を開くまで使いません。署名は Worker の CPU を使い、Workers Free の上限は 1 request 10 ms です（[benchmarks.md](benchmarks.md)）。
+
+- 一覧の item は `AssetSummary`（`Asset` から `previewUrl` を除いた schema）とする
+- `previewUrl` は、1 件の asset を返す response（`GET /api/v1/assets/{assetId}`、PATCH、trash / restore、finalize）にだけ含める
+- Web の viewer は開いたときに asset を取得する。取得までは cache 済みの thumbnail を表示する。preview の URL は常に開いた時点のものになり、期限切れの心配がない
+- backup CLI はもともと個別の asset から preview の URL を得ていたので、影響しない
+
+却下した案: 一覧で preview の URL を返したまま、署名を速くする（署名鍵の cache など）。問題は回数そのもので、使わない URL を発行しないほうが単純です。
+
+影響: 一覧 response の `previewUrl` を使う Client は、個別の asset を取得する必要があります。現時点の Client は Web と backup CLI だけで、どちらも対応済みです。

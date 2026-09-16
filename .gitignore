@@ -6,3 +6,5 @@ node_modules/
 dist/
 .playwright-mcp/
 !.dev.vars.example
+playwright-report/
+test-results/
