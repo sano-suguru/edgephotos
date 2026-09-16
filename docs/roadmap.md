@@ -68,7 +68,7 @@
 
 到達点:
 
-- ✅ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する
+- ✅ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する（Worker 側の owner check は unit test で担保。Access policy が owner のみ Allow である限り、他 identity は Worker まで到達しないため remote では実測できない）
 - ✅ 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
 - 🟡 スマートフォンで撮影した実写真（orientation・GPS・大きい画素数を含む）を 20〜30 枚 upload し、timeline の向きと表示を確認する（EXIF orientation 1〜8・GPS・JPEG / PNG / WebP・160×120 から 6000×4000 を含む合成 20 枚で確認済み。実機で撮影した写真は未実施）
 - ✅ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
