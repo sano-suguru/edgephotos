@@ -168,4 +168,53 @@ describe('D1 migrations', () => {
     ).rejects.toThrow(/CHECK/)
     await env.DB.prepare("DELETE FROM assets WHERE id = 'm-1'").run()
   })
+
+  // The drift test above compares CHECK constraints by count only. These state columns drive the upload
+  // and delete state machines, so the migrated database must accept exactly the values the schema declares.
+  describe('state CHECK constraints', () => {
+    const insertAsset = (id: string, status: string, isFavorite: number) =>
+      env.DB.prepare(
+        `INSERT INTO assets (id, status, sha256, original_size, original_content_type, sort_at, is_favorite,
+           created_at, updated_at)
+         VALUES (?, ?, ?, 1, 'image/jpeg', 0, ?, 'x', 'x')`,
+      )
+        .bind(id, status, `check-${id}`, isFavorite)
+        .run()
+    const insertUpload = (id: string, status: string) =>
+      env.DB.prepare(
+        `INSERT INTO uploads (id, asset_id, status, sha256, original_size, original_content_type,
+           thumbnail_size, preview_size, created_at, expires_at)
+         VALUES (?, ?, ?, 'abc', 1, 'image/jpeg', 1, 1, 'x', 'x')`,
+      )
+        .bind(id, `asset-${id}`, status)
+        .run()
+    const cleanup = () =>
+      env.DB.batch([
+        env.DB.prepare("DELETE FROM assets WHERE id LIKE 'check-%'"),
+        env.DB.prepare("DELETE FROM uploads WHERE id LIKE 'check-%'"),
+      ])
+
+    it('assets.status accepts only the declared states', async () => {
+      expect(schema.assets.status.enumValues).toEqual(['ready', 'purging'])
+      for (const status of schema.assets.status.enumValues) await insertAsset(`check-${status}`, status, 0)
+      await expect(insertAsset('check-banana', 'banana', 0)).rejects.toThrow(/CHECK/)
+      await expect(insertAsset('check-upper', 'READY', 0)).rejects.toThrow(/CHECK/)
+      await cleanup()
+    })
+
+    it('assets.is_favorite accepts only 0 and 1', async () => {
+      await insertAsset('check-fav-0', 'ready', 0)
+      await insertAsset('check-fav-1', 'ready', 1)
+      await expect(insertAsset('check-fav-2', 'ready', 2)).rejects.toThrow(/CHECK/)
+      await expect(insertAsset('check-fav-neg', 'ready', -1)).rejects.toThrow(/CHECK/)
+      await cleanup()
+    })
+
+    it('uploads.status accepts only the declared states', async () => {
+      expect(schema.uploads.status.enumValues).toEqual(['pending', 'finalized', 'duplicate'])
+      for (const status of schema.uploads.status.enumValues) await insertUpload(`check-${status}`, status)
+      await expect(insertUpload('check-banana', 'banana')).rejects.toThrow(/CHECK/)
+      await cleanup()
+    })
+  })
 })
