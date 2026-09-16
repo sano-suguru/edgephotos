@@ -17,7 +17,7 @@
 > - restore: 空の `edgephotos-restore-test`（D1 / R2 / Access / CORS / secret を別に用意）へ `pnpm backup restore` を実行し、`ok: true` を確認済み。restore 先から export し直して manifest を突き合わせ、asset 数・original の SHA-256・album 構成と membership・主要 metadata（size / content type / filename / width / height / takenAt / isFavorite）が一致することを確認。変わるのは `id` と `createdAt` だけで、[D-015](decisions.md) のとおり。空でない library への restore が拒否されることも確認済み。
 > - **未検証:** trash / restore、複数枚・多様な形式での original SHA-256 保持。
 >
-> preview URL（`<version>-<worker>.<subdomain>.workers.dev`）は hostname 単位の Access application の対象外です。private API はここで Access のリダイレクトを受けず、Worker 自身の JWT 検証だけが `401 UNAUTHENTICATED` で拒否します。有効な JWT は `ACCESS_AUD` 一致かつ owner へのみ発行されるため漏洩はありませんが、「private path は必ず Access が前段にいる」とは言えません。
+> preview URL は `wrangler.jsonc` で無効にしてあります（`"preview_urls": false`）。有効だと `<version>-<worker>.<subdomain>.workers.dev` という別 hostname が生え、hostname 単位の Access application の対象外になります。実際、無効化前は preview URL 上の private API が Access のリダイレクトを受けず、Worker 自身の JWT 検証だけが `401 UNAUTHENTICATED` で拒否していました。漏洩はありませんでしたが、「private path は必ず Access が前段にいる」と言えなくなるため閉じました。無効化後は preview URL が `404` になることを確認済みです。
 >
 > owner 以外の identity を Worker が `403` にする経路は、Access policy が owner のみ Allow である限り Worker まで到達しないため、remote-test では実測できません。この検査は多層防御であり、回帰は unit test 側で担保します。
 
