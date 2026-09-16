@@ -23,7 +23,7 @@ pnpm dev              # http://localhost:5173 （Access を模擬した owner �
 ```
 
 ```bash
-pnpm check            # typecheck + lint + test + build
+pnpm check            # typecheck + lint + db:check + test + build
 ```
 
 デプロイ手順と必要な設定は [運用・デプロイ・復元](docs/operations.md) を参照してください。
@@ -85,7 +85,7 @@ Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署�
 | Build | Vite + Cloudflare Vite Plugin |
 | Styling / UI | Tailwind CSS v4 + shadcn/ui + Base UI |
 | API | Hono + `@hono/zod-openapi` |
-| Database | Cloudflare D1 |
+| Database | Cloudflare D1 + Drizzle（schema・型・migration 生成） |
 | Object storage | private Cloudflare R2 |
 | Authentication | Cloudflare Access |
 | Deployment | 1 Worker + Static Assets + D1 + R2 |

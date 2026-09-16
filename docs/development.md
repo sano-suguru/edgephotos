@@ -36,14 +36,20 @@ src/
     app.ts                 Hono app: middleware + all route contracts (OpenAPI)
     auth/access.ts         Access assertion -> AppPrincipal
     http/                  errors, Origin check, security headers
-    services/              uploads / assets / albums / shares / export (explicit SQL)
+    db/
+      schema.ts            D1 schema (Drizzle) -> row types, simple queries, generated migrations
+      index.ts             Db type + createDb (Drizzle over the D1 binding)
+    services/              uploads / assets / albums / shares / export (query builder or explicit SQL)
     storage/               object keys, R2 presigner, finalize inspection, local blob emulation
   contracts/
     schemas.ts             zod schemas shared by Worker (runtime + OpenAPI) and Web (types only)
     errors.ts
-migrations/                D1 schema (forward-only)
+migrations/                D1 migrations (forward-only, applied by wrangler)
+  meta/                    drizzle-kit snapshots / journal (generated; not applied)
+drizzle.config.ts          drizzle-kit generate settings (no D1 credentials)
 scripts/
   backup.ts                backup / restore / verify CLI
+  db-check.ts              schema vs committed migrations drift check
   lib/backup.ts            API-based export / restore / verify (used by CLI and tests)
   vite-dev-access.ts       dev server Access emulation
 tests/
@@ -124,11 +130,28 @@ API route は `@hono/zod-openapi` で schema と route contract を定義しま�
 
 ## 6. D1 / Migration
 
-D1 access は explicit SQL と prepared statements を使用します。
+D1 schema は `src/worker/db/schema.ts`（Drizzle）で定義します。方針は [D-017](decisions.md) です。
 
-- migration は forward-only
-- DB schema の正本は migration
+- row 型は `typeof table.$inferSelect` / `$inferInsert` から導出し、手書きしない
+- 単純な CRUD は query builder、複雑な query（相関 subquery、動的 filter、keyset pagination、集計など）は `sql` テンプレートの明示的な SQL で書く。どちらも bind parameter を使う
+- Repository / DAO / relational query API を作らない。service 関数から `ctx.db` を直接使う
+- schema の property 名は column 名と同じ snake_case にし、ORM 側の値変換を使わない
+
+schema を変える手順:
+
+```bash
+# 1. src/worker/db/schema.ts を変更
+pnpm db:generate add_something   # migrations/000N_add_something.sql と migrations/meta/ を生成
+# 2. 生成 SQL を review する（既存データ、NOT NULL 追加、table 再作成に注意）。必要なら手で直す
+pnpm db:migrate:local
+pnpm db:check && pnpm test
+# 3. .sql と migrations/meta/ を commit
+```
+
+- migration は forward-only。適用済みの `.sql` を編集・改名しない
+- 適用される正本は commit した `migrations/*.sql`。`schema.ts` との一致は `pnpm db:check`（snapshot との差分）と `tests/integration/migrations.test.ts`（適用後の D1 との差分）で検証する
 - 既存データがある前提で migration を書く
+- `drizzle-kit push` / `drizzle-kit migrate` は使わない。適用は `wrangler d1 migrations apply` だけ
 - production migration を通常の test command から実行しない
 
 ## 7. Test strategy
@@ -169,7 +192,8 @@ auth
 
 ```bash
 pnpm test        # unit + integration + e2e（workerd 上、D1 / R2 は Miniflare の local emulation）
-pnpm check       # typecheck + lint + test + build
+pnpm db:check    # schema.ts と migrations/meta の snapshot が一致するか
+pnpm check       # typecheck + lint + db:check + test + build
 ```
 
 integration test は `createApp()` に test 用の Access 鍵と local blob signer を注入し、実際の migration を適用した D1 と R2 binding を使います。D1 / R2 の障害は binding を Proxy で包んで再現します。
@@ -212,6 +236,7 @@ D1、R2、Access application、signing credential を production と共有しま
 
 - typecheck
 - lint / format check
+- schema と migration の drift check（`pnpm db:check`）
 - unit / integration tests
 - production build
 
@@ -221,4 +246,4 @@ Remote の破壊操作を通常の test command に含めません。
 
 ドキュメント本文は日本語、path と code identifier は英語を基本とします。
 
-API の詳細は OpenAPI、DB の詳細は migration、動作の細部は test を正本とします。
+API の詳細は OpenAPI、DB の詳細は migration（と一致を検証した `src/worker/db/schema.ts`）、動作の細部は test を正本とします。

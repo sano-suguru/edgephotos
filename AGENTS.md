@@ -25,6 +25,7 @@
 - Tailwind CSS v4 / shadcn/ui + Base UI
 - Hono / `@hono/zod-openapi`
 - Cloudflare D1 / private R2 / Access
+- Drizzle（D1 の schema・型・migration 生成に限定。[D-017](docs/decisions.md)）
 - 1 Worker + Static Assets
 - HTTP/JSON + OpenAPI の API boundary
 
@@ -63,6 +64,8 @@ derivatives/v1/{assetId}/preview.jpg
 派生画像の生成規則を将来変更する場合は derivative version を追加し、original を変更しません。
 
 D1 と R2 を単一 transaction として扱わず、片側だけ成功する異常系を前提にしてください。
+
+D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>` で生成した SQL を review して commit します。適用済みの `migrations/*.sql` と `migrations/meta/_journal.json` の baseline entry（`idx: 1`）は書き換えないでください。`drizzle-kit push` は使いません。
 
 ## 6. 将来要件を先回りしない
 

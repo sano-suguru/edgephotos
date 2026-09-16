@@ -24,6 +24,7 @@ import {
   UploadReserveSchema,
 } from '../contracts/schemas'
 import { type AccessKeyResolver, type AppPrincipal, authenticateAccess, remoteAccessKeys } from './auth/access'
+import { createDb } from './db'
 import { type AppConfig, type Env, readAppConfig } from './env'
 import { ApiError, errorResponse, requestId } from './http/errors'
 import {
@@ -140,7 +141,7 @@ export function createApp(options: AppOptions) {
     if (!signer) throw misconfigured()
     c.set('principal', auth.principal)
     c.set('config', config)
-    c.set('services', { db: env.DB, bucket: env.BUCKET, signer, now })
+    c.set('services', { db: createDb(env.DB), bucket: env.BUCKET, signer, now })
     await next()
   })
 
@@ -536,7 +537,7 @@ export function createApp(options: AppOptions) {
   shareApp.use('*', async (c, next) => {
     const signer = resolveSigner()
     if (!signer) throw misconfigured()
-    c.set('services', { db: env.DB, bucket: env.BUCKET, signer, now })
+    c.set('services', { db: createDb(env.DB), bucket: env.BUCKET, signer, now })
     await next()
   })
 
