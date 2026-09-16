@@ -15,7 +15,9 @@
 > - presigned URL の失効: share の derivative URL が発行 300 秒後に R2 で `403 ExpiredRequest` になることを確認済み。revoke 済み share の既発行 URL が残り TTL の間だけ有効なのは [security.md](security.md) §5 の契約どおり。
 > - backup: remote-test に対する `pnpm backup export` と `verify` が通り、original の SHA-256 照合が一致（`ok: true`）。
 > - restore: 空の `edgephotos-restore-test`（D1 / R2 / Access / CORS / secret を別に用意）へ `pnpm backup restore` を実行し、`ok: true` を確認済み。restore 先から export し直して manifest を突き合わせ、asset 数・original の SHA-256・album 構成と membership・主要 metadata（size / content type / filename / width / height / takenAt / isFavorite）が一致することを確認。変わるのは `id` と `createdAt` だけで、[D-015](decisions.md) のとおり。空でない library への restore が拒否されることも確認済み。
-> - **未検証:** trash / restore、複数枚・多様な形式での original SHA-256 保持。
+> - 画像形式と orientation: EXIF orientation 1〜8、GPS タグ付き、JPEG / PNG / WebP、160×120 から 6000×4000、1:4 と 40:9 の比率を含む合成 19 枚を upload。orientation 8 種はすべて同じ向き・同じ寸法として登録され、client が EXIF を適用していることを確認。derivative は全件 EXIF・GPS を持たず、thumbnail 512 / preview 2048 の上限を守り、上限より小さい original を拡大しない。
+> - original の byte 保持: export した original を再 hash し、ローカル原本の SHA-256 と全件一致することを確認。trash へ移動して復元した asset も SHA-256 が変わらない。
+> - **未検証:** スマートフォン実機で撮影した写真（実機エンコーダ固有の EXIF 配置）、多数枚での restore。
 >
 > preview URL は `wrangler.jsonc` で無効にしてあります（`"preview_urls": false`）。有効だと `<version>-<worker>.<subdomain>.workers.dev` という別 hostname が生え、hostname 単位の Access application の対象外になります。実際、無効化前は preview URL 上の private API が Access のリダイレクトを受けず、Worker 自身の JWT 検証だけが `401 UNAUTHENTICATED` で拒否していました。漏洩はありませんでしたが、「private path は必ず Access が前段にいる」と言えなくなるため閉じました。無効化後は preview URL が `404` になることを確認済みです。
 >
