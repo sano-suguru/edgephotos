@@ -179,7 +179,9 @@ Migration:
 - `migrations/meta/0001_snapshot.json` は、同じ schema を drizzle-kit で生成したときの snapshot。journal の entry は `idx: 1` / `tag: 0001_initial` とした。drizzle-kit は次の番号を「最後の idx + 1」で決めるため、以後の生成 migration は `0002_*` から始まる。この journal を `idx: 0` へ「直さない」こと
 - `0001_initial.sql` と snapshot の差は次の 2 点だけで、どちらも既存データに影響しない
   - SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
-  - `uploads.asset_id` の UNIQUE は SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index。将来この制約を変える migration を生成した場合は、生成 SQL をそのまま使わず確認する
+  - `uploads.asset_id` の UNIQUE は SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
+- この差が原因で生成 SQL が誤っていれば、CI で検出される。test の setup は本番と同じく空の D1 へ `0001` から順に全 migration を適用し、そのあと drift test が `schema.ts` と比較する。つまり生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通る
+  - 確認済みの例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗する。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通る
 - production DB の再作成は不要
 
 `wrangler` と `readD1Migrations` は `.sql` だけを読むため、`migrations/meta/` は適用対象になりません。
