@@ -20,18 +20,36 @@ test('phone layout: navigation, viewer and share page fit and respond to taps', 
   const photo = `${uniqueName('phone')}.jpg`
   await uploadPhoto(page, photo, 900, 1600)
   expect(await noHorizontalScroll(page)).toBe(true)
-  for (const name of ['タイムライン', 'お気に入り', 'アルバム', 'ゴミ箱', 'ライブラリ']) {
-    await expect(page.getByRole('link', { name })).toBeInViewport()
+  // Frequent destinations are bottom tabs that stay in reach while scrolling; the header scrolls away.
+  const nav = page.getByRole('navigation', { name: 'メイン' })
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+  for (const name of ['タイムライン', 'お気に入り', 'アルバム', 'ライブラリ']) {
+    await expect(nav.getByRole('link', { name })).toBeInViewport()
   }
+  const navBox = await nav.boundingBox()
+  expect(navBox?.height).toBeLessThan(90)
+  // The trash is a low-frequency destination, reached from ライブラリ.
+  await expect(nav.getByRole('link', { name: 'ゴミ箱' })).toBeHidden()
+  await nav.getByRole('link', { name: 'ライブラリ' }).tap()
+  await page.getByRole('link', { name: /ゴミ箱/ }).tap()
+  await expect(page.getByRole('heading', { name: 'ゴミ箱' })).toBeVisible()
+  await nav.getByRole('link', { name: 'タイムライン' }).tap()
 
   await tile(page, photo).tap()
   const viewer = page.getByRole('dialog', { name: photo })
   await expectImageLoaded(viewer.locator('img'))
+  // The photo fills the screen width or height; controls overlay it instead of taking space from it.
+  const imgBox = await viewer.locator('img').boundingBox()
+  const screen = page.viewportSize()
+  expect(imgBox && screen).toBeTruthy()
+  if (imgBox && screen) {
+    expect(imgBox.width >= screen.width - 1 || imgBox.height >= screen.height - 1).toBe(true)
+  }
   const close = viewer.getByRole('button', { name: '閉じる' })
   await expectInViewport(page, close)
-  // Actions below the image stay reachable by scrolling inside the dialog.
-  await viewer.getByRole('button', { name: 'ゴミ箱へ移動' }).scrollIntoViewIfNeeded()
-  await expect(viewer.getByRole('button', { name: 'ゴミ箱へ移動' })).toBeInViewport()
+  await expectInViewport(page, viewer.getByRole('button', { name: 'ゴミ箱へ移動' }))
+  await viewer.getByRole('button', { name: '情報', exact: true }).tap()
+  await expectInViewport(page, viewer.getByRole('complementary', { name: '写真の情報' }))
   await close.tap()
   await expect(viewer).toBeHidden()
 

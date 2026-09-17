@@ -1,6 +1,6 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import type { ComponentChildren } from 'preact'
-import { cn } from './button'
+import { Button, cn } from './button'
 
 // shadcn/ui-style Dialog on Base UI primitives (focus trap, Escape, focus restore, scroll lock).
 export function Dialog(props: {
@@ -38,5 +38,58 @@ export function Dialog(props: {
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>
+  )
+}
+
+// Edge-to-edge dark dialog for viewing photos. The caller lays out the title and close button
+// (DialogTitle / DialogClose) so they can sit in an overlay toolbar.
+export function FullscreenDialog(props: {
+  onClose: () => void
+  onKeyDown?: (e: KeyboardEvent) => void
+  // Where focus goes on close; defaults to the element that opened the dialog.
+  finalFocus?: () => HTMLElement | null
+  children: ComponentChildren
+}) {
+  return (
+    <BaseDialog.Root open onOpenChange={(open) => !open && props.onClose()}>
+      <BaseDialog.Portal>
+        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black" />
+        <BaseDialog.Popup
+          className="fixed inset-0 z-50 flex bg-black text-white outline-none"
+          // Base UI types come from React; preact/compat passes the handler through unchanged.
+          onKeyDown={props.onKeyDown as never}
+          finalFocus={props.finalFocus ? () => props.finalFocus?.() ?? true : undefined}
+        >
+          {props.children}
+        </BaseDialog.Popup>
+      </BaseDialog.Portal>
+    </BaseDialog.Root>
+  )
+}
+
+export const DialogTitle = BaseDialog.Title
+export const DialogClose = BaseDialog.Close
+
+// Confirmation for irreversible actions. Anything that can be undone uses a toast with an undo action instead.
+export function ConfirmDialog(props: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  description: string
+  confirmLabel: string
+  busy?: boolean
+  onConfirm: () => void
+}) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.title} description={props.description}>
+      <div class="flex justify-end gap-2">
+        <Button variant="outline" onClick={() => props.onOpenChange(false)}>
+          キャンセル
+        </Button>
+        <Button variant="destructive" disabled={props.busy} onClick={props.onConfirm}>
+          {props.confirmLabel}
+        </Button>
+      </div>
+    </Dialog>
   )
 }

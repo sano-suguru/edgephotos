@@ -28,7 +28,9 @@ test('uploads a photo with browser-made derivatives and rejects HEIC', async ({ 
 
   await tile(page, name).click()
   const viewer = page.getByRole('dialog', { name })
-  await expect(viewer).toContainText('3000×2000')
+  // Details stay out of the way until asked for.
+  await viewer.getByRole('button', { name: '情報', exact: true }).click()
+  await expect(viewer.getByRole('complementary', { name: '写真の情報' })).toContainText('3000×2000')
   // The cached thumbnail shows first; the preview replaces it once its URL is fetched.
   await expect.poll(() => naturalSize(viewer.locator('img'))).toEqual({ width: 2048, height: 1365 })
 

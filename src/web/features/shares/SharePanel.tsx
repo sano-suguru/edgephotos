@@ -2,6 +2,7 @@ import { useSignal, useSignalEffect } from '@preact/signals'
 import type { Share } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { api } from '../../lib/api/client'
+import { userMessage } from '../../lib/errors'
 
 const STATUS: Record<Share['status'], string> = { active: '有効', expired: '期限切れ', revoked: '無効化済み' }
 
@@ -18,8 +19,8 @@ export function SharePanel({ albumId }: { albumId: string }) {
       .then((r) => {
         shares.value = r.items
       })
-      .catch((err: Error) => {
-        error.value = err.message
+      .catch((err) => {
+        error.value = userMessage(err)
       })
 
   useSignalEffect(() => {
@@ -33,7 +34,7 @@ export function SharePanel({ albumId }: { albumId: string }) {
       await fn()
       await load()
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      error.value = userMessage(err)
     }
   }
 
@@ -86,7 +87,11 @@ export function SharePanel({ albumId }: { albumId: string }) {
         </div>
       )}
 
-      {error.value && <p class="text-destructive">{error.value}</p>}
+      {error.value && (
+        <p role="alert" class="text-destructive">
+          {error.value}
+        </p>
+      )}
 
       <ul class="divide-y divide-border">
         {shares.value.map((share) => (

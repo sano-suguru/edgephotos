@@ -218,8 +218,8 @@ workerd の test では見えない、Browser 固有の部分だけを対象に�
 | --- | --- | --- |
 | `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC の拒否表示。presigned URL の期限切れ後に画像が回復すること | chromium, mobile-webkit |
 | `share.spec.ts` | album 作成 → viewer の menu から追加 → 共有リンク → 別 context の guest が閲覧（secret は Authorization header だけ、Cookie なし。thumbnail URL の期限切れから回復）→ revoke 後は無効表示 | chromium |
-| `keyboard.spec.ts` | Base UI の Dialog / Menu の keyboard 操作と focus | chromium |
-| `mobile.spec.ts` | iPhone 相当の viewport で横スクロールがないこと、tap で viewer・共有 dialog が開き、画面内に収まること | mobile-webkit |
+| `keyboard.spec.ts` | Base UI の Dialog / Menu の keyboard 操作と focus。viewer の ←/→ での移動（Menu 内では写真が変わらない）と、閉じたあとに最後の写真へ focus が戻ること | chromium |
+| `mobile.spec.ts` | iPhone 相当の viewport で横スクロールがないこと、下部タブが scroll 後も画面内にあり、ゴミ箱へはライブラリから行けること、tap で viewer（写真が画面幅か高さいっぱい）・共有 dialog が開き、画面内に収まること | mobile-webkit |
 
 ```bash
 pnpm exec playwright install --only-shell chromium webkit   # 初回のみ
