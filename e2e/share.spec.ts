@@ -82,7 +82,7 @@ test('a guest opens a shared album and loses access after revoke', async ({ page
   await expect(closeOverlay).toBeFocused()
   for (let i = 0; i < 3; i++) {
     await guest.keyboard.press('Tab')
-    expect(await guest.evaluate(() => !document.activeElement?.closest('main'))).toBe(true)
+    expect(await guest.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(true)
   }
   await guest.keyboard.press('Escape')
   await expect(overlay).toBeHidden()

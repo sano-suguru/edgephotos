@@ -108,6 +108,11 @@ function PhotoOverlay(props: { id: string; url: string | null }) {
       }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') viewing.value = null
+        // The close button is the only control, so Tab keeps focus on it instead of leaving the dialog.
+        if (e.key === 'Tab') {
+          e.preventDefault()
+          close.current?.focus()
+        }
       }}
     >
       {props.url ? (
