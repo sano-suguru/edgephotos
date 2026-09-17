@@ -196,6 +196,8 @@ Client は一時的な PUT の失敗（network error、408、429、5xx）を bac
 
 digest 不一致の PUT は R2 が `400` で拒否します。original が存在しないため finalize は `409 UPLOAD_OBJECT_MISSING` を返し、upload は `pending` のままです。URL の期限内なら、正しい bytes を同じ URL へ PUT し直して finalize を再試行できます。
 
+finalize は upload の期限を見ません。期限内に PUT が済んでいれば、background に回した tab が期限後に復帰しても finalize できます。PUT が済んでいない upload は、presigned URL が失効しているため完了できず、`pending` のまま残ります（[roadmap.md](roadmap.md) の既知の制約）。
+
 不変条件:
 
 - original は byte-for-byte immutable
