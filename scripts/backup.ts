@@ -12,8 +12,8 @@
 // and is never written to disk or logs.
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises'
+import { dirname, resolve, sep } from 'node:path'
 import { cliClient } from './cli-client.ts'
 import {
   BackupError,
@@ -32,9 +32,11 @@ function usage(): never {
 }
 
 function fsStore(root: string): BlobStore {
+  const base = resolve(root)
   const safe = (path: string) => {
-    const full = resolve(root, path)
-    if (!full.startsWith(resolve(root))) throw new Error('path escapes backup directory')
+    const full = resolve(base, path)
+    // `base + sep`: a sibling such as `${base}-other` must not pass.
+    if (full === base || !full.startsWith(base + sep)) throw new Error('path escapes backup directory')
     return full
   }
   const missing = (err: unknown) => (err as NodeJS.ErrnoException).code === 'ENOENT'
@@ -45,7 +47,14 @@ function fsStore(root: string): BlobStore {
       // Write beside the target and rename: an interrupted run never leaves a truncated file under the real name.
       const partial = `${full}.partial-${randomUUID()}`
       try {
-        await writeFile(partial, bytes)
+        // fsync before the rename so a power loss does not leave an empty file under the real name.
+        const file = await open(partial, 'w')
+        try {
+          await file.writeFile(bytes)
+          await file.sync()
+        } finally {
+          await file.close()
+        }
         await rename(partial, full)
       } finally {
         await rm(partial, { force: true })
