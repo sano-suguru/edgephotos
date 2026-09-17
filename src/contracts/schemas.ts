@@ -242,6 +242,8 @@ export const STORAGE_AUDIT_ISSUE_KINDS = [
   'missing_original',
   'original_size_mismatch',
   'original_checksum_mismatch',
+  // Deep audit only: R2 has no SHA-256 for this original (stored before D-018). Compare it by download.
+  'original_checksum_unrecorded',
   // Thumbnail / preview missing: the photo is intact but shows as broken.
   'missing_derivative',
   // Permanent delete that did not finish (resume it).

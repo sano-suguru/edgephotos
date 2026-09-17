@@ -15,6 +15,13 @@
       "when": 1789653451463,
       "tag": "0002_upload_asset_created_at",
       "breakpoints": false
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789654031544,
+      "tag": "0003_filtered_list_indexes",
+      "breakpoints": false
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { createLocalJWKSet } from 'jose'
 import { describe, it } from 'vitest'
-import { type BlobStore, backupLibrary, restoreLibrary, verifyLibrary } from '../../scripts/lib/backup'
+import { type BlobStore, backupLibrary, readManifest, restoreLibrary, verifyLibrary } from '../../scripts/lib/backup'
 import { createApp } from '../../src/worker/app'
 import { createR2Signer } from '../../src/worker/storage/signer'
 import { accessKeys, apiClient, assertion, call, callJson, makeApp, sha256, syntheticJpeg, testEnv } from '../helpers'
@@ -163,6 +163,9 @@ function memoryStore(): BlobStore & { bytes: () => number } {
     async get(path) {
       return files.get(path) ?? null
     },
+    async size(path) {
+      return files.get(path)?.byteLength ?? null
+    },
     bytes: () => [...files.values()].reduce((n, b) => n + b.byteLength, 0),
   }
 }
@@ -315,7 +318,8 @@ describe('scale', () => {
       const source = countingClient(local)
       const store = memoryStore()
       let t = performance.now()
-      const manifest = await backupLibrary(source.client, store)
+      await backupLibrary(source.client, store)
+      const manifest = await readManifest(store)
       const backupMs = performance.now() - t
       report(
         manifest.assets.length,
@@ -323,6 +327,31 @@ describe('scale', () => {
         `${(backupMs / 1000).toFixed(1)} s`,
         `api=${source.counts.api} blob=${source.counts.blob}`,
         `${(store.bytes() / 1024 / 1024).toFixed(1)} MiB`,
+      )
+
+      // Second run into the same directory: nothing new to download.
+      source.counts.api = 0
+      source.counts.blob = 0
+      t = performance.now()
+      const again = await backupLibrary(source.client, store)
+      report(
+        manifest.assets.length,
+        'backup export (incremental, no changes)',
+        `${((performance.now() - t) / 1000).toFixed(1)} s`,
+        `api=${source.counts.api} blob=${source.counts.blob}`,
+        `downloaded=${again.downloaded}`,
+      )
+
+      source.counts.api = 0
+      source.counts.blob = 0
+      t = performance.now()
+      const quick = await verifyLibrary(source.client, manifest, { quick: true })
+      report(
+        manifest.assets.length,
+        'backup verify --quick',
+        `${((performance.now() - t) / 1000).toFixed(1)} s`,
+        `api=${source.counts.api} blob=${source.counts.blob}`,
+        `ok=${quick.ok}`,
       )
 
       source.counts.api = 0

@@ -75,7 +75,7 @@ const PURGING_IDS_MAX = 100
 export async function diagnostics(db: Db, now: Date) {
   const row = await db.get<
     | {
-        assets: number
+        total: number
         trashed: number
         purging: number
         pending_uploads: number
@@ -85,8 +85,9 @@ export async function diagnostics(db: Db, now: Date) {
       }
     | undefined
   >(
+    // One pass over assets for the total; trash and purging counts read only their partial indexes.
     sql`SELECT
-        (SELECT COUNT(*) FROM assets WHERE status = 'ready' AND trashed_at IS NULL) AS assets,
+        (SELECT COUNT(*) FROM assets) AS total,
         (SELECT COUNT(*) FROM assets WHERE status = 'ready' AND trashed_at IS NOT NULL) AS trashed,
         (SELECT COUNT(*) FROM assets WHERE status = 'purging') AS purging,
         (SELECT COUNT(*) FROM uploads WHERE status = 'pending') AS pending_uploads,
@@ -98,15 +99,12 @@ export async function diagnostics(db: Db, now: Date) {
   const migration = await db
     .get<{ name: string } | undefined>(sql`SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1`)
     .catch(() => null)
-  const purging = await db
-    .select({ id: assets.id })
-    .from(assets)
-    .where(eq(assets.status, 'purging'))
-    .orderBy(asc(assets.updated_at), asc(assets.id))
-    .limit(PURGING_IDS_MAX)
+  const purging = await db.all<{ id: string }>(
+    sql`SELECT id FROM assets WHERE status = 'purging' ORDER BY updated_at, id LIMIT ${PURGING_IDS_MAX}`,
+  )
   return {
     counts: {
-      assets: row?.assets ?? 0,
+      assets: (row?.total ?? 0) - (row?.trashed ?? 0) - (row?.purging ?? 0),
       trashed: row?.trashed ?? 0,
       purging: row?.purging ?? 0,
       pendingUploads: row?.pending_uploads ?? 0,

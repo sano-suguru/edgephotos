@@ -175,8 +175,10 @@ export async function auditStorage(
       const asset = toCheck[i]
       const recorded = head?.checksums.sha256
       if (!head) issues.push({ kind: 'missing_original', assetId: asset.id })
-      else if (!recorded) checksumsUnrecorded++
-      else if (hex(recorded) !== asset.sha256) issues.push({ kind: 'original_checksum_mismatch', assetId: asset.id })
+      else if (!recorded) {
+        checksumsUnrecorded++
+        issues.push({ kind: 'original_checksum_unrecorded', assetId: asset.id })
+      } else if (hex(recorded) !== asset.sha256) issues.push({ kind: 'original_checksum_mismatch', assetId: asset.id })
     })
   }
 

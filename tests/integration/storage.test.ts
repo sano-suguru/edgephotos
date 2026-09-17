@@ -178,6 +178,16 @@ describe('storage audit', () => {
     for (const limit of [1, 2, 4, 200]) expect((await auditAll(app, { limit })).summary).toEqual(expectedUploads)
   })
 
+  it('lists originals stored before R2 recorded checksums in deep mode', async () => {
+    const app = await makeApp()
+    const { result, fixture } = await uploadPhoto(app)
+    await env.BUCKET.put(`originals/${result.asset.id}`, fixture.original)
+    expect((await auditAll(app)).summary).toEqual([])
+    const deep = await auditAll(app, { deep: true })
+    expect(deep.summary).toEqual([`original_checksum_unrecorded:${result.asset.id}:`])
+    expect(deep.checked.checksumsUnrecorded).toBe(1)
+  })
+
   it('does not write anything', async () => {
     const app = await makeApp()
     await uploadPhoto(app)

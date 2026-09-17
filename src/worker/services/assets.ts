@@ -83,7 +83,8 @@ export async function listAssets(ctx: ServiceContext, query: TimelineQuery) {
   }
   where.push(query.trashed ? sql`a.trashed_at IS NOT NULL` : sql`a.trashed_at IS NULL`)
   if (query.favorite !== undefined) {
-    where.push(sql`a.is_favorite = ${query.favorite ? 1 : 0}`)
+    // Literal, not a bound value, so SQLite can pick the assets_favorites partial index.
+    where.push(query.favorite ? sql`a.is_favorite = 1` : sql`a.is_favorite = 0`)
   }
   const cursor = decodeCursor(query.cursor)
   if (cursor) {

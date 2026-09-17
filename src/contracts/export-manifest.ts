@@ -1,4 +1,4 @@
-import type { ExportAlbumList, ExportAssetPage, ExportManifest, ExportMembershipPage } from './schemas'
+import type { ExportAlbumList, ExportAssetPage, ExportManifest, ExportMembershipPage } from './schemas.ts'
 
 // Assembles the paged export API into one manifest (format v1). Used by the Web app and the backup CLI.
 // Pages are read one after another while the library may change: memberships of photos that are not in the
