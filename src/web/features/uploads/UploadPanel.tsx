@@ -1,7 +1,7 @@
 import { useComputed } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { Button, buttonClass, cn } from '../../components/ui/button'
-import { Upload } from '../../components/ui/icons'
+import { Close, Upload } from '../../components/ui/icons'
 import { SUPPORTED_TYPES } from '../../lib/image'
 import { activeUploads, clearFinishedUploads, enqueueFiles, retryUploads, type UploadItem, uploads } from './upload'
 import { canAutoDismissUploads } from './upload-list'
@@ -39,11 +39,15 @@ export function UploadButton() {
       />
       <button
         type="button"
-        class={cn(buttonClass('default'), 'px-3 sm:px-4')}
+        // Phones show a plain icon: on a small screen a filled button outweighs the photos next to it.
+        class={cn(
+          buttonClass('default', 'md', true),
+          'px-4 max-sm:h-11 max-sm:min-w-11 max-sm:bg-transparent max-sm:px-2 max-sm:text-foreground max-sm:hover:bg-muted',
+        )}
         aria-label={activeUploads.value > 0 ? `アップロード（残り ${activeUploads.value} 枚）` : 'アップロード'}
         onClick={() => input.current?.click()}
       >
-        <Upload class="size-4" />
+        <Upload class="size-5 sm:size-4" />
         <span class="hidden sm:inline">アップロード</span>
         {activeUploads.value > 0 && <span class="tabular-nums">{activeUploads.value}</span>}
       </button>
@@ -84,22 +88,19 @@ export function UploadList() {
 
   return (
     <div
-      class={cn(
-        'mb-4 flex items-start rounded-lg border bg-white text-sm',
-        s.failed > 0 && !active ? 'border-destructive/40' : 'border-border',
-      )}
+      class={cn('mb-4 flex items-start rounded-xl text-sm', s.failed > 0 && !active ? 'bg-destructive/10' : 'bg-muted')}
     >
       <details class="min-w-0 flex-1" open={active || s.failed > 0}>
-        <summary class="flex cursor-pointer select-none items-center gap-3 px-3 py-2">
+        <summary class="flex min-h-11 cursor-pointer select-none items-center gap-3 px-4">
           <span class="flex-1" aria-live="polite">
             {headline}
           </span>
           <span class="text-xs text-muted-foreground">アップロード状況</span>
         </summary>
         {active && (
-          <div class="space-y-1 px-3">
+          <div class="space-y-1 px-4">
             <div
-              class="h-1 overflow-hidden rounded-full bg-muted"
+              class="h-1 overflow-hidden rounded-full bg-black/10"
               role="progressbar"
               aria-label="完了した枚数"
               aria-valuemin={0}
@@ -107,7 +108,7 @@ export function UploadList() {
               aria-valuenow={finished}
             >
               <div
-                class="h-full bg-primary transition-[width] motion-reduce:transition-none"
+                class="h-full bg-accent transition-[width] motion-reduce:transition-none"
                 style={{ width: `${(finished / s.total) * 100}%` }}
               />
             </div>
@@ -118,7 +119,7 @@ export function UploadList() {
             )}
           </div>
         )}
-        <ul class="max-h-48 space-y-1 overflow-auto px-3 py-2">
+        <ul class="max-h-48 space-y-1 overflow-auto px-4 py-2">
           {uploads.value.map((u) => (
             <li key={u.id} class="flex justify-between gap-3">
               <span class="min-w-0 truncate">{u.name}</span>
@@ -132,7 +133,7 @@ export function UploadList() {
           ))}
         </ul>
         {!active && s.retryable > 0 && (
-          <div class="flex justify-end border-t border-border px-3 py-2">
+          <div class="flex justify-end px-4 pb-3">
             <Button size="sm" onClick={() => void retryUploads()}>
               失敗した {s.retryable} 枚を再試行
             </Button>
@@ -143,10 +144,10 @@ export function UploadList() {
         <button
           type="button"
           aria-label="アップロード状況を消す"
-          class="m-1 shrink-0 rounded-md px-2 py-1 text-muted-foreground hover:bg-muted"
+          class={cn(buttonClass('ghost', 'icon'), 'm-1 shrink-0 text-muted-foreground hover:bg-black/5')}
           onClick={clearFinishedUploads}
         >
-          ✕
+          <Close class="size-4" />
         </button>
       )}
     </div>

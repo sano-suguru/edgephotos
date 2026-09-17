@@ -2,7 +2,7 @@ import { useSignal, useSignalEffect } from '@preact/signals'
 import type { Album } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { ConfirmDialog, Dialog } from '../../components/ui/dialog'
-import { Albums } from '../../components/ui/icons'
+import { Albums, More } from '../../components/ui/icons'
 import { DropdownMenu } from '../../components/ui/menu'
 import { showToast } from '../../components/ui/toast'
 import { api } from '../../lib/api/client'
@@ -37,7 +37,7 @@ export function AlbumPage({ id }: { id: string }) {
       <div role="alert" class="py-16 text-center text-sm">
         <p>アルバムを表示できません。</p>
         <p class="mt-1 text-muted-foreground">{error.value}</p>
-        <Button variant="outline" class="mt-3" onClick={() => navigate('/albums')}>
+        <Button variant="secondary" class="mt-3" onClick={() => navigate('/albums')}>
           アルバム一覧へ
         </Button>
       </div>
@@ -47,7 +47,7 @@ export function AlbumPage({ id }: { id: string }) {
     return (
       <div aria-busy="true">
         <span class="sr-only">読み込み中…</span>
-        <div class="mb-6 h-12 w-48 rounded bg-muted motion-safe:animate-pulse" />
+        <div class="mb-6 h-14 w-48 rounded-lg bg-muted motion-safe:animate-pulse" />
       </div>
     )
   }
@@ -55,7 +55,7 @@ export function AlbumPage({ id }: { id: string }) {
 
   return (
     <section>
-      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div class="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <a
             href="/albums"
@@ -67,12 +67,14 @@ export function AlbumPage({ id }: { id: string }) {
           >
             ← アルバム
           </a>
-          <h1 class="text-xl font-semibold">{current.title}</h1>
+          <h1 class="text-2xl font-semibold tracking-tight">{current.title}</h1>
         </div>
-        <div class="flex gap-2">
-          <Button onClick={() => (sharing.value = true)}>共有</Button>
+        <div class="flex gap-1">
+          <Button variant="secondary" pill onClick={() => (sharing.value = true)}>
+            共有
+          </Button>
           <DropdownMenu
-            label="…"
+            label={<More />}
             ariaLabel="アルバムの操作"
             items={[
               {
@@ -101,7 +103,7 @@ export function AlbumPage({ id }: { id: string }) {
         albumId={current.id}
         empty={
           <>
-            <Albums class="size-10 text-muted-foreground/60" />
+            <Albums class="size-8 text-muted-foreground/50" />
             <p>このアルバムにはまだ写真がありません。</p>
             <p>タイムラインで写真を開き、「アルバムに追加」から追加できます。</p>
           </>
@@ -129,14 +131,16 @@ export function AlbumPage({ id }: { id: string }) {
             maxLength={200}
             value={draft.value}
             onInput={(e) => (draft.value = (e.currentTarget as HTMLInputElement).value)}
-            class="h-9 rounded-md border border-border px-3"
+            class="h-10 rounded-lg bg-muted px-3"
           />
           {renameError.value && (
             <p role="alert" class="text-sm text-destructive">
               {renameError.value}
             </p>
           )}
-          <Button type="submit">保存</Button>
+          <Button type="submit" class="mt-2 self-end">
+            保存
+          </Button>
         </form>
       </Dialog>
 

@@ -2,14 +2,17 @@
 
 @source "./";
 
+/* Quiet, neutral chrome so the photos carry the color. Filled buttons are ink (one per screen); the accent
+   marks state only: the current tab, focus, progress. Sections separate by space and type, not boxes. */
 @theme {
-  --color-background: oklch(0.985 0.002 250);
-  --color-foreground: oklch(0.2 0.02 260);
-  --color-muted: oklch(0.95 0.005 250);
-  --color-muted-foreground: oklch(0.5 0.02 260);
-  --color-border: oklch(0.9 0.008 250);
-  --color-primary: oklch(0.52 0.14 255);
+  --color-background: oklch(0.995 0 0);
+  --color-foreground: oklch(0.21 0 0);
+  --color-muted: oklch(0.96 0 0);
+  --color-muted-foreground: oklch(0.5 0 0);
+  --color-border: oklch(0.92 0 0);
+  --color-primary: oklch(0.21 0 0);
   --color-primary-foreground: oklch(0.99 0 0);
+  --color-accent: oklch(0.55 0.15 255);
   --color-destructive: oklch(0.55 0.2 27);
   --radius-lg: 0.75rem;
 }
@@ -21,7 +24,7 @@
     color: var(--color-foreground);
   }
   :focus-visible {
-    outline: 2px solid var(--color-primary);
+    outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
 }

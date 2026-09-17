@@ -58,10 +58,10 @@ export function SettingsPage() {
   }
 
   return (
-    <section class="max-w-2xl space-y-6">
-      <h1 class="text-xl font-semibold">ライブラリ</h1>
+    <section class="max-w-2xl">
+      <h1 class="mb-6 text-2xl font-semibold tracking-tight">ライブラリ</h1>
       {error.value && (
-        <p role="alert" class="text-sm text-destructive">
+        <p role="alert" class="mb-4 text-sm text-destructive">
           {error.value}
         </p>
       )}
@@ -71,7 +71,7 @@ export function SettingsPage() {
           e.preventDefault()
           navigate('/trash')
         }}
-        class="flex items-center gap-3 rounded-lg border border-border bg-white p-4 text-sm hover:bg-muted"
+        class="-mx-3 flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm hover:bg-muted"
       >
         <Trash class="size-5 text-muted-foreground" />
         <span class="flex-1 font-medium">ゴミ箱</span>
@@ -80,34 +80,39 @@ export function SettingsPage() {
         </span>
       </a>
       {diag.value && (
-        <dl class="grid grid-cols-2 gap-2 rounded-lg border border-border bg-white p-4 text-sm">
-          <dt class="text-muted-foreground">写真</dt>
-          <dd>{diag.value.counts.assets}</dd>
-          <dt class="text-muted-foreground">ゴミ箱</dt>
-          <dd>{diag.value.counts.trashed}</dd>
-          <dt class="text-muted-foreground">アルバム</dt>
-          <dd>{diag.value.counts.albums}</dd>
-          <dt class="text-muted-foreground">未完了のアップロード</dt>
-          <dd>
-            {diag.value.counts.pendingUploads}
-            {diag.value.counts.expiredUploads > 0 && `（うち期限切れ ${diag.value.counts.expiredUploads}）`}
-          </dd>
-          <dt class="text-muted-foreground">削除処理中</dt>
-          <dd>{diag.value.counts.purging}</dd>
-          <dt class="text-muted-foreground">最終 export</dt>
-          <dd>{diag.value.lastExportAt ?? '未実施'}</dd>
-          <dt class="text-muted-foreground">Migration</dt>
-          <dd>{diag.value.latestMigration ?? '—'}</dd>
-        </dl>
-      )}
-      {diag.value && diag.value.counts.expiredUploads > 0 && (
-        <p class="text-sm text-muted-foreground">
-          期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。写真がタイムラインに無ければ、もう一度選んでアップロードしてください。
-        </p>
+        <div class="mt-10">
+          <h2 class="mb-2 text-sm font-semibold">状態</h2>
+          <dl class="divide-y divide-border text-sm">
+            {(
+              [
+                ['写真', diag.value.counts.assets],
+                ['ゴミ箱', diag.value.counts.trashed],
+                ['アルバム', diag.value.counts.albums],
+                [
+                  '未完了のアップロード',
+                  `${diag.value.counts.pendingUploads}${diag.value.counts.expiredUploads > 0 ? `（うち期限切れ ${diag.value.counts.expiredUploads}）` : ''}`,
+                ],
+                ['削除処理中', diag.value.counts.purging],
+                ['最終 export', diag.value.lastExportAt ?? '未実施'],
+                ['Migration', diag.value.latestMigration ?? '—'],
+              ] as const
+            ).map(([label, value]) => (
+              <div key={label} class="flex justify-between gap-4 py-2.5">
+                <dt class="text-muted-foreground">{label}</dt>
+                <dd class="text-right tabular-nums">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {diag.value.counts.expiredUploads > 0 && (
+            <p class="mt-3 text-sm text-muted-foreground">
+              期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。写真がタイムラインに無ければ、もう一度選んでアップロードしてください。
+            </p>
+          )}
+        </div>
       )}
       {diag.value && diag.value.purgingAssetIds.length > 0 && (
-        <div class="space-y-2 rounded-lg border border-border bg-white p-4 text-sm">
-          <h2 class="font-medium">中断した完全削除</h2>
+        <div class="mt-10 space-y-3 text-sm">
+          <h2 class="font-semibold text-destructive">中断した完全削除</h2>
           <p class="text-muted-foreground">
             {`完全削除が途中で止まった写真が ${diag.value.counts.purging} 枚あります。どの画面にも表示されず、元に戻せません。削除を最後まで実行します。${diag.value.purgingAssetIds.length < diag.value.counts.purging ? `1 回に処理するのは古い順に ${diag.value.purgingAssetIds.length} 枚までです。残りは、終わったあとにもう一度押してください。` : ''}`}
           </p>
@@ -120,13 +125,13 @@ export function SettingsPage() {
           </Button>
         </div>
       )}
-      <div class="space-y-2 rounded-lg border border-border bg-white p-4 text-sm">
-        <h2 class="font-medium">Export</h2>
+      <div class="mt-10 space-y-3 text-sm">
+        <h2 class="font-semibold">Export</h2>
         <p class="text-muted-foreground">
           metadata・アルバム構成・オリジナルの SHA-256 を含む manifest を保存します。オリジナル本体を含む完全な backup
           と restore は <code>pnpm backup</code> CLI を使用してください（docs/operations.md）。
         </p>
-        <Button variant="outline" onClick={downloadManifest}>
+        <Button variant="secondary" onClick={downloadManifest}>
           manifest をダウンロード
         </Button>
       </div>

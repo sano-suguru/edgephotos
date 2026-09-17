@@ -2,6 +2,7 @@ import { signal } from '@preact/signals'
 import { render } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import type { SharedAlbum, SignedUrl } from '../../contracts/schemas'
+import { buttonClass } from '../components/ui/button'
 import { Close } from '../components/ui/icons'
 import '../styles.css'
 
@@ -102,7 +103,7 @@ function PhotoOverlay(props: { id: string; url: string | null }) {
       role="dialog"
       aria-modal="true"
       aria-label="写真"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
       onClick={() => {
         viewing.value = null
       }}
@@ -143,15 +144,15 @@ function SharePage() {
   const a = album.value
   return (
     <>
-      <main class="mx-auto max-w-6xl p-4">
-        <h1 class="mb-1 text-xl font-semibold">{a.album.title}</h1>
-        <p class="mb-4 text-sm text-muted-foreground">期限 {new Date(a.expiresAt).toLocaleString()}</p>
-        <ul class="grid grid-cols-3 gap-1 sm:grid-cols-4 md:grid-cols-6">
+      <main class="mx-auto max-w-6xl px-4 pb-10 pt-8">
+        <h1 class="text-2xl font-semibold tracking-tight">{a.album.title}</h1>
+        <p class="mb-6 mt-1 text-sm text-muted-foreground">期限 {new Date(a.expiresAt).toLocaleString()}</p>
+        <ul class="grid grid-cols-3 gap-0.5 sm:grid-cols-4 sm:gap-1 md:grid-cols-6">
           {a.items.map((item) => (
-            <li key={item.id} class="aspect-square overflow-hidden rounded bg-muted">
+            <li key={item.id} class="aspect-square overflow-hidden bg-muted">
               <button
                 type="button"
-                class="h-full w-full"
+                class="block h-full w-full focus-visible:outline-offset-[-3px]"
                 data-item-id={item.id}
                 onClick={() => openPreview(item.id)}
                 aria-label="拡大表示"
@@ -173,12 +174,8 @@ function SharePage() {
           ))}
         </ul>
         {a.nextCursor && (
-          <div class="mt-4 text-center">
-            <button
-              type="button"
-              class="rounded-md border border-border px-4 py-2 text-sm"
-              onClick={() => loadAlbum(a.nextCursor ?? undefined)}
-            >
+          <div class="mt-6 text-center">
+            <button type="button" class={buttonClass('secondary')} onClick={() => loadAlbum(a.nextCursor ?? undefined)}>
               さらに表示
             </button>
           </div>

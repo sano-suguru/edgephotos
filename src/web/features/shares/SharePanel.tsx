@@ -63,7 +63,7 @@ export function SharePanel({ albumId }: { albumId: string }) {
   }
 
   return (
-    <div class="flex flex-col gap-4 text-sm">
+    <div class="flex flex-col gap-5 text-sm">
       <form
         ref={form}
         class="flex items-end gap-2"
@@ -75,7 +75,7 @@ export function SharePanel({ albumId }: { albumId: string }) {
           })
         }}
       >
-        <label class="flex flex-col gap-1">
+        <label class="flex flex-col gap-1.5 text-muted-foreground">
           有効期限（日）
           <input
             type="number"
@@ -83,24 +83,24 @@ export function SharePanel({ albumId }: { albumId: string }) {
             max={365}
             value={days.value}
             onInput={(e) => (days.value = Number((e.currentTarget as HTMLInputElement).value))}
-            class="h-9 w-24 rounded-md border border-border px-2 text-base md:text-sm"
+            class="h-9 w-24 rounded-lg bg-muted px-3 text-base text-foreground md:text-sm"
           />
         </label>
         <Button type="submit">リンクを発行</Button>
       </form>
 
       {fresh.value && (
-        <div class="rounded-md border border-border bg-muted p-3">
-          <p class="mb-2 font-medium">新しいリンク（この画面を閉じると再表示できません）</p>
+        <div>
+          <p class="mb-1.5 font-medium">新しいリンク（この画面を閉じると再表示できません）</p>
           <div class="flex gap-2">
             <input
               readOnly
               value={fresh.value.url}
               aria-label="共有リンク"
-              class="h-9 flex-1 rounded-md border border-border px-2 text-base md:text-sm"
+              class="h-9 min-w-0 flex-1 rounded-lg bg-muted px-3 text-base md:text-sm"
             />
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={async () => {
                 await navigator.clipboard.writeText(fresh.value?.url ?? '')
                 copied.value = true
@@ -118,18 +118,18 @@ export function SharePanel({ albumId }: { albumId: string }) {
         </p>
       )}
 
-      <ul class="divide-y divide-border">
+      <ul class="divide-y divide-border empty:hidden">
         {shares.value.map((share) => (
-          <li key={share.id} class="flex items-center justify-between gap-2 py-2">
+          <li key={share.id} class="flex items-center justify-between gap-2 py-2.5">
             <div>
               <div>{STATUS[share.status]}</div>
               <div class="text-muted-foreground">期限 {new Date(share.expiresAt).toLocaleString()}</div>
             </div>
             {share.status === 'active' && (
-              <div class="flex gap-1">
+              <div class="flex shrink-0 gap-1">
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   onClick={(e) => {
                     opener.current = e.currentTarget
                     confirming.value = { kind: 'regenerate', shareId: share.id }
@@ -140,7 +140,7 @@ export function SharePanel({ albumId }: { albumId: string }) {
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant="destructive-ghost"
                   onClick={(e) => {
                     opener.current = e.currentTarget
                     confirming.value = { kind: 'revoke', shareId: share.id }

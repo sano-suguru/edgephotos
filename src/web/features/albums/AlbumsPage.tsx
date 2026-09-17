@@ -31,7 +31,7 @@ function AlbumCover(props: { album: Album }) {
   })
 
   return (
-    <div class="relative aspect-square overflow-hidden rounded-xl bg-muted">
+    <div class="relative aspect-square overflow-hidden rounded-lg bg-muted">
       {url.value && !failed.value ? (
         <img
           src={url.value}
@@ -99,14 +99,16 @@ export function AlbumsPage() {
 
   return (
     <section>
-      <div class="mb-4 flex items-center justify-between">
-        <h1 class="text-xl font-semibold">アルバム</h1>
-        <Button onClick={() => (creating.value = true)}>新規アルバム</Button>
+      <div class="mb-6 flex items-center justify-between gap-3">
+        <h1 class="text-2xl font-semibold tracking-tight">アルバム</h1>
+        <Button variant="secondary" pill onClick={() => (creating.value = true)}>
+          新規アルバム
+        </Button>
       </div>
       {error.value && (
         <div role="alert" class="mb-3 flex items-center gap-3 text-sm">
           <p class="text-destructive">アルバムを読み込めませんでした。{error.value}</p>
-          <Button size="sm" variant="outline" onClick={() => void load()}>
+          <Button size="sm" variant="secondary" onClick={() => void load()}>
             再試行
           </Button>
         </div>
@@ -116,7 +118,7 @@ export function AlbumsPage() {
           <span class="sr-only">読み込み中…</span>
           {Array.from({ length: 5 }, (_, i) => (
             <div key={i}>
-              <div class="aspect-square rounded-xl bg-muted motion-safe:animate-pulse" />
+              <div class="aspect-square rounded-lg bg-muted motion-safe:animate-pulse" />
               <div class="mt-2 h-4 w-2/3 rounded bg-muted motion-safe:animate-pulse" />
             </div>
           ))}
@@ -124,7 +126,7 @@ export function AlbumsPage() {
       )}
       {albums.value?.length === 0 && (
         <div class="flex flex-col items-center gap-3 py-20 text-center text-sm text-muted-foreground">
-          <Albums class="size-10 text-muted-foreground/60" />
+          <Albums class="size-8 text-muted-foreground/50" />
           <p>アルバムはまだありません。</p>
           <p>「新規アルバム」で作成し、写真を開いてアルバムに追加できます。</p>
         </div>
@@ -138,18 +140,18 @@ export function AlbumsPage() {
                 e.preventDefault()
                 navigate(`/albums/${album.id}`)
               }}
-              class="group block rounded-xl"
+              class="group block rounded-lg"
             >
               <AlbumCover album={album} />
-              <div class="mt-2 truncate font-medium">{album.title}</div>
-              <div class="text-sm text-muted-foreground">{album.assetCount} 枚</div>
+              <div class="mt-2 truncate text-sm font-medium">{album.title}</div>
+              <div class="text-xs text-muted-foreground tabular-nums">{album.assetCount} 枚</div>
             </a>
           </li>
         ))}
       </ul>
       <Dialog open={creating.value} onOpenChange={(open) => (creating.value = open)} title="新規アルバム">
         <form onSubmit={create} class="flex flex-col gap-3">
-          <label class="text-sm" for="album-title">
+          <label class="text-sm text-muted-foreground" for="album-title">
             タイトル
           </label>
           <input
@@ -158,14 +160,14 @@ export function AlbumsPage() {
             maxLength={200}
             value={title.value}
             onInput={(e) => (title.value = (e.currentTarget as HTMLInputElement).value)}
-            class="h-9 rounded-md border border-border px-3"
+            class="h-10 rounded-lg bg-muted px-3"
           />
           {createError.value && (
             <p role="alert" class="text-sm text-destructive">
               {createError.value}
             </p>
           )}
-          <Button type="submit" disabled={title.value.trim() === ''}>
+          <Button type="submit" class="mt-2 self-end" disabled={title.value.trim() === ''}>
             作成
           </Button>
         </form>
