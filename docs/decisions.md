@@ -202,7 +202,7 @@ Migration:
 D-012 では `assets.sha256` は client の申告値で、R2 上の byte 列と一致する保証がありませんでした。重複判定・backup・restore はこの値を content identity として使うため、storage 側で一致を保証します。
 
 - reserve は original の presigned PUT に `x-amz-checksum-sha256: base64(申告 SHA-256 の raw digest)` を署名 header として含める（SigV4 の `X-Amz-SignedHeaders` に入る）。Client が header を省略・変更すると署名が合わない
-- R2 は PUT body の SHA-256 がこの値と一致しなければ PUT を `400 BadDigest` で拒否し、object を作らない（S3 PutObject の checksum。R2 は 2023-06-16 の release note で S3 PutObject の sha256 checksum に対応。remote-test で実測済み。operations.md 冒頭）
+- R2 は PUT body の SHA-256 がこの値と一致しなければ PUT を `400 BadDigest` で拒否し、object を作らない（S3 PutObject の checksum。R2 は 2023-06-16 の release note で S3 PutObject の sha256 checksum に対応。remote-test で実測済み。[verification.md](verification.md)）
 - finalize は R2 binding の `head()` が返す `checksums.sha256` を申告値と比較する。R2 は put 時に指定された checksum を object に記録し、S3 API で PUT した object でも binding から読める（remote-test で実測済み）。記録がない・値が違う original は `422 UPLOAD_OBJECT_INVALID`（`checksum_missing` / `checksum_mismatch`）とし、`ready` にしない。何らかの経路で checksum 検証を経ずに置かれた object に対しても fail-closed になる
 - Worker は original を download も hash もしない。確認は HEAD 1 回で済む
 - thumbnail / preview は再生成可能な derivative で、content identity に使わないため checksum を付けない
@@ -254,13 +254,15 @@ v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Cl
 
 **状態:** 採用
 
-実機由来の公開サンプル写真と合成 fixture を使い、Chromium と WebKit で取り込みを検証しました（結果は operations.md 冒頭）。見つかった問題は、server の契約を変えずに Client 側で直しています。
+実機由来の公開サンプル写真と合成 fixture を使い、Chromium と WebKit で取り込みを検証しました（経過は [verification.md](verification.md)、memory の数値は [benchmarks.md](benchmarks.md)）。見つかった問題は、server の契約を変えずに Client 側で直します。
 
-- **WebKit の canvas JPEG には APP1 / APP13 が付く。** WebKit の `canvas.toBlob('image/jpeg')` は、APP1（Exif: ColorSpace と PixelX/YDimension）と APP13（空の Photoshop IRB）を書き出す。finalize はこれを `metadata_segment` として拒否するため、Safari からの upload が全件 `422 UPLOAD_OBJECT_INVALID` になっていた。Client が PUT 前に APP1 / APP13 を取り除く（`src/web/lib/jpeg-metadata.ts`）。finalize の検査は緩めない。撮影 metadata がないことは、引き続き server が保証する
-- **PUT を再試行する。** 3 回の PUT のどれかが一時的に失敗すると、その写真全体が失敗していた。network error、408、429、5xx は、backoff を挟んで最大 4 回まで試す。`412` は保存済みとして扱う（`src/web/lib/storage-put.ts`）。key は reserve ごとに固有で、`If-None-Match: *` で署名しているため、`412` になるのは同じ upload の以前の試行が R2 に届き、応答だけが失われた場合に限られる。finalize は引き続き size と、original については R2 が検証した SHA-256 を確認する。実 R2 の `412` が CORS 越しに status として読めることは、remote-test で確認済み（operations.md 冒頭）。`400`（BadDigest）と `403`（期限切れ）は再試行しない
-- **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らなかった。300 枚を選ぶと、100 件近くを残したまま完了表示になっていた。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削る（`src/web/features/uploads/upload-list.ts`）
-- **前処理の並列数は 2 のままにする。** 2 が最適だと示したわけではない。desktop の Browser では、変えるだけの根拠が得られなかった。 1 枚分の peak memory は、ほぼ decode 後の bitmap（幅 × 高さ × 4 byte）で決まる。ArrayBuffer を早く手放す案、canvas を 0×0 にして解放する案は、測定の揺れを超える差が出なかったため入れない。Chromium では並列数を 1 増やすごとに peak が bitmap 1 枚分増え、1 → 2 で時間が約 2 割縮んだ。WebKit では peak も時間もほぼ変わらなかった。bitmap は PUT の前に close されるため、転送中に保持するのは File と小さな derivative だけになる。Web Worker は導入しない。mobile では、1 → 2 の速度差（約 2 割）より peak の増分（48MP で bitmap 約 190MB）の方が重い可能性がある。iPhone の実機で 48MP を数枚続けて取り込み、Safari が落ちる場合は、まず並列数 1 を試す
-  - 2 は画面全体での上限です（2026-09-17 修正）。以前は写真を選ぶたびに 2 本の処理を追加していたため、取り込み中にもう一度選ぶと 4 枚、3 回選ぶと 6 枚を同時に decode できました。上の測定は同時に 2 枚までを前提にしています。現在は、後から選んだ写真は先の写真の後ろに並びます（`src/web/lib/task-limit.ts`）
+- **WebKit の canvas JPEG には APP1 / APP13 が付く。** WebKit の `canvas.toBlob('image/jpeg')` は、APP1（Exif: ColorSpace と PixelX/YDimension）と APP13（空の Photoshop IRB）を書き出す。finalize はこれを `metadata_segment` として拒否するため、Safari からの upload が失敗していた。Client が PUT 前に APP1 / APP13 を取り除く（`src/web/lib/jpeg-metadata.ts`）。finalize の検査は緩めない。撮影 metadata がないことは、引き続き server が保証する
+- **PUT を再試行する。** 3 回の PUT のどれかが一時的に失敗すると、その写真全体が失敗していた。network error、408、429、5xx は、backoff を挟んで最大 4 回まで試す。`412` は保存済みとして扱う（`src/web/lib/storage-put.ts`）。key は reserve ごとに固有で、`If-None-Match: *` で署名しているため、`412` になるのは同じ upload の以前の試行が R2 に届き、応答だけが失われた場合に限られる。finalize は引き続き size と、original については R2 が検証した SHA-256 を確認する。実 R2 の `412` が CORS 越しに status として読めることは、remote-test で確認済み（[verification.md](verification.md)）。`400`（BadDigest）と `403`（期限切れ）は再試行しない
+- **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らず、未完了のまま完了表示になっていた。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削る（`src/web/features/uploads/upload-list.ts`）
+- **前処理の並列数は 2 のままにする。** 2 が最適だと示したわけではなく、desktop の Browser では変えるだけの根拠が得られなかった。1 枚分の peak memory は、ほぼ decode 後の bitmap（幅 × 高さ × 4 byte）で決まる。並列数を上げると Chromium では peak が bitmap 1 枚分ずつ増え、1 → 2 で時間が約 2 割縮む。WebKit ではどちらもほぼ変わらない。bitmap は PUT の前に close されるため、転送中に保持するのは File と小さな derivative だけになる
+  - 入れなかったもの: ArrayBuffer を早く手放す案と、canvas を 0×0 にして解放する案（測定の揺れを超える差が出なかった）。Web Worker
+  - 再検討の条件: mobile では、1 → 2 の速度差より peak の増分（48MP で bitmap 約 190MB）の方が重い可能性がある。iPhone の実機で 48MP を数枚続けて取り込み、Safari が落ちる場合は、まず並列数 1 を試す
+  - 2 は選択の回数によらず、画面全体での上限とする。上の判断は同時に 2 枚までを前提にしている。後から選んだ写真は先の写真の後ろに並ぶ（`src/web/lib/task-limit.ts`）
 
 ## D-021: Browser 固有の経路だけを Playwright で自動化する
 

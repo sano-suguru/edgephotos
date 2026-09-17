@@ -68,30 +68,22 @@
 
 到達点:
 
-- ✅ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する（Worker 側の owner check は unit test で担保。Access policy が owner のみ Allow である限り、他 identity は Worker まで到達しないため remote では実測できない）
+- ✅ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する（Worker 側の owner check は unit test で担保。[verification.md](verification.md)）
 - ✅ 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
-- ✅ original の checksum 付き PUT（[D-018](decisions.md)）が実 R2 で機能する（digest 違いは `400 BadDigest` で object なし、正しい bytes は `200`、binding の `head().checksums.sha256` を finalize で照合できる。Browser の CORS 越し）
-- 🟡 スマートフォンで撮影した実写真（orientation・GPS・大きい画素数を含む）を 20〜30 枚 upload し、timeline の向きと表示を確認する（EXIF orientation 1〜8・GPS・JPEG / PNG / WebP・160×120 から 6000×4000 を含む合成 20 枚と、実機由来の JPEG 1 枚で確認済み。カメラロール原本による確認は post-merge verification へ送る）
+- ✅ original の checksum 付き PUT（[D-018](decisions.md)）が実 R2 で機能する
+- 🟡 スマートフォンで撮影した実写真（orientation・GPS・大きい画素数を含む）を 20〜30 枚 upload し、timeline の向きと表示を確認する（合成画像と実機由来の JPEG 1 枚で確認済み。カメラロール原本による確認は post-merge verification へ送る）
 
 ## Post-merge verification
 
 merge を止める条件から外し、実際に使い始めてから確認する項目です。新機能の追加は伴いません。
 
 - ⬜ 普段の入力経路でスマートフォン写真を数枚 upload し、timeline の orientation と preview を確認する
-- ⬜ iPhone Safari の実機で、取り込みの memory と lifecycle を確認する（desktop の WebKit では代用できない）
-  - 48MP の HEIC を複数選択する（落ちる場合は前処理の並列数 1 を試す。[D-020](decisions.md)）
-  - iCloud にしかない写真を選ぶ
-  - 100〜200 枚を選ぶ
-  - upload 中に画面をロックする、Safari を background へ移す、Wi-Fi とモバイル回線を切り替える
-  - 10 分を超えて中断し、presigned URL の期限切れを踏む
-  - 選択時の HEIC → JPEG 変換と、位置情報の扱いを確認する
-- ⬜ Android の実機で、同じ項目のうち該当するもの（HEIF 設定の端末を含む）を確認する
-
-実機由来の公開サンプルと合成 fixture による取り込みは、Chromium と WebKit で検証済みです（operations.md 冒頭）。残っているのは iPhone / Android 実機でしか確かめられない点です。具体的には、iOS の写真ピッカーの HEIC → JPEG 変換、mobile Safari の memory 上限、画面ロックで中断した upload の再開です。表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。
+- ⬜ iPhone Safari の実機で、取り込みの memory と lifecycle を確認する（確認項目は [verification.md](verification.md) の「未検証」）
+- ⬜ Android の実機で、同じ項目のうち該当するものを確認する
 - ✅ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
 - ✅ remote で backup export → verify → 別の空環境への restore を 1 回成功させる
 
-実測の詳細は [operations.md](operations.md) 冒頭の検証状況を正本とします。
+実測の詳細は [verification.md](verification.md) を正本とします。
 
 ## 既知の制約
 
@@ -128,7 +120,7 @@ private alpha を継続利用に近づけるための段階です。新しい構
 - ✅ 1,000 / 10,000 件の scale 測定（[benchmarks.md](benchmarks.md)）
 - ✅ Actions の SHA 固定、Dependabot、release / rollback / credential 更新 / 復旧 drill の手順（operations.md §8、§13、§14）
 
-続き（2026-09-17、local で確認したあと remote-test へ deploy して確認。iPhone / Android 実機は未確認。確認方法は operations.md 冒頭）:
+続き（2026-09-17、local で確認したあと remote-test へ deploy して確認。iPhone / Android 実機は未確認。確認方法は [verification.md](verification.md)）:
 
 - ✅ 完全削除が途中で止まった写真を選び直すと「登録済み」と表示され、実際には登録されない不具合を修正。止まる前に reserve していた upload の finalize が、新しい object を重複として消す不具合も同じ原因（[D-014](decisions.md)）
 - ✅ 止まった完全削除を、ライブラリ画面から再開できるようにした（以前は対象が画面に出ず、再開できなかった）
@@ -145,7 +137,7 @@ private alpha を継続利用に近づけるための段階です。新しい構
 - update / uninstall procedure
 - screenshots / demo
 - accessibility の基本確認
-- 実機での client-side image processing 計測（desktop の Chromium / WebKit では計測済み。operations.md 冒頭）
+- 実機での client-side image processing 計測（desktop の Chromium / WebKit では計測済み。[benchmarks.md](benchmarks.md)）
 
 ## Future
 

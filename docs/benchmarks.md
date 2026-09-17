@@ -1,6 +1,6 @@
-# Scale 測定
+# 測定
 
-1,000〜10,000 asset を想定した測定結果と、その結果をもとに下した判断を記録します。測定は合成データで行い、実写真は使っていません。
+1,000〜10,000 asset を想定した scale の測定結果と、その結果をもとに下した判断を記録します。Browser での取り込みの memory も記録します。測定は合成データと公開サンプルで行い、実写真（家族写真など）は使っていません。
 
 再測定:
 
@@ -110,6 +110,31 @@ remote での見積もり（上の往復時間から。original の転送時間�
 production build の bundle（gzip）: app 83 KB、共通 CSS / JS 14 KB、共有ページ 1.5 KB。
 
 期限切れ URL の回復（[D-021](decisions.md)）の cost（1,020 件表示時、Chromium）: API 17 回。表示済みの thumbnail は再取得しない（修正前の実装では 1,021 枚を取り直していた）。1 分以内に次の失敗が起きても再取得しない。
+
+## Browser の取り込み memory（2026-09-17）
+
+local の `vite dev`、Playwright の Chromium 151 と WebKit 26.5、macOS。Browser のプロセスツリーの RSS を 50ms ごとに採取し、1 枚処理中の増分を記録した。画像は [verification.md](verification.md) の「Browser での取り込み」と同じ。
+
+| 画素数 | 1 枚処理中の RSS 増分 |
+| --- | --- |
+| 12MP | 約 45〜110MB |
+| 48MP / 50MP | 約 190〜340MB |
+| 108MP | 約 440〜840MB |
+| 200MP | 約 0.9〜1.1GB |
+
+decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の ArrayBuffer（最大 23MB）は小さい。
+
+200 件の連続 upload（計 920MB、48MP / 50MP を 6 件含む）で RSS は単調増加せず、peak は Chromium 約 1.1GB、WebKit 約 0.9GB（WebContent 単体では約 0.6GB）だった。
+
+前処理の並列数（48MP を 6 件）:
+
+| 並列数 | Chromium の増分 / 所要時間 | WebKit の増分 / 所要時間 |
+| --- | --- | --- |
+| 1 | 420MB / 2.0 秒 | 527MB / 約 2.3 秒 |
+| 2 | 682MB / 1.6 秒 | 481MB / 約 2.3 秒 |
+| 3 | 975MB / 1.5 秒 | 522MB / 約 2.3 秒 |
+
+判断は [D-020](decisions.md)。
 
 ## 判断
 

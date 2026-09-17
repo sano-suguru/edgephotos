@@ -250,7 +250,7 @@ original の期待 SHA-256 を fixture metadata として固定します。
 
 現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。Browser E2E は canvas で描いた JPEG を使います。orientation、透明 PNG、WebP、壊れた画像などの decode 差は、下記の一度きりの検証で確認済みで、常設の fixture にはしていません。
 
-Browser での取り込み検証（decode、orientation、derivative、memory）は、公開されている実機サンプルと合成画像を使い、scratch 環境で一度きりの Playwright script として実施しました。fixture も script も commit していません。結果は [operations.md](operations.md) 冒頭に記録しています。Browser 差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（`tests/unit/web-image.test.ts`。WebKit が実際に出力した APP1 / APP13 の byte 列を含みます）。
+Browser での取り込み検証（decode、orientation、derivative、memory）は、公開されている実機サンプルと合成画像を使い、scratch 環境で一度きりの Playwright script として実施しました。fixture も script も commit していません。結果は [verification.md](verification.md) に、memory の数値は [benchmarks.md](benchmarks.md) に記録しています。Browser 差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（`tests/unit/web-image.test.ts`。WebKit が実際に出力した APP1 / APP13 の byte 列を含みます）。
 
 ## 9. 環境分離
 
@@ -284,3 +284,5 @@ Remote の破壊操作を通常の test command に含めません。CI は Clou
 ドキュメント本文は日本語、path と code identifier は英語を基本とします。
 
 API の詳細は OpenAPI、DB の詳細は migration（と一致を検証した `src/worker/db/schema.ts`）、動作の細部は test を正本とします。
+
+実環境や Browser で確かめた結果は [verification.md](verification.md)、性能と memory の数値は [benchmarks.md](benchmarks.md) に書きます。operations / decisions / roadmap には検証の経過や測定値を書かず、リンクだけを置きます。
