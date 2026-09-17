@@ -124,6 +124,7 @@ private alpha を継続利用に近づけるための段階です。新しい構
 - ✅ 取り込み中に写真を選び直すと、同時に decode する枚数が 2 を超えていた不具合を修正（[D-020](decisions.md)）
 - ✅ 100MB を超えるファイルは、読み込む前に専用の文言で拒否する（以前は全体を memory に読み、decode してから `VALIDATION_FAILED` で失敗していた）
 - ✅ 撮影日時の offset が無い場合の扱いを明文化（architecture.md §6）
+- ✅ `pnpm diagnose` が `APP_ORIGIN` と実際の URL の不一致を検出する（状態を変えない probe。operations.md §7）
 
 ## Release polish
 

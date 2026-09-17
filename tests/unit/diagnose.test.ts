@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import {
   type Check,
@@ -10,6 +11,7 @@ import {
   REQUIRED_SECRETS,
 } from '../../scripts/lib/diagnose'
 import { readR2SignerConfig } from '../../src/worker/storage/signer'
+import { APP_ORIGIN, assertion, makeApp } from '../helpers'
 
 const status = (checks: Check[], name: string) => checks.find((c) => c.name === name)?.status
 
@@ -147,5 +149,29 @@ describe('setup diagnostics', () => {
         : base(path, init)
     const forbidden = await checkDeployment({ api: notOwner, blob: denied, token: 'token' })
     expect(forbidden.find((c) => c.name === 'owner API')?.detail).toContain('OWNER_EMAIL')
+  })
+
+  // Runs the probe against the real Worker: Access would turn cf-access-token into the assertion header.
+  it('detects an APP_ORIGIN that differs from the URL the owner opens, without changing anything', async () => {
+    const app = await makeApp()
+    const api: Fetch = async (path, init) => {
+      const headers = new Headers(init?.headers)
+      if (headers.has('cf-access-token')) {
+        headers.delete('cf-access-token')
+        headers.set('cf-access-jwt-assertion', await assertion())
+      }
+      return app.request(`${APP_ORIGIN}${path}`, { ...init, headers })
+    }
+    const blob: Fetch = async () => new Response('ok')
+    const albums = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM albums').first<{ n: number }>())?.n ?? 0
+    const before = await albums()
+
+    const same = await checkDeployment({ api, blob, token: 'token', origin: APP_ORIGIN })
+    expect(status(same, 'worker: APP_ORIGIN')).toBe('pass')
+    const other = await checkDeployment({ api, blob, token: 'token', origin: 'https://photos.other.test' })
+    const failed = other.find((c) => c.name === 'worker: APP_ORIGIN')
+    expect(failed?.status).toBe('fail')
+    expect(failed?.detail).toContain('https://photos.other.test')
+    expect(await albums()).toBe(before)
   })
 })
