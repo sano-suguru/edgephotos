@@ -173,6 +173,10 @@ export function clearFinishedUploads() {
 // afterwards. Ask first.
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', (e) => {
-    if (activeUploads.peek() > 0) e.preventDefault()
+    if (activeUploads.peek() > 0) {
+      e.preventDefault()
+      // Some WebKit builds show the prompt only when returnValue is set.
+      e.returnValue = ''
+    }
   })
 }
