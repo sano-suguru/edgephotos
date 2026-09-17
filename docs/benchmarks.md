@@ -1,11 +1,12 @@
 # 測定
 
-1,000〜10,000 asset を想定した scale の測定結果と、その結果をもとに下した判断を記録します。Browser での取り込みの memory も記録します。測定は合成データと公開サンプルで行い、利用者の写真は使っていません。
+1,000〜100,000 asset を想定した scale の測定結果と、その結果をもとに下した判断を記録します。Browser での取り込みの memory も記録します。測定は合成データと公開サンプルで行い、利用者の写真は使っていません。
 
 再測定:
 
 ```bash
 pnpm bench      # tests/bench/scale.bench.ts（local workerd。assert はせず数値を表示する）
+BENCH_SIZES=100000 BENCH_BACKUP_MAX=0 BENCH_BIG_ALBUM=50000 pnpm bench
 ```
 
 ## 環境（2026-09-17）
@@ -23,8 +24,39 @@ remote-test の往復時間（中央値、東京から）:
 | `GET /api/v1/me` | 19 |
 | `GET /api/v1/assets?limit=60` | 35 |
 | `GET /api/v1/assets/{id}`、`/original` | 31〜33 |
-| `GET /api/v1/export`（数件） | 67 |
+| `GET /api/v1/export`（数件。現在は paged export に置き換え） | 67 |
 | R2 presigned GET（小さい thumbnail） | 105 |
+
+## 100,000 件（local、中央値、2026-09-17）
+
+合成 100,000 件（1% favorite、5% trash、21 album。大きい album は 5,000 枚と 50,000 枚の 2 通り）。左が修正前、右が修正後（[D-023](decisions.md)、[D-024](decisions.md)、部分 index）。
+
+| 操作 | 時間 | rows_read |
+| --- | --- | --- |
+| timeline 1 ページ目（60 / 200） | 3〜5 / 8〜12 ms | 64 / 212 |
+| timeline 最終ページ（60） | 3〜5 ms | 65 |
+| timeline を 200 件ずつ全件（475 ページ） | 4.1〜5.3 s | |
+| favorites 1 ページ目（1%） | 5 → 3 ms | 6,004 → **61** |
+| favorites 最終ページ（200） | 14 → 8 ms | 20,133 → **201** |
+| trash 最終ページ（200） | 10 → 8 ms | 4,022 → **201** |
+| export（1 response） | **1,082 ms / 55 MiB** | 100,000 + 27,000 |
+| export assets 1 ページ（1,000） | 8〜11 ms / 543 KiB | 1,001 |
+| export album-assets 1 ページ（1,000） | 3〜4 ms / 98 KiB | 2,002 |
+| diagnostics | 39〜41 → **3〜4** ms | 400,022 → **105,023** |
+| album 一覧（21 album、5,000 枚の album を含む） | 9〜16 ms | 18,062 |
+| album 一覧（cover 付き） | 12 KiB | 一覧と同じ（album ごとの request 21 回が不要になる） |
+| album の 1 ページ目（5,000 枚 / 50,000 枚） | 8〜9 / **65** ms | 14,751 / **147,501** |
+| album 取得（件数、50,000 枚） | 93 ms | |
+| 共有 album の 1 ページ目（50,000 枚） | 111 ms | |
+| album 一覧（50,000 枚の album を含む） | 65〜78 ms | |
+| album 削除（5,000 枚 / 50,000 枚） | 14 / 396 ms | |
+| storage audit 1 ページ（500） | 779 ms（最初のページ）、deep 873 ms | assets 501 |
+| storage audit 全件（200 ページ） | 16 s（1 ページ平均 80 ms） | |
+
+- 最初に劣化したのは export でした。1 response の JSON が 55 MiB になり、Worker の memory 上限（128 MB）に行 object と文字列を同時に持つため、remote では失敗する見込みでした。ページに分けました（D-024）
+- 修正後に最初に劣化するのは、大きな album です。album の page・件数・共有ページが album の枚数に比例して読みます（50,000 枚で 1 ページ約 15 万行、65〜111 ms）。Workers Free の D1 上限（1 日 500 万行）なら、このページを 1 日 34 回開くと上限に達します。直すには `album_assets` に `sort_at` を持たせる非正規化とデータ移行が要るため、今回は見送りました（roadmap の既知の制約）
+- storage audit の最初のページが遅いのは、layout 外の key を探す `delimiter` 付きの list が、Miniflare では bucket 全体を走査するためです。2 ページ目以降は list 2〜3 回と D1 2 回です。R2 の list は I/O で、Worker の CPU はほとんど使いません。実 R2 での時間は未測定です
+- timeline は 10,000 件と同じで、page の深さにも library の大きさにもよりません
 
 ## API（local、中央値）
 
@@ -81,9 +113,13 @@ remote-test の D1 に、同じ SQL を bind parameter 付きで `EXPLAIN QUERY 
 
 | 操作 | 1,000 件 | 10,000 件 | request 数（10,000 件） |
 | --- | --- | --- | --- |
-| `backupLibrary`（original + derivative） | 3.2〜4.4 s | 34 s | API 20,001 + storage GET 30,000 |
-| `verifyLibrary` | 1.5 s | 15 s | API 10,001 + storage GET 10,000 |
-| `restoreLibrary`（空の環境へ） | 10〜12 s | 100〜105 s | API 29,622 + storage PUT 30,000 |
+| `backupLibrary`（original + derivative） | 3.2〜5.0 s | 34〜48 s | API 20,020 + storage GET 30,000 |
+| `backupLibrary`（2 回目、変更なし） | 0.0 s | 0.2 s | API 20 + storage GET 0 |
+| `verifyLibrary` | 1.5 s | 15〜20 s | API 10,040 + storage GET 10,000 |
+| `verifyLibrary --quick` | 0.2 s | 2.7 s | API 40 + storage GET 0 |
+| `restoreLibrary`（空の環境へ） | 10〜20 s | 100〜150 s | API 29,625 + storage PUT 30,000 |
+
+幅は複数回の測定の範囲です（2026-09-17。後の回は paged export と storage audit を含む）。
 
 どちらも asset 数に比例しました。10,000 件でも memory と D1 の上限には当たりません（manifest は 5.8 MiB）。
 
@@ -142,6 +178,12 @@ decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の 
 
 | 項目 | 根拠 | 変更 |
 | --- | --- | --- |
+| export のページ分割 | 100,000 件で 1 response 55 MiB、1 秒（上の表） | 3 つの paged endpoint と client 側の組み立て（[D-024](decisions.md)） |
+| favorites / trash / 止まった削除の部分 index | 件数の少ない filter の最終ページが library の残りを読む（favorites で 20,133 行） | 部分 index と、条件を literal で書いた SQL。ページあたり約 200 行 |
+| diagnostics の走査 | ライブラリ画面を開くたびに assets を 4 回全件走査（40 万行） | 全件は `COUNT(*)` 1 回、trash と削除中は部分 index |
+| album cover | album ごとに `limit=1` の一覧 API を 1 回（同じ member を読む request が album 数だけ） | `GET /api/v1/albums?covers=true` の 1 回で cover を返す。読む行は一覧と同じ |
+| 差分 backup | 同じディレクトリへの 2 回目も全 original を download（10,000 件で API 20,000 回と storage GET 30,000 回） | 取得済みの写真を飛ばす。10,000 件で API 20 回、storage 0 回、0.2 秒 |
+| verify `--quick` | 全 original を download（10,000 件で 20 秒、API 10,000 回） | R2 の SHA-256 記録と storage audit で確認。API 40 回、download 0、2.7 秒 |
 | timeline の cursor | 本番 D1 の plan が `SCAN`。rows_read が page の深さに比例（10,000 件の最終ページで 9,959 行）。D1 は rows read で課金・制限される | row value の比較に書き換え（index は追加していない）。最終ページは 65 行 |
 | album の存在確認 | 追加・削除・page 取得・共有の作成のたびに member 数を数えていた（5,000 枚の album で 1 回 10,004 行）。restore で 5,000 枚を album に入れると、合計約 2,500 万行になる | 主キーでの存在確認に置き換え（1 行）。件数が必要な album 取得・一覧はそのまま |
 | 期限切れ URL の回復 | 1,020 件表示時に 1,021 枚を再取得していた | 表示済みの thumbnail は URL を差し替えない。読み込みに失敗した thumbnail だけ新しい URL にする |
@@ -158,9 +200,11 @@ decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の 
 | diagnostics | 30,022 行、3 ms | 変更しない。表示は設定画面と restore 前の確認だけ |
 | export | 10,000 件で 84 ms、5.8 MiB | 変更しない。D1 に結果サイズの上限はなく（1 行 2 MB、query 30 秒）、Worker の memory にも余裕がある |
 | backup / restore の並列化 | remote で約 1〜1.5 時間（10,000 件）と見積もった。並列化で縮むのは往復時間の分だけで、転送時間は縮まない | 並列化しない。年に数回の操作で、再試行を入れたので途中で止まりにくい |
-| restore の再開 | | 実装しない。途中で止まった場合は、これまでどおり空の環境を作り直す（[operations.md](operations.md) §10） |
+| restore の再開 | 10,000 件で remote 1〜1.5 時間、100,000 件では 10 時間を超える見積もり。Access token の期限切れだけで最初からになる | 実装した（`--resume`、[D-024](decisions.md)） |
 | timeline の仮想スクロール | 10,000 件を手で読み込むと、WebKit で 1 回 0.8 秒、viewer を開くのに 1.3 秒 | 入れない。60 件ずつ 160 回以上押した場合の値で、最初の表示は 60 件のまま速い |
 | Queue / Durable Objects / 別 Worker / cache | どの測定でも必要性が出なかった | 追加しない |
+| 大きな album の page | 50,000 枚の album で 1 ページ 147,501 行、65 ms | 今回は変更しない。非正規化とデータ移行が要る。Free の rows read 上限で問題になった時点、または体感で遅くなった時点で行う |
+| storage cleanup の定期実行 | 手動の実行で件数を 0 にでき、写真の整合性に影響しない | Cron を入れない（[D-023](decisions.md)） |
 | 前処理の並列数 | 今回は測っていない（[D-020](decisions.md) の測定のまま） | 2 のまま |
 
 ### plan に依存する注意

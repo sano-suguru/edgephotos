@@ -10,6 +10,7 @@ declare global {
       TEST_MIGRATIONS: D1Migration[]
       BENCH_SIZES?: string
       BENCH_BACKUP_MAX?: string
+      BENCH_BIG_ALBUM?: string
     }
   }
 }

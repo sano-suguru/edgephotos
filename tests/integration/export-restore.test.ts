@@ -312,8 +312,14 @@ describe('export and restore to an empty environment', () => {
         counts,
         client: {
           ...inner,
-          api: (p: string, i?: RequestInit) => (counts.api++, inner.api(p, i)),
-          blob: (u: string, i?: RequestInit) => (counts.blob++, inner.blob(u, i)),
+          api: (p: string, i?: RequestInit) => {
+            counts.api++
+            return inner.api(p, i)
+          },
+          blob: (u: string, i?: RequestInit) => {
+            counts.blob++
+            return inner.blob(u, i)
+          },
         },
       }
     }

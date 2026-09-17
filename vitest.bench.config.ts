@@ -3,7 +3,8 @@ import { defineConfig } from 'vitest/config'
 import base from './vitest.config.ts'
 
 // Scale measurements (docs/benchmarks.md). Not part of `pnpm test`: slow, and prints numbers instead of asserting.
-// BENCH_SIZES=1000,10000,100000 selects the library sizes; backup / restore run up to BENCH_BACKUP_MAX assets.
+// BENCH_SIZES=1000,10000,100000 selects the library sizes; backup / restore run up to BENCH_BACKUP_MAX assets;
+// BENCH_BIG_ALBUM sets the size of the large album (capped at half the library).
 export default defineConfig({
   ...base,
   plugins: [
@@ -17,6 +18,7 @@ export default defineConfig({
           TEST_MIGRATIONS: await readD1Migrations('migrations'),
           BENCH_SIZES: process.env.BENCH_SIZES ?? '1000,10000',
           BENCH_BACKUP_MAX: process.env.BENCH_BACKUP_MAX ?? '10000',
+          BENCH_BIG_ALBUM: process.env.BENCH_BIG_ALBUM ?? '5000',
         },
       },
     })),

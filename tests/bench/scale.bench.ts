@@ -15,7 +15,7 @@ import { accessKeys, apiClient, assertion, call, callJson, makeApp, sha256, synt
 const SIZES = (env.BENCH_SIZES ?? '1000,10000').split(',').map(Number)
 const BACKUP_MAX = Number(env.BENCH_BACKUP_MAX ?? 10_000)
 const RUNS = 7
-const BIG_ALBUM = 5_000
+const BIG_ALBUM = Number(env.BENCH_BIG_ALBUM ?? 5_000)
 const SMALL_ALBUMS = 20
 const SMALL_ALBUM_SIZE = 200
 
@@ -282,6 +282,7 @@ describe('scale', () => {
 
       // Albums
       await measure(size, 'albums list (21)', '/api/v1/albums')
+      await measure(size, 'albums list with covers (21)', '/api/v1/albums?covers=true')
       await measure(size, `album p1 (${Math.min(BIG_ALBUM, size / 2)} members)`, `/api/v1/albums/${bigAlbum.id}/assets`)
       await measure(size, 'album get', `/api/v1/albums/${bigAlbum.id}`)
       const member = ids[ids.length - 1]
@@ -312,6 +313,28 @@ describe('scale', () => {
       await measure(size, 'export assets page (1000)', '/api/v1/export/assets')
       await measure(size, 'export album-assets page (1000)', '/api/v1/export/album-assets')
       await measure(size, 'diagnostics', '/api/v1/diagnostics')
+
+      // Storage audit: one page, and the whole library as the CLI walks it.
+      await measure(size, 'storage audit p1 (500)', '/api/v1/storage/audit?limit=500')
+      await measure(size, 'storage audit p1 (500, deep)', '/api/v1/storage/audit?limit=500&deep=true')
+      let auditAfter: string | null = null
+      let auditPages = 0
+      let auditIssues = 0
+      const auditStart = performance.now()
+      do {
+        const page: { nextAfter: string | null; issues: unknown[] } = await (
+          await req(`/api/v1/storage/audit?limit=500${auditAfter ? `&after=${auditAfter}` : ''}`)
+        ).json()
+        auditPages++
+        auditIssues += page.issues.length
+        auditAfter = page.nextAfter
+      } while (auditAfter)
+      report(
+        size,
+        `storage audit walk (${auditPages} pages x 500)`,
+        `${(performance.now() - auditStart).toFixed(0)} ms`,
+        `issues=${auditIssues}`,
+      )
 
       // Backup / verify / restore over the public API (sequential, as the CLI does).
       if (size > BACKUP_MAX) continue

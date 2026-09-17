@@ -107,7 +107,41 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 
 機能・情報設計・API は変えず、色・枠・影・ボタンの強弱だけを見直した（token は無彩色にし、塗りのボタンは header のアップロード（desktop）と各画面の主操作に限る。pill 形は header 行の操作だけで、form と dialog のボタンは角丸の長方形。header と phone のタブは不透明。accent は現在地・focus・進捗に限る）。local（`vite dev`、使い捨ての `EDGEPHOTOS_STATE_DIR`）に合成 JPEG 18 枚と album 2 件を入れ、Playwright で desktop Chromium（1440×900）と WebKit iPhone 13 相当の timeline・album・共有 dialog・確認 dialog・ライブラリ・viewer を変更前後で撮って比べた。共有ページは `vite dev` だと CSP（`style-src 'self'`）が inline style を拒否して CSS が当たらないため、`vite build` + `vite preview` で share API を mock して確認した。入れ子の確認 dialog では外側の dialog を暗くする。彩度の低い合成画像 24 枚でも timeline を撮った。phone では黒塗りのアップロードが写真より先に目に入ったため、phone だけ塗りのないアイコンにした。`pnpm check` と `pnpm test:e2e`（13 件）が通った。
 
+## 長期保管の整合性（2026-09-17）
+
+対象は、storage audit / cleanup、paged export、差分 backup と `check`、restore の `--resume`、verify の `--quick`、完全削除と復元の競合、finalize の UNIQUE 競合、upload の再試行、元ファイルの形式判定。remote-test には deploy していない。
+
+### local（workerd の自動テスト）
+
+- 競合 2 件は、修正前のコードで再現するテストを先に書いて失敗を確認した。完全削除の開始と trash からの復元が交差すると、復元した写真が `purging` になって R2 から消えていた。finalize の D1 batch が commit した後に UNIQUE 違反が報告されると、自分の asset の 3 object を重複として消していた（SQLite 自体は、同じ upload の再送では id の競合を先に検出するため、現在の D1 でこの経路に入る状況は確認していない。防御として直した）
+- storage audit: 10 分類のすべてを 1 つのライブラリに作り、`limit` を 1・2・3・5・200 にしても同じ結果になること、object の無い asset と行だけの upload がページ境界をまたいでも漏れないこと、audit の前後で D1 と R2 が変わらないことを確認した。ページの終わりを決める処理（asset 側・upload 側）を 1 つずつ外すとテストが失敗することも確かめた
+- storage cleanup: 転送済みの中断 upload は写真になり（元の upload 時刻と撮影日時を保持）、欠けている・行だけの upload と重複の残りだけが消え、写真・trash・止まった削除・object の欠けた写真・どの行も指さない object・1 日以内の upload・進行中の upload は残ること。2 回目は何もしないこと。R2 の障害では何も消さず `failed` に数えること。cleanup が upload を片付けた後に、検査を終えていた finalize が asset を作らない（`410`）こと
+- backup: 2 回目は storage への request が 0、写真を 1 枚足すと 3 request。途中で切れたファイルは取り直し、同じ size で 1 bit 違うファイルは `check` だけが検出すること。original が壊れた写真があっても残りを backup し、その写真を名前で挙げること
+- restore: Access token が 3〜14 回目のどの API 呼び出しで切れても、`--resume` で最後まで進み、`verify`（全件 download）が `ok` になること。記録に無い album や backup に無い写真がある library には再開しないこと。終わった restore は再開しないこと。restore 後の timeline の並び（撮影日時の無い写真を含む）が元と同じこと
+- verify: `--quick` が download 0 件で `ok` になり、original の size が変わった写真を storage audit で検出すること
+- paged export: 1 件ずつ・2 件ずつのページを重複なく連結できること、ページの間に写真の削除と追加があっても manifest が知らない asset を指さないこと
+
+### local（Browser）
+
+`pnpm test:e2e`（Chromium・WebKit、13 件）が通った。加えて、`vite dev` の使い捨て state に対して、Chromium で一度きりの Playwright script（commit していない）を実行した。
+
+- album 一覧は cover の画像を読み込み、album ごとの request（`/api/v1/albums/{id}/assets`）を 1 回も送らない。空の album は icon のまま
+- finalize が 3 回 `503` になった写真は「転送は終わりましたが、登録を確認できませんでした…再試行すると、転送をやり直さずに登録します」と表示され、再試行で PUT を 1 回も送らずに完了した
+- 中身が PNG で名前が `.jpg` のファイルは、PNG として upload され完了した（以前は finalize が `content_type_mismatch` で毎回拒否した）
+- 3 日前の中断 upload（行だけ）を D1 に入れると、ライブラリ画面の「点検する」が「途中で止まったアップロード」1 件を表示し、「中断したアップロードを整理する」で破棄され、再点検で問題なしになった
+
+### 形式と Browser 差の確認（コードの確認のみ）
+
+- 取り込み結果が Browser で変わりうる点: derivative の画素（縮小の実装と JPEG encoder の違い。content identity には使わないので許容）、WebP の orientation と途中で切れた JPEG（roadmap の既知の制約のまま）。撮影日時は JS の `exifr` で読むので engine に依存しない
+- 元ファイルの形式は、今回から中身の先頭 byte で決める（finalize と同じ関数）。Browser が拡張子から推測する `type` の違いに左右されない
+
 ## 未検証
+
+2026-09-17 の長期保管の変更（上記）は remote-test に deploy していません。deploy 後に次を確認します。
+
+- migration `0002`・`0003` の remote 適用と、`EXPLAIN QUERY PLAN` で favorites / trash が部分 index を使うこと（bind した値ではなく literal で書いた条件が D1 でも index の選択に効くか）
+- 実 R2 の `list()` の並び（key の辞書順）と `startAfter` が、storage audit のページ境界の前提どおりであること。`--deep` の `head()` が S3 API で PUT した original の SHA-256 を返すこと（D-018 で確認済みの挙動）
+- `pnpm backup export`（差分）・`check`・`restore --resume`・`verify --quick` を remote で一巡すること
 
 iPhone / Android 実機での取り込みは未確認です。desktop の WebKit では代用できません。[roadmap.md](roadmap.md) の Post-merge verification で、次を確認します。
 

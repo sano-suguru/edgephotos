@@ -27,10 +27,11 @@ src/
     features/
       uploads/  timeline/  albums/  shares/  settings/
     lib/
-      api/client.ts        fetch client for /api/v1
+      api/client.ts        fetch client for /api/v1 (api/error.ts: ApiRequestError, DOM-free)
       image.ts             SHA-256, EXIF, canvas derivatives
       task-limit.ts        upload concurrency shared across selections
       original-limit.ts    original size limit checked before reading a file
+      original-type.ts     original format from its first bytes (same check as finalize)
     share/main.tsx         share page (no private app code)
     state/router.ts
   worker/
@@ -41,17 +42,22 @@ src/
     db/
       schema.ts            D1 schema (Drizzle) -> row types, simple queries, generated migrations
       index.ts             Db type + createDb (Drizzle over the D1 binding)
-    services/              uploads / assets / albums / shares / export (query builder or explicit SQL)
+    services/              uploads / assets / albums / shares / export / storage-audit (query builder or explicit SQL)
     storage/               object keys, R2 presigner, finalize inspection, local blob emulation
   contracts/
     schemas.ts             zod schemas shared by Worker (runtime + OpenAPI) and Web (types only)
+    export-manifest.ts     assembles the paged export into a manifest (Web and backup CLI)
+    image-type.ts          magic-byte format detection (finalize and Web)
     errors.ts
 migrations/                D1 migrations (forward-only, applied by wrangler)
   meta/                    drizzle-kit snapshots / journal (generated; not applied)
 drizzle.config.ts          drizzle-kit generate settings (no D1 credentials)
 scripts/
-  backup.ts                backup / restore / verify CLI
+  backup.ts                backup export / check / restore / verify CLI
+  storage.ts               storage audit / cleanup CLI (`pnpm storage`)
   diagnose.ts              read-only setup diagnostics CLI (`pnpm diagnose`)
+  cli-client.ts            API client for the CLIs (EDGEPHOTOS_URL / EDGEPHOTOS_ACCESS_TOKEN)
+  cli-check.ts             starts the CLIs under Node type stripping (`pnpm cli:check`)
   db-check.ts              schema vs committed migrations drift check
   lib/backup.ts            API-based export / restore / verify (used by CLI and tests)
   lib/diagnose.ts          setup checks (used by CLI and tests)
@@ -66,7 +72,9 @@ playwright.config.ts
 
 route は現状 `src/worker/app.ts` に集約しています。route 数が増えて見通しが悪くなった時点で `routes/` へ分割します。
 
-`contracts/` には Browser bundle に公開してよい API schema / type だけを置きます。server secret 型や storage credential 実装を置きません。
+`contracts/` には Browser bundle に公開してよい API schema / type と、Worker と Client が同じ結果を出す必要のある小さな純関数（manifest の組み立て、形式の判定）だけを置きます。server secret 型や storage credential 実装を置きません。
+
+`scripts/` は Node の型除去（type stripping）でそのまま実行します。相対 import には `.ts` を付け、parameter property など型除去で動かない構文を使いません。workerd の test は bundler を通すため、この違いを検出できません。`pnpm cli:check`（`pnpm check` に含む）が CLI を実際に起動して確かめます。
 
 ## 3. Preact / Signals
 
@@ -189,6 +197,8 @@ pnpm db:check && pnpm test
 - upload reservation
 - finalize idempotency
 - D1 / R2 partial failure
+- storage audit の分類とページ境界、cleanup が消してよいものだけを消すこと
+- 差分 backup、backup の検査、restore の再開（呼び出しのどこで止まっても同じ結果になること）
 - authorization
 - album membership
 - share revoke
@@ -233,7 +243,12 @@ spec を増やすのは、Browser でしか起きない不具合を直したと�
 
 ### Scale benchmark
 
-`pnpm bench` は `tests/bench/scale.bench.ts` を実行し、合成データ 1,000 / 10,000 件で主要 API の時間、SQL の query plan と rows_read、backup / restore の request 数を表示します。assert はしません。結果と判断は [benchmarks.md](benchmarks.md) に記録します。
+`pnpm bench` は `tests/bench/scale.bench.ts` を実行し、合成データで主要 API の時間、SQL の query plan と rows_read、storage audit の全走査、backup / restore の request 数を表示します。assert はしません。結果と判断は [benchmarks.md](benchmarks.md) に記録します。
+
+```bash
+pnpm bench                                                        # 1,000 / 10,000 件
+BENCH_SIZES=100000 BENCH_BACKUP_MAX=0 BENCH_BIG_ALBUM=50000 pnpm bench   # 10 万件（seed だけで約 5 分）
+```
 
 ### 実行
 
@@ -241,7 +256,8 @@ spec を増やすのは、Browser でしか起きない不具合を直したと�
 pnpm test        # unit + integration + e2e（workerd 上、D1 / R2 は Miniflare の local emulation）
 pnpm test:e2e    # Browser E2E（Chromium と WebKit）
 pnpm db:check    # schema.ts と migrations/meta の snapshot が一致するか
-pnpm check       # typecheck + lint + db:check + test + build
+pnpm cli:check   # CLI が Node の型除去で起動するか
+pnpm check       # typecheck + lint + db:check + cli:check + test + build
 ```
 
 integration test は `createApp()` に test 用の Access 鍵と local blob signer を注入し、実際の migration を適用した D1 と R2 binding を使います。D1 / R2 の障害は binding を Proxy で包んで再現します。

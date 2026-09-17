@@ -89,12 +89,18 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 
 v1 の完成条件には含めません。
 
-**未完了 upload の cleanup は未実装。** finalize されなかった `uploads` row と R2 object は残ります。同じ写真を同時に finalize したときの重複側 object も、best effort の削除に失敗すれば残ります（[D-014](decisions.md)）。finalize されない upload は asset にならないため、写真のデータ整合性は壊れません。影響は R2 の料金、backup との容量差、diagnostics の WARN が常時出ることです。残骸が増えるほど、後で消してよい object の判定も難しくなります。
+**中断した upload の片付けは手動。** finalize されなかった upload の行と object は、owner が storage cleanup を実行するまで残ります（[D-023](decisions.md)）。写真の整合性には影響しません。定期実行は入れていません。次のどちらかが続く場合に、Cron も候補に含めて検討します（[AGENTS.md](../AGENTS.md) §6）。
 
-現在は、期限切れの件数を diagnostics（ライブラリ画面と `pnpm diagnose`）で観測するだけです。R2 に残った object は D1 から分からないため数えていません。次のどちらかが続く場合に、Cron / Queues も候補に含めて cleanup 方式を検討します（[AGENTS.md](../AGENTS.md) §6）。
+- cleanup を実行しても `library: interrupted uploads` の件数がすぐに増える
+- R2 使用量が、export manifest の `originalSize` 合計を大きく上回り、storage audit に出ない差がある
 
-- `library: interrupted uploads` の件数が増え続ける
-- R2 使用量が、export manifest の `originalSize` 合計を大きく上回る（thumbnail / preview の分の差は正常）
+**壊れた写真の修復は手作業。** storage audit は original / derivative の欠落や違いを見つけますが、直しません。backup の original から upload し直す手順は [operations.md](operations.md) §12 にあります。derivative だけを作り直す経路はありません。
+
+**どの行も指さない object は消さない。** D1 の time travel の後などに残る `unreferenced_objects` は報告だけします。取り出しと削除は R2 の Dashboard で行います。
+
+**大きな album の 1 ページは album の大きさに比例して読む。** album の中身を撮影日時順に返すため、album の全 member を読んで並べ替えます（[benchmarks.md](benchmarks.md)）。
+
+**backup / restore は逐次。** 10 万枚の初回 backup と restore は remote で 10 時間を超える見積もりです。差分 backup と `--resume` により、途中で止まっても最初からにはなりません（[D-024](decisions.md)）。
 
 **WebP の EXIF は読まない。** WebP の `takenAt` は常に `null` です。EXIF orientation は WebKit では適用され、Chromium では適用されないため、同じ WebP でも Browser によって width / height と derivative の向きが変わります。
 
@@ -111,6 +117,20 @@ v1 の完成条件には含めません。
 - ✅ 止まった完全削除の再開と、それに伴う再 upload の不具合の修正（[D-014](decisions.md)）
 - ✅ 取り込みの並列数の上限修正（[D-020](decisions.md)）と、100MB 超の事前拒否
 - ✅ 期限切れ upload の件数表示、`APP_ORIGIN` の不一致検出、撮影日時の offset が無い場合の扱いの明文化（architecture.md §6）
+
+## Long-term integrity（2026-09-17）
+
+機能は足さず、長く預けたライブラリが壊れない・壊れたら分かる・戻せることを優先した段階です。判断は [D-023](decisions.md) と [D-024](decisions.md)、数値は [benchmarks.md](benchmarks.md)、確認内容は [verification.md](verification.md) にあります。
+
+- ✅ 完全削除と同時に trash から復元された写真を削除しない。finalize の UNIQUE 競合で自分の object を消さない
+- ✅ D1 / R2 の突合（storage audit、`--deep` で R2 の SHA-256 記録と照合）と、中断した upload の cleanup
+- ✅ export のページ分割（10 万枚で 1 response 55 MiB だった）
+- ✅ 差分 backup、backup ディレクトリのオフライン検査、1 枚の破損で止まらない backup
+- ✅ 再開できる restore、`createdAt` と並び順の保持、verify の `--quick` と storage audit
+- ✅ favorites / trash / 止まった削除の部分 index、diagnostics の走査削減、album cover を一覧で返す
+- ✅ 失敗した upload の再試行で転送をやり直さない。失敗表示に「追加されたか・次に何をするか」を出す。アップロード中にタブを閉じる前の確認
+- ✅ 元ファイルの形式を中身で判定する。「オリジナル」を「保存したファイル」と表記する
+- ✅ 1,000 / 10,000 / 100,000 件の scale 測定
 
 ## Release polish
 
@@ -134,5 +154,5 @@ v1 の完成条件には含めません。
 - advanced search
 - Queues / background processing
 - client-specific adapter / BFF
-- アルバム一覧の cover を album の response に含める（現在の Web は album ごとに `limit=1` の一覧 API を呼ぶ。album 数に比例して request と署名が増える）
-- 失敗した upload の cleanup（「既知の制約」参照。`expires_at` を使うか、定期実行を入れるかを含めて未定）
+- derivative の作り直し（original から thumbnail / preview を再生成する経路。`missing_derivative` と、将来の derivative version の変更に使う）
+- 大きな album の page を album の大きさによらず読む（`album_assets` に `sort_at` を持たせる。「既知の制約」参照）
