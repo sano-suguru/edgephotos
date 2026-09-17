@@ -1,6 +1,6 @@
 # 検証記録
 
-この文書は、EdgePhotos を実環境と Browser で確認した結果と、まだ確認していない項目を記録します。確認済みの項目には、環境・日付・使ったデータ・結果を書きます。
+この文書は、EdgePhotos を実環境と Browser で確認した結果と、まだ確認していない項目を記録します。確認済みの項目には、再現や判断に必要な範囲で、環境・日付・使ったデータ・結果を書きます。
 
 運用の手順は [operations.md](operations.md)、性能と memory の数値は [benchmarks.md](benchmarks.md)、判断は [decisions.md](decisions.md) を正本とします。
 

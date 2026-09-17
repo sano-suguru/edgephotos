@@ -285,4 +285,4 @@ Remote の破壊操作を通常の test command に含めません。CI は Clou
 
 API の詳細は OpenAPI、DB の詳細は migration（と一致を検証した `src/worker/db/schema.ts`）、動作の細部は test を正本とします。
 
-実環境や Browser で確かめた結果は [verification.md](verification.md)、性能と memory の数値は [benchmarks.md](benchmarks.md) に書きます。operations / decisions / roadmap には検証の経過や測定値を書かず、リンクだけを置きます。
+実環境や Browser で確かめた結果は [verification.md](verification.md)、性能と memory の数値は [benchmarks.md](benchmarks.md) に書きます。operations / decisions / roadmap / README には検証の詳しい経過や測定値を重複して書かず、状態や判断に必要な短い要約とリンクだけを置きます。
