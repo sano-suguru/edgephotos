@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { LIMITS } from '../../src/contracts/schemas'
+import { resumePurges } from '../../src/web/features/settings/resume-purges'
 import { mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
 import { exifDateToIso } from '../../src/web/lib/exif-date'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
@@ -173,5 +174,33 @@ describe('client-side size limit', () => {
   // The client refuses oversized originals before reading them; it must agree with the server contract.
   it('matches the reserve schema', () => {
     expect(ORIGINAL_MAX_BYTES).toBe(LIMITS.originalMaxBytes)
+  })
+})
+
+describe('resuming unfinished deletes', () => {
+  // Same shape as ApiRequestError (not imported: the API client is typed for the browser).
+  const apiError = (status: number, code: string) => Object.assign(new Error(code), { status, code })
+  const notFound = () => apiError(404, 'ASSET_NOT_FOUND')
+
+  // Another tab, or a re-upload of the same photo, may finish one of the deletes first.
+  it('skips ids another request already finished', async () => {
+    const called: string[] = []
+    await resumePurges(['a', 'b', 'c'], async (id) => {
+      called.push(id)
+      if (id === 'b') throw notFound()
+    })
+    expect(called).toEqual(['a', 'b', 'c'])
+  })
+
+  it('stops on any other failure', async () => {
+    const called: string[] = []
+    const failure = apiError(500, 'INTERNAL')
+    await expect(
+      resumePurges(['a', 'b', 'c'], async (id) => {
+        called.push(id)
+        if (id === 'b') throw failure
+      }),
+    ).rejects.toBe(failure)
+    expect(called).toEqual(['a', 'b'])
   })
 })

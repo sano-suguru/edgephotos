@@ -1,6 +1,7 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
 import { Button } from '../../components/ui/button'
 import { api } from '../../lib/api/client'
+import { resumePurges } from './resume-purges'
 
 type Diagnostics = Awaited<ReturnType<typeof api.diagnostics>>
 
@@ -35,12 +36,11 @@ export function SettingsPage() {
     await load()
   }
 
-  // Purging assets are hidden everywhere; repeating DELETE finishes each one (docs/architecture.md §7.1).
-  async function resumePurges(ids: string[]) {
+  async function resume(ids: string[]) {
     resuming.value = true
     error.value = null
     try {
-      for (const id of ids) await api.purge(id)
+      await resumePurges(ids, api.purge)
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -88,7 +88,7 @@ export function SettingsPage() {
           <Button
             variant="destructive"
             disabled={resuming.value}
-            onClick={() => resumePurges(diag.value?.purgingAssetIds ?? [])}
+            onClick={() => resume(diag.value?.purgingAssetIds ?? [])}
           >
             削除を再開
           </Button>

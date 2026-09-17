@@ -99,9 +99,21 @@ v1 の完成条件には含めませんが、後から迷わないよう記録�
 
 **失敗した upload の行が残り続ける。** `reserve` 済みで finalize されなかった `uploads` row は削除されません。期限切れ row を掃除する経路はありません。R2 object が残る場合も同様です。`expires_at` を過ぎた件数だけは diagnostics（ライブラリ画面と `pnpm diagnose`）で分かります。R2 に残った object の量は、D1 から分からないため数えていません。
 
-これはデータの汚れであって、認証やデータ整合性の問題ではありません。`finalizeUpload()` は R2 に object が実在することを確認してから `ready` にします。期限内に PUT が済んでいれば、期限後の finalize も成立します（background に回した tab の復帰を拒否しないため、finalize は期限を見ません）。PUT が済んでいない reserve は、presigned URL が失効しているため後から完了できません。
+写真のデータ整合性は壊れません。finalize されていない upload は asset にならず、timeline・album・share・export のどれにも出ないためです。`finalizeUpload()` は R2 に object が実在することを確認してから `ready` にします。期限内に PUT が済んでいれば、期限後の finalize も成立します（background に回した tab の復帰を拒否しないため、finalize は期限を見ません）。PUT が済んでいない reserve は、presigned URL が失効しているため後から完了できません。
 
-現時点では、残骸がどの程度発生するかを測れておらず、自動 cleanup の要求も出ていません。そのため diagnostics で件数を観測するだけに留めています（[AGENTS.md](../AGENTS.md) §6）。実利用で残骸が増え続け、運用上の問題になった場合は、Cron / Queues なども候補に含めて最小の cleanup 方法を選びます。
+ただし、運用には影響します。残骸が増えるほど、次の問題が大きくなります。
+
+- R2 の保存料金が増える
+- R2 の使用量と backup の大きさが一致しなくなる
+- diagnostics の WARN が常に出て、新しい異常に気付きにくくなる
+- 後で cleanup するときに、消してよい object の判定が難しくなる
+
+同じ写真の upload を同時に finalize した場合、重複になった側の object も残ることがあります。D1 に重複と記録したあと best effort で削除するだけで、削除の失敗は再試行しないためです（[D-014](decisions.md)）。
+
+現時点では、残骸がどの程度発生するかを測れておらず、自動 cleanup の要求も出ていません。そのため diagnostics で件数を観測するだけに留めています（[AGENTS.md](../AGENTS.md) §6）。実利用で残骸が増え続け、運用上の問題になった場合は、Cron / Queues なども候補に含めて最小の cleanup 方法を選びます。判断の目安は次の 2 つです。
+
+- `library: interrupted uploads` の件数が増え続ける
+- Cloudflare Dashboard の R2 使用量が、export manifest の `originalSize` の合計を大きく上回る。manifest には thumbnail / preview の size が無いので、その分の差は正常
 
 **WebP の EXIF は読まない。** `exifr` は WebP の EXIF を解析しないため、WebP の `takenAt` は常に `null` です。WebP の EXIF orientation は、WebKit では適用され、Chromium では適用されません。そのため同じ WebP でも、Browser によって width / height と derivative の向きが変わります。カメラが WebP を出力することはまれなので、v1 では扱いません。
 

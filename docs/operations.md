@@ -34,6 +34,7 @@
 >   - 削除前に reserve・PUT 済みだった upload の finalize が `200 created` を返し、その original を owner 用 URL から読み戻せること（新しい object を重複として消さない）
 >   - 誤った `Origin` の album 作成が `403 ORIGIN_NOT_ALLOWED`、正しい `Origin` では `400 VALIDATION_FAILED` になり、album 数が変わらないこと
 >   - 実 D1 での並行実行（各 3 回）: 同じ `purging` asset に `DELETE` 2 本と同じ写真の reserve を同時に送ると、`DELETE` は 204/204 または 204/404（`ASSET_NOT_FOUND`）、reserve はすべて `201`。同じ写真の pending upload 2 件を、`purging` の asset の `DELETE` と同時に finalize すると、どの回も片方が `created`、片方が同じ asset への `duplicate` になり、再送しても同じ結果だった。UNIQUE 競合の fallback を通ったかどうかは外から区別できない。「競合の勝者が `purging`」の分岐は再現していない（コードの確認のみ）
+>   - 上の 204/404 のように別の request が先に削除を終えると、「削除を再開」はその 404 で止まっていた。そのあと、404 の ID は飛ばして残りを続けるよう修正した（unit test で確認。この修正は remote-test に deploy していない）
 >   - テスト asset はすべて完全削除し、件数は検証前（写真 21、ゴミ箱 2、削除処理中 0、未完了 upload 2、album 1）に戻した。D1 に今回の upload 行は残っていない
 > - **未検証:** iPhone / Android 実機での取り込み。具体的には、iOS Safari の memory 上限（jetsam）と 48MP 以上の decode、iOS 写真ピッカーの HEIC → JPEG 変換と位置情報の扱い、画面ロックやアプリ切り替えで中断した PUT の再開、presigned URL の期限（600 秒）を越える中断。
 >
