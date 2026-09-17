@@ -89,14 +89,14 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 
 v1 の完成条件には含めません。
 
-**未完了 upload の cleanup は未実装。** finalize されなかった `uploads` row と R2 object は残ります。同じ写真を同時に finalize したときの重複側 object も、best effort の削除に失敗すれば残ります（[D-014](decisions.md)）。finalize されない upload は asset にならないため、写真のデータ整合性は壊れません。影響は R2 の料金、backup との容量差、diagnostics の WARN が常時出ることです。
+**未完了 upload の cleanup は未実装。** finalize されなかった `uploads` row と R2 object は残ります。同じ写真を同時に finalize したときの重複側 object も、best effort の削除に失敗すれば残ります（[D-014](decisions.md)）。finalize されない upload は asset にならないため、写真のデータ整合性は壊れません。影響は R2 の料金、backup との容量差、diagnostics の WARN が常時出ることです。残骸が増えるほど、後で消してよい object の判定も難しくなります。
 
 現在は、期限切れの件数を diagnostics（ライブラリ画面と `pnpm diagnose`）で観測するだけです。R2 に残った object は D1 から分からないため数えていません。次のどちらかが続く場合に、Cron / Queues も候補に含めて cleanup 方式を検討します（[AGENTS.md](../AGENTS.md) §6）。
 
 - `library: interrupted uploads` の件数が増え続ける
 - R2 使用量が、export manifest の `originalSize` 合計を大きく上回る（thumbnail / preview の分の差は正常）
 
-**WebP の EXIF は読まない。** WebP の `takenAt` は常に `null` です。EXIF orientation の適用も Browser で異なり、WebKit は適用し、Chromium は適用しません。
+**WebP の EXIF は読まない。** WebP の `takenAt` は常に `null` です。EXIF orientation は WebKit では適用され、Chromium では適用されないため、同じ WebP でも Browser によって width / height と derivative の向きが変わります。
 
 **途中で切れた JPEG の扱いが Browser で違う。** Chromium は拒否し、WebKit は読めた部分から derivative を作って original を保存します。
 

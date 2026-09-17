@@ -90,8 +90,8 @@ Presigned URL は bearer capability として扱います。
 | 操作 | TTL | 署名に含めるもの | 保証 |
 | --- | --- | --- | --- |
 | upload PUT | 600 秒 | `Content-Type`、`If-None-Match: *`、original は `x-amz-checksum-sha256` | 期限内に URL を再利用しても、保存済み object を上書きできない。original の body が申告 SHA-256 と違えば R2 が拒否する |
-| owner GET | 600 秒 | | |
-| share GET | 最大 300 秒 | | share の残り期限を超えて発行しない |
+| owner GET | 600 秒 | — | — |
+| share GET | 最大 300 秒 | — | share の残り期限を超えて発行しない |
 
 finalize は、R2 が記録した SHA-256 と申告値の一致を確認するまで asset を `ready` にしません（[D-018](decisions.md)）。したがって `assets.sha256` は、R2 が検証した original の SHA-256 です。
 

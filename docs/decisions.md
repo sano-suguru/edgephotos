@@ -220,8 +220,8 @@ v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Cl
 
 - iPhone の Safari では、`<input type=file>` の `accept` が HEIC を含まない場合、写真ピッカーの既定（「自動」）が HEIC を JPEG に変換して渡す（Apple Developer Forums の報告。実機では未確認）。これは Safari / iOS の実装上の挙動で、Web 標準の保証ではない
 - `accept` に `image/heic` を足すと、Safari 17 以降は HEIC のまま渡し、JPEG まで HEIC へ変換することがある（同フォーラムの報告）。そのため EdgePhotos の `accept` は `image/jpeg,image/png,image/webp` のままにする
-- EdgePhotos は変換を利用しているだけで、前提にはしない。HEIC が届いた場合は明示的なエラーにするので、変換の挙動が将来変わっても黙って壊れない
-- 変換後の JPEG の metadata と取り込み結果は、macOS の `sips` による代替で確認した（[verification.md](verification.md)）
+- `accept` は選択候補の hint にすぎない。EdgePhotos が前提にするのは「HEIC が届いたら明示的なエラーにする」経路だけで、変換は利用しているだけである。変換の挙動が将来変わっても、黙って壊れずにエラーとして表に出る
+- 変換後の JPEG の metadata と取り込み結果は、macOS の `sips` で代わりに確認した。iOS 上の変換結果そのものは未確認（[verification.md](verification.md)）
 - WebKit は `createImageBitmap` で HEIC を decode でき、Chromium はできない
 - Cloudflare Images は HEIC を入力にでき、Worker から binding で呼べる。変換は月 5,000 件まで無料で、以降は従量課金
 
