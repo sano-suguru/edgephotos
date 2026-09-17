@@ -1,3 +1,4 @@
+import { collectExportManifest } from '../../../contracts/export-manifest'
 import type {
   Album,
   Asset,
@@ -87,7 +88,7 @@ export const api = {
   revokeShare: (id: string) => request<Share>('POST', `/api/v1/shares/${id}/revoke`),
   regenerateShare: (id: string) => request<ShareCreated>('POST', `/api/v1/shares/${id}/regenerate`),
 
-  exportManifest: () => request<ExportManifest>('GET', '/api/v1/export'),
+  exportManifest: (): Promise<ExportManifest> => collectExportManifest((path) => request('GET', path)),
   diagnostics: () =>
     request<{
       counts: Record<string, number>

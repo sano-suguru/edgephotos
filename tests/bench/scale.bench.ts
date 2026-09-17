@@ -10,7 +10,10 @@ import { accessKeys, apiClient, assertion, call, callJson, makeApp, sha256, synt
 // Local workerd + Miniflare D1 (SQLite, same engine as D1) and R2: no network latency, so request
 // counts matter as much as the times. API timings use the real SigV4 signer with fake credentials.
 
-const SIZES = [1_000, 10_000]
+// BENCH_SIZES=1000,10000,100000 pnpm bench. Backup / restore run only up to BENCH_BACKUP_MAX assets (they are
+// sequential over the API and take minutes per 10k).
+const SIZES = (env.BENCH_SIZES ?? '1000,10000').split(',').map(Number)
+const BACKUP_MAX = Number(env.BENCH_BACKUP_MAX ?? 10_000)
 const RUNS = 7
 const BIG_ALBUM = 5_000
 const SMALL_ALBUMS = 20
@@ -259,6 +262,20 @@ describe('scale', () => {
       if (cursor) await measure(size, 'timeline last page (60)', `/api/v1/assets?limit=60&cursor=${cursor}`)
       await measure(size, 'favorites p1 (1%)', '/api/v1/assets?limit=60&favorite=true')
       await measure(size, 'trash p1 (5%)', '/api/v1/assets?limit=60&trashed=true')
+      // A filtered list stops only after 61 matches or the end of the index: the page after the last few
+      // matches reads the rest of the library.
+      for (const filter of ['favorite=true', 'trashed=true']) {
+        let last: string | null = null
+        let next: string | null = null
+        do {
+          const page: { nextCursor: string | null } = await (
+            await req(`/api/v1/assets?limit=200&${filter}${next ? `&cursor=${next}` : ''}`)
+          ).json()
+          last = next
+          next = page.nextCursor
+        } while (next)
+        await measure(size, `${filter} last page`, `/api/v1/assets?limit=200&${filter}${last ? `&cursor=${last}` : ''}`)
+      }
 
       // Albums
       await measure(size, 'albums list (21)', '/api/v1/albums')
@@ -289,10 +306,12 @@ describe('scale', () => {
       await explain(`${size} shared album`, [...recording.log])
 
       // Export / diagnostics
-      await measure(size, 'export manifest', '/api/v1/export')
+      await measure(size, 'export assets page (1000)', '/api/v1/export/assets')
+      await measure(size, 'export album-assets page (1000)', '/api/v1/export/album-assets')
       await measure(size, 'diagnostics', '/api/v1/diagnostics')
 
       // Backup / verify / restore over the public API (sequential, as the CLI does).
+      if (size > BACKUP_MAX) continue
       const source = countingClient(local)
       const store = memoryStore()
       let t = performance.now()

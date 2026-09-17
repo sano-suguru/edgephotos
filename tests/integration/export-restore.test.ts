@@ -1,6 +1,13 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { type BlobStore, backupLibrary, readManifest, restoreLibrary, verifyLibrary } from '../../scripts/lib/backup'
+import {
+  type BlobStore,
+  backupLibrary,
+  fetchManifest,
+  readManifest,
+  restoreLibrary,
+  verifyLibrary,
+} from '../../scripts/lib/backup'
 import { apiClient, call, callJson, makeApp, photo, putObject, reserve, syntheticPng, uploadPhoto } from '../helpers'
 
 function memoryStore(): BlobStore & { files: Map<string, Uint8Array> } {
@@ -182,8 +189,86 @@ describe('export and restore to an empty environment', () => {
     expect(corrupted.problems).toContain(`original SHA-256 mismatch for asset ${victim.id}`)
   })
 
+  it('exports the library in pages that add up to the whole manifest', async () => {
+    const app = await makeApp({ which: 'primary' })
+    for (let i = 0; i < 5; i++) await uploadPhoto(app)
+    const full = await fetchManifest(apiClient(app))
+    const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'paged' }, expect: 201 })
+    for (const a of full.assets.slice(0, 4)) await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${a.id}`)
+
+    const ids: string[] = []
+    let after: string | null = null
+    let pages = 0
+    do {
+      const page: { items: { id: string }[]; nextAfter: string | null } = await callJson(
+        app,
+        'GET',
+        `/api/v1/export/assets?limit=2${after ? `&after=${after}` : ''}`,
+        { expect: 200 },
+      )
+      ids.push(...page.items.map((i) => i.id))
+      after = page.nextAfter
+      pages++
+    } while (after)
+    expect(pages).toBeGreaterThan(2)
+    expect(ids).toEqual([...ids].sort())
+    expect(new Set(ids).size).toBe(ids.length)
+    const manifest = await fetchManifest(apiClient(app))
+    expect(ids.sort()).toEqual(manifest.assets.map((a) => a.id).sort())
+
+    const pairs: string[] = []
+    after = null
+    do {
+      const qs: string = after ? `&after=${encodeURIComponent(after)}` : ''
+      const page: { items: { albumId: string; assetId: string }[]; nextAfter: string | null } = await callJson(
+        app,
+        'GET',
+        `/api/v1/export/album-assets?limit=1${qs}`,
+        { expect: 200 },
+      )
+      pairs.push(...page.items.map((m) => `${m.albumId}/${m.assetId}`))
+      after = page.nextAfter
+    } while (after)
+    const inAlbum = manifest.albums.find((a) => a.id === album.id)
+    expect(inAlbum?.assetIds.sort()).toEqual(
+      full.assets
+        .slice(0, 4)
+        .map((a) => a.id)
+        .sort(),
+    )
+    expect(pairs.filter((p) => p.startsWith(album.id))).toHaveLength(4)
+    expect((await callJson(app, 'GET', '/api/v1/diagnostics')).lastExportAt).not.toBeNull()
+  })
+
+  it('never refers to an asset that is not in the manifest when the library changes mid-export', async () => {
+    const app = await makeApp({ which: 'primary' })
+    const victim = (await uploadPhoto(app)).result.asset.id
+    const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'moving' }, expect: 201 })
+    await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${victim}`)
+    const inner = apiClient(app)
+    let added: string | null = null
+    const client = {
+      ...inner,
+      api: async (path: string, init?: RequestInit) => {
+        // Between the asset pages and the membership pages, one photo is deleted and one is added.
+        if (path.startsWith('/api/v1/export/albums') && !added) {
+          await env.DB.prepare(`UPDATE assets SET status = 'purging' WHERE id = ?`).bind(victim).run()
+          added = (await uploadPhoto(app)).result.asset.id
+          await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${added}`)
+          await env.DB.prepare(`UPDATE assets SET status = 'ready' WHERE id = ?`).bind(victim).run()
+          await env.DB.prepare('DELETE FROM album_assets WHERE asset_id = ?').bind(victim).run()
+        }
+        return inner.api(path, init)
+      },
+    }
+    const manifest = await fetchManifest(client)
+    const known = new Set(manifest.assets.map((a) => a.id))
+    expect(known.has(added as unknown as string)).toBe(false)
+    for (const al of manifest.albums) for (const id of al.assetIds) expect(known.has(id)).toBe(true)
+  })
+
   it('export requires Access', async () => {
     const app = await makeApp()
-    expect((await call(app, 'GET', '/api/v1/export', { token: null })).status).toBe(401)
+    expect((await call(app, 'GET', '/api/v1/export/assets', { token: null })).status).toBe(401)
   })
 })

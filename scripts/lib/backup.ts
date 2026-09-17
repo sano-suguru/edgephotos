@@ -2,6 +2,7 @@
 // Restore re-uploads through the normal reserve -> PUT -> finalize protocol, so no privileged
 // import endpoint exists. Asset ids change; content identity is the original's SHA-256.
 
+import { collectExportManifest } from '../../src/contracts/export-manifest'
 import type { ExportManifest, UploadFinalizeResult, UploadReservation } from '../../src/contracts/schemas'
 
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>
@@ -66,11 +67,15 @@ async function download(client: ApiClient, url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer())
 }
 
+export function fetchManifest(client: ApiClient): Promise<ExportManifest> {
+  return collectExportManifest((path) => apiJson(client, path))
+}
+
 const originalPath = (sha256: string) => `originals/${sha256}`
 const derivativePath = (sha256: string, variant: 'thumbnail' | 'preview') => `derivatives/${sha256}/${variant}.jpg`
 
 export async function backupLibrary(client: ApiClient, store: BlobStore): Promise<ExportManifest> {
-  const manifest = await apiJson<ExportManifest>(client, '/api/v1/export')
+  const manifest = await fetchManifest(client)
   for (const asset of manifest.assets) {
     const original = await apiJson<{ url: string }>(client, `/api/v1/assets/${asset.id}/original`)
     const bytes = await download(client, original.url)
@@ -186,7 +191,7 @@ export type VerifyReport = { ok: boolean; checkedOriginals: number; problems: st
 // Compares a live library against an export manifest: asset count, per-asset metadata,
 // album membership (by original SHA-256), and the SHA-256 of every original re-downloaded from R2.
 export async function verifyLibrary(client: ApiClient, expected: ExportManifest): Promise<VerifyReport> {
-  const actual = await apiJson<ExportManifest>(client, '/api/v1/export')
+  const actual = await fetchManifest(client)
   const problems: string[] = []
 
   if (actual.assets.length !== expected.assets.length) {

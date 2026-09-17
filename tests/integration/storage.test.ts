@@ -19,7 +19,9 @@ type App = Awaited<ReturnType<typeof makeApp>>
 
 async function resetStorage() {
   await env.DB.batch(
-    ['album_assets', 'albums', 'shares', 'uploads', 'assets', 'settings'].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+    ['album_assets', 'albums', 'shares', 'uploads', 'assets', 'settings'].map((t) =>
+      env.DB.prepare(`DELETE FROM ${t}`),
+    ),
   )
   for (;;) {
     const listed = await env.BUCKET.list()
@@ -44,13 +46,15 @@ async function auditAll(app: App, opts: { limit?: number; deep?: boolean } = {})
     checked.pages++
     after = page.nextAfter
   } while (after)
-  const summary = issues
-    .map((i) => `${i.kind}:${i.assetId ?? i.key}:${(i.objects ?? []).join('+')}`)
-    .sort()
+  const summary = issues.map((i) => `${i.kind}:${i.assetId ?? i.key}:${(i.objects ?? []).join('+')}`).sort()
   return { issues, checked, summary }
 }
 
-const keysOf = (id: string) => [`originals/${id}`, `derivatives/v1/${id}/thumbnail.jpg`, `derivatives/v1/${id}/preview.jpg`]
+const keysOf = (id: string) => [
+  `originals/${id}`,
+  `derivatives/v1/${id}/thumbnail.jpg`,
+  `derivatives/v1/${id}/preview.jpg`,
+]
 
 async function exists(key: string) {
   return (await env.BUCKET.head(key)) !== null
@@ -97,7 +101,8 @@ describe('storage audit', () => {
     const fresh = await reserve(app, await photo())
     const expiredComplete = await photo()
     const rc = await reserve(old, expiredComplete)
-    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(old, rc.targets[v], expiredComplete[v])
+    for (const v of ['original', 'thumbnail', 'preview'] as const)
+      await putObject(old, rc.targets[v], expiredComplete[v])
     const partial = await photo()
     const rp = await reserve(old, partial)
     await putObject(old, rp.targets.original, partial.original)
@@ -238,7 +243,8 @@ describe('storage cleanup', () => {
     for (const r of [first, second]) {
       for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(old, r.targets[v], dup[v])
     }
-    const dupWinner = (await callJson(old, 'POST', `/api/v1/uploads/${first.upload.id}/finalize`, { expect: 200 })).asset
+    const dupWinner = (await callJson(old, 'POST', `/api/v1/uploads/${first.upload.id}/finalize`, { expect: 200 }))
+      .asset
     await callJson(old, 'POST', `/api/v1/uploads/${second.upload.id}/finalize`, { expect: 200 })
     const secondKeys = keysOf(assetIdFromTarget(second.targets.original.url).slice('originals/'.length))
     for (const k of secondKeys) await env.BUCKET.put(k, syntheticJpeg()) // the best-effort delete had failed
@@ -291,7 +297,10 @@ describe('storage cleanup', () => {
       id: string
     }>()
     expect(pending.results.map((r) => r.id).sort()).toEqual([ry.upload.id, inFlight.upload.id].sort())
-    const assets = await env.DB.prepare('SELECT id, status FROM assets ORDER BY id').all<{ id: string; status: string }>()
+    const assets = await env.DB.prepare('SELECT id, status FROM assets ORDER BY id').all<{
+      id: string
+      status: string
+    }>()
     expect(assets.results).toHaveLength(6)
 
     // Idempotent.
@@ -320,7 +329,9 @@ describe('storage cleanup', () => {
         if (prop === 'batch' && settledId) {
           return async (statements: D1PreparedStatement[]) => {
             await target
-              .prepare(`UPDATE uploads SET status = 'duplicate', duplicate_of = NULL WHERE id = ? AND status = 'pending'`)
+              .prepare(
+                `UPDATE uploads SET status = 'duplicate', duplicate_of = NULL WHERE id = ? AND status = 'pending'`,
+              )
               .bind(settledId)
               .run()
             settledId = null
@@ -337,7 +348,9 @@ describe('storage cleanup', () => {
     settledId = r.upload.id
     const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
     expect(res.status).toBe(410)
-    const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM assets WHERE sha256 = ?').bind(p.sha256).first<{ n: number }>()
+    const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM assets WHERE sha256 = ?')
+      .bind(p.sha256)
+      .first<{ n: number }>()
     expect(n?.n).toBe(0)
   })
 

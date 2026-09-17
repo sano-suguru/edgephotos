@@ -160,10 +160,7 @@ export async function purgeAsset(ctx: ServiceContext, id: string): Promise<void>
       ctx.db
         .delete(albumAssets)
         .where(
-          and(
-            eq(albumAssets.asset_id, id),
-            sql`EXISTS (SELECT 1 FROM assets WHERE id = ${id} AND status = 'purging')`,
-          ),
+          and(eq(albumAssets.asset_id, id), sql`EXISTS (SELECT 1 FROM assets WHERE id = ${id} AND status = 'purging')`),
         ),
     ])
     const marked = await getAssetRow(ctx.db, id)

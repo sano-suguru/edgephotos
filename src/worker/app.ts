@@ -8,7 +8,10 @@ import {
   AssetPatchSchema,
   AssetSchema,
   ErrorSchema,
-  ExportManifestSchema,
+  EXPORT_PAGE_MAX,
+  ExportAlbumListSchema,
+  ExportAssetPageSchema,
+  ExportMembershipPageSchema,
   IdSchema,
   LIMITS,
   ShareCreatedSchema,
@@ -39,7 +42,7 @@ import {
 import * as albums from './services/albums'
 import * as assets from './services/assets'
 import type { ServiceContext } from './services/context'
-import { buildExport, diagnostics } from './services/export'
+import { diagnostics, exportAlbums, exportAssetsPage, exportMembershipsPage } from './services/export'
 import * as shares from './services/shares'
 import { auditStorage, cleanupUploads } from './services/storage-audit'
 import * as uploads from './services/uploads'
@@ -492,14 +495,60 @@ export function createApp(options: AppOptions) {
   )
 
   // Export & diagnostics
+  const ExportPageQuery = z.object({
+    limit: z.coerce.number().int().min(1).max(EXPORT_PAGE_MAX).default(EXPORT_PAGE_MAX),
+  })
+
   app.openapi(
     createRoute({
       method: 'get',
-      path: '/api/v1/export',
+      path: '/api/v1/export/assets',
       tags: tag('export'),
-      responses: { 200: json(ExportManifestSchema, 'Portable metadata export'), ...errorResponses },
+      request: { query: ExportPageQuery.extend({ after: IdSchema.optional() }) },
+      responses: {
+        200: json(ExportAssetPageSchema, 'Ready assets ordered by id. The last page records the export time.'),
+        ...errorResponses,
+      },
     }),
-    async (c) => c.json(await buildExport(svc(c).db, now()), 200),
+    async (c) => {
+      const q = c.req.valid('query')
+      return c.json(await exportAssetsPage(svc(c).db, now(), q.after, q.limit), 200)
+    },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/api/v1/export/albums',
+      tags: tag('export'),
+      responses: { 200: json(ExportAlbumListSchema, 'Albums, oldest first'), ...errorResponses },
+    }),
+    async (c) => c.json(await exportAlbums(svc(c).db), 200),
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/api/v1/export/album-assets',
+      tags: tag('export'),
+      request: {
+        query: ExportPageQuery.extend({
+          after: z
+            .string()
+            .regex(
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+            )
+            .optional(),
+        }),
+      },
+      responses: { 200: json(ExportMembershipPageSchema, 'Album membership of ready assets'), ...errorResponses },
+    }),
+    async (c) => {
+      const q = c.req.valid('query')
+      const [albumId, assetId] = q.after?.split('/') ?? []
+      const after = q.after ? { albumId, assetId } : null
+      return c.json(await exportMembershipsPage(svc(c).db, after, q.limit), 200)
+    },
   )
 
   app.openapi(

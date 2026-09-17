@@ -1,45 +1,33 @@
-import { asc, desc, eq, sql } from 'drizzle-orm'
-import type { ExportManifest } from '../../contracts/schemas'
+import { and, asc, eq, gt, sql } from 'drizzle-orm'
 import type { Db } from '../db'
-import { albumAssets, albums, assets, settings } from '../db/schema'
+import { albums, assets, settings } from '../db/schema'
 import { assetObjectKeys } from '../storage/keys'
 
-// Portable metadata export: assets, albums, membership, object manifest and expected hashes.
+// Portable metadata export, one page at a time: assets, albums, membership, object manifest and expected hashes.
 // Contains no credentials, JWTs, share secrets or presigned URLs. Shares are not exported.
-export async function buildExport(db: Db, now: Date): Promise<ExportManifest> {
-  const [assetRows, albumRows, members] = await db.batch([
-    db.select().from(assets).where(eq(assets.status, 'ready')).orderBy(desc(assets.sort_at), desc(assets.id)),
-    db
-      .select({ id: albums.id, title: albums.title, created_at: albums.created_at })
-      .from(albums)
-      .orderBy(asc(albums.created_at), asc(albums.id)),
-    db
-      .select({ album_id: albumAssets.album_id, asset_id: albumAssets.asset_id })
-      .from(albumAssets)
-      .innerJoin(assets, eq(assets.id, albumAssets.asset_id))
-      .where(eq(assets.status, 'ready'))
-      .orderBy(albumAssets.album_id, albumAssets.added_at, albumAssets.asset_id),
-  ])
-  const membership = new Map<string, string[]>()
-  for (const m of members) {
-    const list = membership.get(m.album_id) ?? []
-    list.push(m.asset_id)
-    membership.set(m.album_id, list)
-  }
-  const exportedAt = now.toISOString()
-  await db
-    .insert(settings)
-    .values({ key: 'last_export_at', value: exportedAt, updated_at: exportedAt })
-    .onConflictDoUpdate({
-      target: settings.key,
-      set: { value: sql`excluded.value`, updated_at: sql`excluded.updated_at` },
-    })
 
+export async function exportAssetsPage(db: Db, now: Date, after: string | undefined, limit: number) {
+  const rows = await db
+    .select()
+    .from(assets)
+    .where(and(eq(assets.status, 'ready'), after ? gt(assets.id, after) : undefined))
+    .orderBy(asc(assets.id))
+    .limit(limit + 1)
+  const page = rows.slice(0, limit)
+  const nextAfter = rows.length > limit ? page[page.length - 1].id : null
+  if (nextAfter === null) {
+    // The last page: record when the owner last took the whole list (docs/security.md §8).
+    const exportedAt = now.toISOString()
+    await db
+      .insert(settings)
+      .values({ key: 'last_export_at', value: exportedAt, updated_at: exportedAt })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value: sql`excluded.value`, updated_at: sql`excluded.updated_at` },
+      })
+  }
   return {
-    format: 'edgephotos-export',
-    formatVersion: 1,
-    exportedAt,
-    assets: assetRows.map((a) => ({
+    items: page.map((a) => ({
       id: a.id,
       sha256: a.sha256,
       originalSize: a.original_size,
@@ -53,12 +41,29 @@ export async function buildExport(db: Db, now: Date): Promise<ExportManifest> {
       createdAt: a.created_at,
       objects: assetObjectKeys(a.id),
     })),
-    albums: albumRows.map((al) => ({
-      id: al.id,
-      title: al.title,
-      createdAt: al.created_at,
-      assetIds: membership.get(al.id) ?? [],
-    })),
+    nextAfter,
+  }
+}
+
+export async function exportAlbums(db: Db) {
+  const rows = await db
+    .select({ id: albums.id, title: albums.title, createdAt: albums.created_at })
+    .from(albums)
+    .orderBy(asc(albums.created_at), asc(albums.id))
+  return { items: rows }
+}
+
+export async function exportMembershipsPage(db: Db, after: { albumId: string; assetId: string } | null, limit: number) {
+  const cursor = after ? sql` AND (aa.album_id, aa.asset_id) > (${after.albumId}, ${after.assetId})` : sql``
+  const rows = await db.all<{ album_id: string; asset_id: string }>(
+    sql`SELECT aa.album_id, aa.asset_id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
+        WHERE a.status = 'ready'${cursor} ORDER BY aa.album_id, aa.asset_id LIMIT ${limit + 1}`,
+  )
+  const page = rows.slice(0, limit)
+  const last = page[page.length - 1]
+  return {
+    items: page.map((r) => ({ albumId: r.album_id, assetId: r.asset_id })),
+    nextAfter: rows.length > limit ? `${last.album_id}/${last.asset_id}` : null,
   }
 }
 

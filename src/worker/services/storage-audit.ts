@@ -36,8 +36,8 @@ export async function auditStorage(
   const issues: StorageAuditIssue[] = []
   const present = new Map<string, Present>()
   const entry = (id: string) => {
-    let p = present.get(id)
-    if (!p) present.set(id, (p = {}))
+    const p = present.get(id) ?? {}
+    present.set(id, p)
     return p
   }
   // Inclusive end of the page; null while no source has stopped early.
@@ -161,7 +161,8 @@ export async function auditStorage(
         issues.push({ kind: 'expired_upload', assetId: id, objects: found, uploadId: upload.id })
       } else inProgress++
     } else if (upload?.status === 'duplicate') {
-      if (found.length > 0) issues.push({ kind: 'duplicate_leftover', assetId: id, objects: found, uploadId: upload.id })
+      if (found.length > 0)
+        issues.push({ kind: 'duplicate_leftover', assetId: id, objects: found, uploadId: upload.id })
     } else if (found.length > 0) {
       issues.push({ kind: 'unreferenced_objects', assetId: id, objects: found })
     }

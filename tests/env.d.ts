@@ -8,6 +8,8 @@ declare global {
       RESTORE_DB: D1Database
       RESTORE_BUCKET: R2Bucket
       TEST_MIGRATIONS: D1Migration[]
+      BENCH_SIZES?: string
+      BENCH_BACKUP_MAX?: string
     }
   }
 }

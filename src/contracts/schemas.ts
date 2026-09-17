@@ -299,6 +299,29 @@ export const StorageCleanupResultSchema = z
 export type StorageAuditIssue = z.infer<typeof StorageAuditIssueSchema> & { sortKey?: string }
 export type StorageAuditPage = z.infer<typeof StorageAuditPageSchema>
 export type StorageCleanupResult = z.infer<typeof StorageCleanupResultSchema>
+// Paged export. Clients assemble these pages into an ExportManifest (src/contracts/export-manifest.ts); a single
+// response for the whole library would not fit a Worker's memory at 100k photos (docs/benchmarks.md).
+export const EXPORT_PAGE_MAX = 1000
+
+export const ExportAssetPageSchema = z
+  .object({ items: z.array(ExportAssetSchema), nextAfter: IdSchema.nullable() })
+  .openapi('ExportAssetPage')
+
+export const ExportAlbumListSchema = z
+  .object({ items: z.array(z.object({ id: IdSchema, title: z.string(), createdAt: z.string() })) })
+  .openapi('ExportAlbumList')
+
+export const ExportMembershipPageSchema = z
+  .object({
+    items: z.array(z.object({ albumId: IdSchema, assetId: IdSchema })),
+    // `{albumId}/{assetId}` of the last item; null on the last page.
+    nextAfter: z.string().nullable(),
+  })
+  .openapi('ExportMembershipPage')
+
+export type ExportAssetPage = z.infer<typeof ExportAssetPageSchema>
+export type ExportAlbumList = z.infer<typeof ExportAlbumListSchema>
+export type ExportMembershipPage = z.infer<typeof ExportMembershipPageSchema>
 export type AssetSummary = z.infer<typeof AssetSummarySchema>
 export type Asset = z.infer<typeof AssetSchema>
 export type AssetPage = z.infer<typeof AssetPageSchema>
