@@ -31,8 +31,8 @@ migration 適用、fail-closed、upload → timeline → album → share → rev
 
 ### upload と checksum
 
-- original の checksum（[D-018](decisions.md)）: remote-test で Browser から、canvas で生成した合成 JPEG を使って確認済み（2026-09-16）。reserve が返す original の PUT header に `x-amz-checksum-sha256` が入る。同じ size で 1 byte だけ違う body の PUT は R2 が `400 BadDigest` で拒否し、その時点の finalize は `409 UPLOAD_OBJECT_MISSING`（`original`）。同じ URL へ正しい bytes を PUT し直すと `200`、finalize は `200 created`（S3 API で PUT した object の `checksums.sha256` を binding の `head()` から読めることの実証）。owner 用 GET で読み戻した original の SHA-256 は `assets.sha256` と一致した。確認に使った asset は trash へ移動済み。
-- upload 経路: owner が Access login を通したうえで、private API の成功応答、`reserve -> PUT -> finalize` が remote-test で通ることを確認済み。PUT の宛先が `*.r2.cloudflarestorage.com` であること（Worker が本体を中継しないこと）を DevTools で確認。`ACCESS_AUD` と `ACCESS_TEAM_DOMAIN` の正しさもこれで確定。
+- original の checksum（[D-018](decisions.md)）: remote-test で Browser から、canvas で生成した合成 JPEG を使って確認済み（2026-09-16）。reserve が返す original の PUT header に `x-amz-checksum-sha256` が入る。同じ size で 1 byte だけ違う body の PUT は R2 が `400 BadDigest` で拒否し、その時点の finalize は `409 UPLOAD_OBJECT_MISSING`（`original`）。同じ URL へ正しい bytes を PUT し直すと `200`、finalize は `200 created`。S3 API で PUT した object の `checksums.sha256` を、binding の `head()` から読めることを確認した。owner 用 GET で読み戻した original の SHA-256 は `assets.sha256` と一致した。確認に使った asset は trash へ移動済み。
+- upload 経路: owner が Access login を通したうえで、private API の成功応答、`reserve -> PUT -> finalize` が remote-test で通ることを確認済み。PUT の宛先が `*.r2.cloudflarestorage.com` であること（Worker が本体を中継しないこと）を DevTools で確認。これにより、remote-test に設定した `ACCESS_AUD` と `ACCESS_TEAM_DOMAIN` で owner の JWT 検証が通ることも確認した。
 - 実 R2 の `412`（2026-09-17、Browser の `fetch()` から CORS 越し、canvas で作った合成 JPEG）: 同じ presigned PUT URL へ 2 回目の PUT を送ると、original・thumbnail とも `412` が返り、`res.status` として読めた（network error にはならない）。そのあとの finalize は `200 created` で、再試行で `412` を受けた upload がそのまま ready になれることを確認した。確認に使った asset は trash へ移動済み。
 - duplicate handling と完全削除: 同一 original の再 upload が `409 DUPLICATE_ASSET` になること、完全削除後は同じ original を再登録できることを確認済み。
 

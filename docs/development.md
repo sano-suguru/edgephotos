@@ -117,7 +117,7 @@ feature 実装前に、少なくとも次の component を Preact の production
 
 確認結果（2026-09、`@base-ui/react` 1.8 + `preact/compat`）:
 
-- Dialog / Menu: production build・TypeScript は成立。`pnpm dev` 上の Chromium で、Dialog の focus 移動・Escape で閉じる・trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore を確認。`e2e/keyboard.spec.ts` で自動化済み（focus trap、Escape、focus restore、Menu の矢印キー移動、Menu から Dialog を開いて Enter で送信）。Tab 移動の直後、Base UI は不可視の focus guard に一瞬 focus を置いてから Dialog 内へ戻す。trap としては正しく動く
+- Dialog / Menu: production build・TypeScript は成立。`pnpm dev` 上の Chromium で、Dialog の focus 移動・Escape で閉じる・trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore を確認。`e2e/keyboard.spec.ts` で自動化済み（focus trap、Escape、focus restore、Menu の矢印キー移動、Menu から Dialog を開いて Enter で送信）
 - Select / Combobox: 現状の UI で未使用のため未確認
 - touch interaction: iPhone 13 相当の viewport と touch（Playwright WebKit）で tap 操作を自動化済み（`e2e/mobile.spec.ts`）。実機では未確認
 

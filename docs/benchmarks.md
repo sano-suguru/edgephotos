@@ -165,8 +165,8 @@ decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の 
 
 ### plan に依存する注意
 
-Workers Free の CPU 上限は 1 request 10 ms です。timeline の 1 ページの署名は、修正前の約 8 ms から約 4 ms になりました。ただし isolate の起動直後の最初の署名は、それだけで 16〜41 ms かかります。10,000 件の export は `JSON.stringify` だけで約 11 ms です。Node での測定なので、本番の CPU 時間と同じではありません。ただし Free の 10 ms に収まる根拠にもなりません。
+Workers Free の CPU 上限は 1 request 10 ms です。timeline の 1 ページの署名は、修正前の約 8 ms から約 4 ms になりました。ただし isolate の起動直後の最初の署名は、それだけで 16〜41 ms かかります。10,000 件の export は `JSON.stringify` だけで約 11 ms です。Node での測定なので本番の CPU 時間とは一致しませんが、Free の 10 ms に収まる根拠もありません。
 
-継続して使う場合は Workers Paid（月 $5 から、CPU 上限は既定 30 秒）を推奨します（[operations.md](operations.md) §1）。Free でしか使えないことが要件になった場合は、export を分割するなどの対応を、そのとき測って決めます。
+このため、継続利用の手順（[operations.md](operations.md) §1）では Workers Paid（月 $5 から、CPU 上限は既定 30 秒）を前提にしています。Free でしか使えないことが要件になった場合は、export を分割するなどの対応を、そのとき測って決めます。
 
 D1 の rows read も plan で上限が違います（Free は 1 日 500 万行）。修正後、timeline を 1 ページ読む cost は page の深さによらず約 60 行です。album 一覧と album の page は、album の大きさに比例します。
