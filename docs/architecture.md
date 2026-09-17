@@ -163,7 +163,7 @@ PUT|DELETE /api/v1/albums/{albumId}/assets/{assetId}   idempotent
 GET|POST /api/v1/albums/{albumId}/shares
 POST   /api/v1/shares/{shareId}/revoke | /regenerate
 GET    /api/v1/export                           metadata manifest
-GET    /api/v1/diagnostics                      non-sensitive counts
+GET    /api/v1/diagnostics                      non-sensitive counts, unfinished purge ids
 GET    /share/api/v1/shares/{shareId}           Authorization: Bearer <secret>
 GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
 ```
@@ -192,7 +192,7 @@ finalize での確認内容（[D-012](decisions.md)）:
 - original の magic bytes が申告 content type と一致
 - thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG（違反は `422 UPLOAD_OBJECT_INVALID`）
 
-D1 への asset 作成と upload 状態更新は 1 つの D1 batch（transaction）で行います。asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。
+D1 への asset 作成と upload 状態更新は 1 つの D1 batch（transaction）で行います。asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
 
 presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw digest の base64）として署名します。R2 は body の digest が一致しない PUT を拒否し、object を作りません。Client はこの header を省略も変更もできません（[D-018](decisions.md)）。
 
@@ -225,6 +225,13 @@ Browser の JPEG encoder が付ける APP1 / APP13（WebKit は Exif の色空�
 original の形式は JPEG / PNG / WebP です。HEIC / HEIF は Client が明示的に拒否します。iPhone の通常経路では、Safari の写真ピッカーが HEIC を JPEG に変換して渡す、現在報告されている挙動に任せます。この挙動は Web 標準の保証ではありません。HEIC がそのまま渡された場合は、明示的なエラーになります（[D-019](decisions.md)）。
 
 Web 版が保存する original は「Browser から受け取った byte 列」です。iOS が選択時に JPEG へ変換した場合、カメラロールの HEIC そのものは保存されません。
+
+### 撮影日時（takenAt）
+
+- Client は EXIF の `DateTimeOriginal`（なければ `CreateDate`）を読みます。offset は `OffsetTimeOriginal`（`CreateDate` には `OffsetTime`）があるときだけ付けます
+- offset が無い日時は、offset を補わずにそのまま保存します（例: `2024-05-01T10:20:30`）。Browser の timezone も付けません。撮影地の時刻として書かれた値を、別の timezone の値に変えないためです
+- timeline の並び順（`sort_at`）だけは、offset の無い日時を UTC とみなして計算します。そのため、日本時間で動く offset を書かないカメラの写真は、同じ瞬間に offset 付きで撮った写真より 9 時間新しいものとして並びます
+- EXIF は original に残っているため、将来 GPS や端末の設定から offset を推定する場合も、保存済みの original から計算し直せます。`takenAt` は backup / restore でも文字列のまま保持されます
 
 ### thumbnail
 
@@ -276,6 +283,7 @@ share session / share Cookie は v1 では作りません。
 - `trash` は論理削除です。timeline・album・share から見えなくなりますが、original は残ります。
 - `restore` で元に戻せます。album 所属も復帰します。
 - 完全削除は trash 内の asset に対してのみ実行できます。`purging` に遷移して全画面から隠したあと、R2 object を削除し、最後に D1 row を削除します。途中で失敗した場合も、同じ `DELETE` を再実行すれば再開できます。
+- 止まった削除の asset ID は `GET /api/v1/diagnostics` の `purgingAssetIds`（古い順に最大 100 件）で分かります。ライブラリ画面の「削除を再開」がそれぞれに `DELETE` を送ります。同じ写真を upload し直した場合も、reserve / finalize が削除を完了させます（[D-014](decisions.md)）。
 
 ## 7.2 Export / Restore
 

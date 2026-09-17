@@ -125,6 +125,12 @@ Browser はこの 2 header を送るため、R2 CORS の AllowedHeaders に `con
 
 `assets.sha256` は UNIQUE です（値の出所は client 申告であり、上記 [D-012](#d-012-finalize-の保存確認は存在サイズ形式派生画像-metadataとする) の区別が前提です）。reserve 時に同じ original が存在すれば `409 DUPLICATE_ASSET` を返します。reserve 後の競合で finalize 時に重複が判明した場合は、既存 asset を返し、その upload 専用の object を D1 記録後に削除します。ゴミ箱内の asset も重複として扱います。
 
+完全削除が途中で止まった asset（`purging`）は重複として扱いません（2026-09-17 追記）。reserve と finalize は、その asset の完全削除を最後まで実行してから先へ進みます。R2 がまだ削除に失敗する場合は `500` を返し、upload は `pending` のまま再試行できます。
+
+- 理由: `purging` の行は全画面から隠れていますが、`assets.sha256` の UNIQUE を持ったままです。以前は、同じ写真を選び直すと reserve が `409 DUPLICATE_ASSET` を返し、画面には「登録済み」と表示されていました。実際にはライブラリに無い写真です。削除前に reserve した upload を finalize すると、新しく PUT した object を「重複」として消し、`410` を返していました
+- 削除は owner がすでに確定した操作で、再実行しても安全です（architecture.md §7.1）。新しい upload の object key は別の asset ID なので、削除の対象になりません
+- 止まった削除は、ライブラリ画面の「削除を再開」からも完了できます。`GET /api/v1/diagnostics` が対象の asset ID を返します
+
 ## D-015: restore は公開 HTTP API 経由の再 upload とする
 
 **状態:** 採用
@@ -252,6 +258,7 @@ v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Cl
 - **PUT を再試行する。** 3 回の PUT のどれかが一時的に失敗すると、その写真全体が失敗していた。network error、408、429、5xx は、backoff を挟んで最大 4 回まで試す。`412` は保存済みとして扱う（`src/web/lib/storage-put.ts`）。key は reserve ごとに固有で、`If-None-Match: *` で署名しているため、`412` になるのは同じ upload の以前の試行が R2 に届き、応答だけが失われた場合に限られる。finalize は引き続き size と、original については R2 が検証した SHA-256 を確認する。実 R2 の `412` が CORS 越しに status として読めることは、remote-test で確認済み（operations.md 冒頭）。`400`（BadDigest）と `403`（期限切れ）は再試行しない
 - **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らなかった。300 枚を選ぶと、100 件近くを残したまま完了表示になっていた。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削る（`src/web/features/uploads/upload-list.ts`）
 - **前処理の並列数は 2 のままにする。** 2 が最適だと示したわけではない。desktop の Browser では、変えるだけの根拠が得られなかった。 1 枚分の peak memory は、ほぼ decode 後の bitmap（幅 × 高さ × 4 byte）で決まる。ArrayBuffer を早く手放す案、canvas を 0×0 にして解放する案は、測定の揺れを超える差が出なかったため入れない。Chromium では並列数を 1 増やすごとに peak が bitmap 1 枚分増え、1 → 2 で時間が約 2 割縮んだ。WebKit では peak も時間もほぼ変わらなかった。bitmap は PUT の前に close されるため、転送中に保持するのは File と小さな derivative だけになる。Web Worker は導入しない。mobile では、1 → 2 の速度差（約 2 割）より peak の増分（48MP で bitmap 約 190MB）の方が重い可能性がある。iPhone の実機で 48MP を数枚続けて取り込み、Safari が落ちる場合は、まず並列数 1 を試す
+  - 2 は画面全体での上限です（2026-09-17 修正）。以前は写真を選ぶたびに 2 本の処理を追加していたため、取り込み中にもう一度選ぶと 4 枚、3 回選ぶと 6 枚を同時に decode できました。上の測定は同時に 2 枚までを前提にしています。現在は、後から選んだ写真は先の写真の後ろに並びます（`src/web/lib/task-limit.ts`）
 
 ## D-021: Browser 固有の経路だけを Playwright で自動化する
 

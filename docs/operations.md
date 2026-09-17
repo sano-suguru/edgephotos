@@ -2,7 +2,7 @@
 
 この文書は、EdgePhotos v1 のセットアップ、更新、backup / restore、uninstall の運用契約を定義します。
 
-> **検証状況（2026-09-16）:**
+> **検証状況（2026-09-16〜17。各項目の日付が優先）:**
 > - local（Miniflare / `vite dev` / `vite preview`）: migration 適用、fail-closed、upload → timeline → album → share → revoke、export / restore / verify を確認済み。
 > - remote-test 環境: D1・R2 の作成、remote D1 migration、`CLOUDFLARE_ENV=remote-test` での build と deploy、未設定 Worker が private / share API を `503` で拒否すること、共有ページの header / CSP、`/share/assets/*` の配信を確認済み。
 > - Access 境界: private path（`/`、`/api/v1/*`）が Access login へ 302、`/share`・`/share/{shareId}`・`/share/api/v1/*`・`/share/assets/*` が Access を通過して Worker に到達することを確認済み。
@@ -27,6 +27,7 @@
 >   - memory（Browser のプロセスツリーの RSS。50ms ごとに採取し、1 枚処理中の増分を記録）: 12MP で約 45〜110MB、48MP / 50MP で約 190〜340MB、108MP で約 440〜840MB、200MP で約 0.9〜1.1GB。decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の ArrayBuffer（最大 23MB）は小さい。200 件の連続 upload（計 920MB、48MP / 50MP を 6 件含む）で RSS は単調増加せず、peak は Chromium 約 1.1GB、WebKit 約 0.9GB（WebContent 単体では約 0.6GB）だった。前処理の並列数 1 / 2 / 3 で 48MP を 6 件処理すると、Chromium の増分は 420 / 682 / 975MB、所要時間は 2.0 / 1.6 / 1.5 秒。WebKit は 527 / 481 / 522MB、所要時間はいずれも約 2.3 秒だった。
 >   - Browser の制約で試せなかったこと: WebKit では Playwright で横取りした PUT の Blob 本文が失われるため、再試行の再現は Chromium だけで行った（再試行のコードは engine に依存しない）。
 > - 実 R2 の `412`（2026-09-17、remote-test、Browser の `fetch()` から CORS 越し、canvas で作った合成 JPEG）: 同じ presigned PUT URL へ 2 回目の PUT を送ると、original・thumbnail とも `412` が返り、`res.status` として読めた（network error にはならない）。そのあとの finalize は `200 created` で、再試行で `412` を受けた upload がそのまま ready になれることを確認した。確認に使った asset は trash へ移動済み。
+> - 2026-09-17 の continuous-use 修正（完全削除が止まった写真の再 upload、止まった削除の再開、期限切れ upload の件数、取り込みの並列数）: local の自動テスト（workerd と Playwright の Chromium / WebKit）だけで確認した。remote-test には未 deploy で、`pnpm diagnose` の `library: *` の 2 項目も remote では未実行。
 > - **未検証:** iPhone / Android 実機での取り込み。具体的には、iOS Safari の memory 上限（jetsam）と 48MP 以上の decode、iOS 写真ピッカーの HEIC → JPEG 変換と位置情報の扱い、画面ロックやアプリ切り替えで中断した PUT の再開、presigned URL の期限（600 秒）を越える中断。
 >
 > restore の検証に使った `edgephotos-restore-test` は drill 用の一時環境で、検証後に Worker・D1・R2 bucket・Access application・R2 API token をすべて削除しました。`wrangler.jsonc` には今後維持する環境だけを残します。再度 drill を行う場合は §2 と §4 の手順で作り直します。
@@ -188,6 +189,8 @@ production は `--env` を付けません。確認する内容と、失敗時に
 | `owner API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `OWNER_EMAIL` |
 | `worker: D1 schema` | Worker が見ている D1 の最新 migration と checkout の不一致（別 DB を bind している、migration 未適用） |
 | `r2: presigned GET` | Worker が署名した URL を R2 が拒否（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`）。library が空なら SKIP |
+| `library: interrupted uploads`（WARN） | finalize されないまま期限（600 秒）を過ぎた upload がある。設定の誤りではない。写真が timeline に無ければ選び直す。R2 object は自動では消えない（roadmap の既知の制約） |
+| `library: unfinished deletes`（WARN） | 完全削除が途中で止まった写真がある。ライブラリ画面の「削除を再開」で完了させる |
 
 Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠落・不正な設定の**名前**が `{"problem":"misconfigured","settings":[...]}` として出ます（値は出しません）。
 
@@ -198,7 +201,7 @@ Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠�
 
 設定不足時に写真機能を匿名公開する fallback はありません。設定が欠けていれば `503 SERVER_MISCONFIGURED` です。
 
-remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload` が FAIL になることも確認した。
+remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS（`library: *` の 2 項目を足す前の check 構成）。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload` が FAIL になることも確認した。
 
 ## 8. Update（release と migration）
 
@@ -302,14 +305,14 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 利用者自身の Cloudflare Dashboard（Workers Logs）と、アプリ内の非機密 diagnostics（`GET /api/v1/diagnostics`、ライブラリ画面）を使います。
 
 - asset / trash / album 件数
-- 未完了 upload（`pending`）件数
-- 削除処理中（`purging`）件数
+- 未完了 upload（`pending`）件数と、そのうち期限切れ（`expires_at` を過ぎた = 中断した）件数
+- 削除処理中（`purging`）件数と、その asset ID（ライブラリ画面の「削除を再開」で完了できる）
 - 最終 export 日時
 - 適用済み migration
 
 Worker のエラーログは request ID・route・例外名だけを出し、header・token・URL・body を出しません。
 
-未完了 upload の R2 object は自動削除しません（Cron を置かない方針）。件数は diagnostics で確認できます。
+未完了 upload の R2 object は自動削除しません（Cron を置かない方針）。件数は diagnostics で確認できます。期限切れの件数が増え続ける場合は、取り込み中の画面ロックや回線断が多いことを疑います（roadmap の Post-merge verification）。
 
 ## 13. R2 credential の更新と漏洩対応
 
