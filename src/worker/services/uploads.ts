@@ -1,5 +1,5 @@
 import type { z } from '@hono/zod-openapi'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import type { UploadReserveSchema } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
@@ -12,6 +12,8 @@ import { getAssetRow, purgeAsset, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
 
 type ReserveInput = z.infer<typeof UploadReserveSchema>
+
+const CREATED_AT_SKEW_MS = 5 * 60 * 1000
 
 function duplicateError(existing: AssetRow) {
   return new ApiError(409, 'DUPLICATE_ASSET', 'An asset with the same original already exists.', {
@@ -30,6 +32,15 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
   const assetId = crypto.randomUUID()
   const expiresAt = new Date(now.getTime() + UPLOAD_URL_TTL_SECONDS * 1000)
   const meta = input.metadata
+  let assetCreatedAt: string | null = null
+  if (meta.createdAt) {
+    const t = Date.parse(meta.createdAt)
+    // A future value would pin the photo above everything uploaded until then.
+    if (t > now.getTime() + CREATED_AT_SKEW_MS) {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'metadata.createdAt is in the future.')
+    }
+    assetCreatedAt = new Date(t).toISOString()
+  }
 
   await ctx.db.insert(uploads).values({
     id: uploadId,
@@ -46,6 +57,7 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
     taken_at: meta.takenAt ?? null,
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
+    asset_created_at: assetCreatedAt,
   })
 
   const keys = assetObjectKeys(assetId)
@@ -180,26 +192,35 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
 
   const now = ctx.now()
   const ts = now.toISOString()
+  const createdAt = upload.asset_created_at ?? upload.created_at
   try {
+    // The asset is created from the upload row only while that row is still pending, in the same transaction
+    // that settles it. Storage cleanup settles expired uploads first and then removes their objects, so an
+    // asset can never be created for objects that cleanup is about to delete.
     await ctx.db.batch([
       ctx.db
         .insert(assets)
-        .values({
-          id: upload.asset_id,
-          status: 'ready',
-          sha256: upload.sha256,
-          original_size: upload.original_size,
-          original_content_type: upload.original_content_type,
-          original_filename: upload.original_filename,
-          width: upload.width,
-          height: upload.height,
-          taken_at: upload.taken_at,
-          sort_at: sortAtFor(upload.taken_at, now),
-          is_favorite: 0,
-          trashed_at: null,
-          created_at: ts,
-          updated_at: ts,
-        })
+        .select(
+          ctx.db
+            .select({
+              id: uploads.asset_id,
+              status: sql<'ready'>`'ready'`.as('status'),
+              sha256: uploads.sha256,
+              original_size: uploads.original_size,
+              original_content_type: uploads.original_content_type,
+              original_filename: uploads.original_filename,
+              width: uploads.width,
+              height: uploads.height,
+              taken_at: uploads.taken_at,
+              sort_at: sql<number>`${sortAtFor(upload.taken_at, new Date(createdAt))}`.as('sort_at'),
+              is_favorite: sql<number>`0`.as('is_favorite'),
+              trashed_at: sql<null>`NULL`.as('trashed_at'),
+              created_at: sql<string>`${createdAt}`.as('created_at'),
+              updated_at: sql<string>`${ts}`.as('updated_at'),
+            })
+            .from(uploads)
+            .where(and(eq(uploads.id, upload.id), eq(uploads.status, 'pending'))),
+        )
         .onConflictDoNothing({ target: assets.id }),
       ctx.db
         .update(uploads)

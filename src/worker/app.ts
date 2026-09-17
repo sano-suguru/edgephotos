@@ -19,6 +19,8 @@ import {
   ShareSchema,
   ShareVariantSchema,
   SignedUrlSchema,
+  StorageAuditPageSchema,
+  StorageCleanupResultSchema,
   UploadFinalizeResultSchema,
   UploadReservationSchema,
   UploadReserveSchema,
@@ -39,6 +41,7 @@ import * as assets from './services/assets'
 import type { ServiceContext } from './services/context'
 import { buildExport, diagnostics } from './services/export'
 import * as shares from './services/shares'
+import { auditStorage, cleanupUploads } from './services/storage-audit'
 import * as uploads from './services/uploads'
 import { type BlobSigner, createR2Signer, r2SignerConfigProblems, readR2SignerConfig } from './storage/signer'
 
@@ -526,6 +529,57 @@ export function createApp(options: AppOptions) {
       },
     }),
     async (c) => c.json(await diagnostics(svc(c).db, now()), 200),
+  )
+
+  // Storage reconciliation (docs/decisions.md D-023)
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/api/v1/storage/audit',
+      tags: tag('storage'),
+      request: {
+        query: z.object({
+          after: z.string().max(1024).optional(),
+          limit: z.coerce.number().int().min(1).max(500).default(200),
+          deep: boolQuery,
+        }),
+      },
+      responses: {
+        200: json(StorageAuditPageSchema, 'One page of the D1 / R2 comparison, ordered by asset id (read-only)'),
+        ...errorResponses,
+      },
+    }),
+    async (c) => {
+      const q = c.req.valid('query')
+      return c.json(await auditStorage(svc(c), { after: q.after, limit: q.limit, deep: q.deep ?? false }), 200)
+    },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/api/v1/storage/cleanup',
+      tags: tag('storage'),
+      request: {
+        body: {
+          required: false,
+          content: {
+            'application/json': { schema: z.object({ limit: z.number().int().min(1).max(50).default(25) }) },
+          },
+        },
+      },
+      responses: {
+        200: json(
+          StorageCleanupResultSchema,
+          'Resolves interrupted uploads older than a day. Never deletes an asset or an unreferenced object.',
+        ),
+        ...errorResponses,
+      },
+    }),
+    async (c) => {
+      const body = c.req.valid('json') as { limit?: number } | undefined
+      return c.json(await cleanupUploads(svc(c), body?.limit ?? 25), 200)
+    },
   )
 
   // OpenAPI document (private).

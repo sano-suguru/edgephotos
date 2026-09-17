@@ -53,10 +53,13 @@ export const uploads = sqliteTable(
     width: integer(),
     height: integer(),
     taken_at: text(),
+    // status 'duplicate' with duplicate_of NULL: an interrupted upload that storage cleanup gave up on.
     duplicate_of: text(),
     created_at: text().notNull(),
     expires_at: text().notNull(),
     finalized_at: text(),
+    // assets.created_at to use instead of this row's created_at (restore keeps the original upload time).
+    asset_created_at: text(),
   },
   (t) => [
     index('uploads_status').on(t.status, t.created_at),

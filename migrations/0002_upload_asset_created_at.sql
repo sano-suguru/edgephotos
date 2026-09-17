@@ -1,0 +1,1 @@
+ALTER TABLE `uploads` ADD `asset_created_at` text;

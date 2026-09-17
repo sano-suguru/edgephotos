@@ -92,6 +92,9 @@ export const UploadReserveSchema = z
         width: z.number().int().positive().optional(),
         height: z.number().int().positive().optional(),
         takenAt: TakenAtSchema.optional(),
+        // When the photo was first added to a library. Restore sends the value from the backup so that the
+        // timeline order of photos without a capture time survives; other clients omit it (= now).
+        createdAt: z.iso.datetime({ offset: true }).optional(),
       })
       .default({}),
   })
@@ -232,6 +235,70 @@ export const ExportManifestSchema = z
   })
   .openapi('ExportManifest')
 
+// ---- Storage audit / cleanup (docs/decisions.md D-023) ----
+
+export const STORAGE_AUDIT_ISSUE_KINDS = [
+  // An asset whose original object is gone or differs from what finalize verified. Data loss.
+  'missing_original',
+  'original_size_mismatch',
+  'original_checksum_mismatch',
+  // Thumbnail / preview missing: the photo is intact but shows as broken.
+  'missing_derivative',
+  // Permanent delete that did not finish (resume it).
+  'unfinished_delete',
+  // Upload that was never finalized and whose URLs expired. Resolved by cleanup.
+  'expired_upload',
+  // Objects of an upload that turned out to be a duplicate (or was abandoned). Removed by cleanup.
+  'duplicate_leftover',
+  // Objects no D1 row refers to. Never removed automatically: D1 may have been rolled back.
+  'unreferenced_objects',
+  // A key outside the documented layout.
+  'unexpected_key',
+] as const
+
+const StorageVariantSchema = z.enum(['original', 'thumbnail', 'preview'])
+
+export const StorageAuditIssueSchema = z
+  .object({
+    kind: z.enum(STORAGE_AUDIT_ISSUE_KINDS),
+    assetId: IdSchema.nullable(),
+    uploadId: IdSchema.optional(),
+    objects: z.array(StorageVariantSchema).optional(),
+    key: z.string().optional(),
+  })
+  .openapi('StorageAuditIssue')
+
+export const StorageAuditPageSchema = z
+  .object({
+    checked: z.object({
+      assets: z.number().int(),
+      uploadsInProgress: z.number().int(),
+      objects: z.number().int(),
+      // Originals stored before R2 recorded checksums (deep audit only). Compare them with `pnpm backup verify`.
+      checksumsUnrecorded: z.number().int(),
+    }),
+    issues: z.array(StorageAuditIssueSchema),
+    // Pass as `after` for the next page; null when the scan is complete.
+    nextAfter: z.string().nullable(),
+  })
+  .openapi('StorageAuditPage')
+
+export const StorageCleanupResultSchema = z
+  .object({
+    // Asset ids of interrupted uploads whose objects were complete and valid, now in the library.
+    completed: z.array(IdSchema),
+    // Interrupted uploads that could never be finalized (objects missing or invalid).
+    abandoned: z.number().int(),
+    // Upload records whose leftover objects were removed.
+    cleared: z.number().int(),
+    failed: z.number().int(),
+    more: z.boolean(),
+  })
+  .openapi('StorageCleanupResult')
+
+export type StorageAuditIssue = z.infer<typeof StorageAuditIssueSchema> & { sortKey?: string }
+export type StorageAuditPage = z.infer<typeof StorageAuditPageSchema>
+export type StorageCleanupResult = z.infer<typeof StorageCleanupResultSchema>
 export type AssetSummary = z.infer<typeof AssetSummarySchema>
 export type Asset = z.infer<typeof AssetSchema>
 export type AssetPage = z.infer<typeof AssetPageSchema>
