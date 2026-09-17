@@ -2,6 +2,7 @@ import exifr from 'exifr'
 import { exifDateToIso } from './exif-date'
 import { stripJpegMetadata } from './jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from './original-limit'
+import { originalTypeOf } from './original-type'
 
 // Client-side preprocessing. The original File is uploaded untouched; derivatives are re-rendered
 // through a canvas, so they never carry the original's EXIF/GPS (encoder-added segments are stripped).
@@ -76,12 +77,14 @@ async function renderJpeg(bitmap: ImageBitmap, maxEdge: number, quality: number)
 }
 
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
-  if (!(SUPPORTED_TYPES as readonly string[]).includes(file.type)) {
+  // Cheap refusals before reading: HEIC by name or type, non-images by the browser's type, oversized files.
+  if (isHeic(file) || (file.type !== '' && !file.type.startsWith('image/'))) {
     throw new UnsupportedFileError(`Unsupported file type: ${file.type || 'unknown'}`)
   }
-  // Before reading: an oversized file is refused without holding it in memory.
   if (file.size > ORIGINAL_MAX_BYTES) throw new FileTooLargeError(`File is larger than ${ORIGINAL_MAX_BYTES} bytes`)
   const buffer = await file.arrayBuffer()
+  const contentType = originalTypeOf(buffer)
+  if (!contentType) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
   const [sha256, takenAt] = await Promise.all([sha256Hex(buffer), readTakenAt(buffer)])
   let bitmap: ImageBitmap
   try {
@@ -96,7 +99,7 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
     ]
     return {
       file,
-      contentType: file.type as SupportedType,
+      contentType,
       sha256,
       width: bitmap.width,
       height: bitmap.height,

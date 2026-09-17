@@ -170,7 +170,7 @@ export function AlbumPage({ id }: { id: string }) {
         open={sharing.value}
         onOpenChange={(open) => (sharing.value = open)}
         title="共有リンク"
-        description="リンクを知っている人は、期限内はこのアルバムの縮小画像を閲覧できます。オリジナルは共有されません。"
+        description="リンクを知っている人は、期限内はこのアルバムの縮小画像を閲覧できます。保存したファイルそのもの（位置情報などを含む）は共有されません。"
       >
         <SharePanel albumId={current.id} />
       </Dialog>

@@ -260,13 +260,13 @@ export async function checkDeployment(opts: {
       ),
     )
   }
-  // Interrupted uploads are never cleaned up (docs/roadmap.md, known limitations); they are only reported.
+  // Interrupted uploads are resolved only when the owner runs the storage cleanup (docs/decisions.md D-023).
   if (diag.counts.expiredUploads > 0) {
     results.push(
       check(
         'library: interrupted uploads',
         'warn',
-        `${diag.counts.expiredUploads} uploads expired before finalize (not in the library; their R2 objects, if any, remain)`,
+        `${diag.counts.expiredUploads} uploads expired before finalize (not in the library); resolve them with \`pnpm storage cleanup\` or from the Library page`,
       ),
     )
   }
