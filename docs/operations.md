@@ -320,7 +320,7 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 
 Worker のエラーログは request ID・route・例外名だけを出し、header・token・URL・body を出しません。
 
-未完了 upload の R2 object は自動削除しません（Cron を置かない方針）。件数は diagnostics で確認できます。期限切れの件数が増え続ける場合は、取り込み中の画面ロックや回線断が多いことを疑います（roadmap の Post-merge verification）。
+未完了 upload の R2 object は、現時点では自動削除しません（必要性が観測されるまで cleanup を入れない。roadmap の既知の制約）。件数は diagnostics で確認できます。期限切れの件数が増え続ける場合は、取り込み中の画面ロックや回線断が多いことを疑います（roadmap の Post-merge verification）。
 
 ## 13. R2 credential の更新と漏洩対応
 

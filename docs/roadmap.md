@@ -101,7 +101,7 @@ v1 の完成条件には含めませんが、後から迷わないよう記録�
 
 これはデータの汚れであって、認証やデータ整合性の問題ではありません。`finalizeUpload()` は R2 に object が実在することを確認してから `ready` にします。期限内に PUT が済んでいれば、期限後の finalize も成立します（background に回した tab の復帰を拒否しないため、finalize は期限を見ません）。PUT が済んでいない reserve は、presigned URL が失効しているため後から完了できません。
 
-自動 cleanup を始めると Cron / Queues へスコープが広がるため、要求か測定結果が出るまで着手しません（[AGENTS.md](../AGENTS.md) §6）。
+現時点では、残骸がどの程度発生するかを測れておらず、自動 cleanup の要求も出ていません。そのため diagnostics で件数を観測するだけに留めています（[AGENTS.md](../AGENTS.md) §6）。実利用で残骸が増え続け、運用上の問題になった場合は、Cron / Queues なども候補に含めて最小の cleanup 方法を選びます。
 
 **WebP の EXIF は読まない。** `exifr` は WebP の EXIF を解析しないため、WebP の `takenAt` は常に `null` です。WebP の EXIF orientation は、WebKit では適用され、Chromium では適用されません。そのため同じ WebP でも、Browser によって width / height と derivative の向きが変わります。カメラが WebP を出力することはまれなので、v1 では扱いません。
 
