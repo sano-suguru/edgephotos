@@ -1,6 +1,7 @@
 import exifr from 'exifr'
 import { exifDateToIso } from './exif-date'
 import { stripJpegMetadata } from './jpeg-metadata'
+import { ORIGINAL_MAX_BYTES } from './original-limit'
 
 // Client-side preprocessing. The original File is uploaded untouched; derivatives are re-rendered
 // through a canvas, so they never carry the original's EXIF/GPS (encoder-added segments are stripped).
@@ -25,6 +26,7 @@ export type PreparedPhoto = {
 }
 
 export class UnsupportedFileError extends Error {}
+export class FileTooLargeError extends UnsupportedFileError {}
 
 // HEIC/HEIF is not accepted in v1 (docs/decisions.md D-019). Desktop browsers may report an empty type,
 // so the extension is checked too.
@@ -77,6 +79,8 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
   if (!(SUPPORTED_TYPES as readonly string[]).includes(file.type)) {
     throw new UnsupportedFileError(`Unsupported file type: ${file.type || 'unknown'}`)
   }
+  // Before reading: an oversized file is refused without holding it in memory.
+  if (file.size > ORIGINAL_MAX_BYTES) throw new FileTooLargeError(`File is larger than ${ORIGINAL_MAX_BYTES} bytes`)
   const buffer = await file.arrayBuffer()
   const [sha256, takenAt] = await Promise.all([sha256Hex(buffer), readTakenAt(buffer)])
   let bitmap: ImageBitmap

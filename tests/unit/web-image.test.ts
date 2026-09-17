@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { LIMITS } from '../../src/contracts/schemas'
 import { mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
 import { exifDateToIso } from '../../src/web/lib/exif-date'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
+import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
 import { putOutcome } from '../../src/web/lib/storage-put'
+import { createTaskLimiter } from '../../src/web/lib/task-limit'
 import { scanJpegForMetadata } from '../../src/worker/storage/inspect'
 import { syntheticJpeg } from '../helpers'
 
@@ -122,5 +125,53 @@ describe('upload list merging', () => {
   it('fills the remaining room with the most recent finished items', () => {
     const previous = [item('a', 'done'), item('b', 'duplicate'), item('c', 'error')]
     expect(mergeUploadList(previous, [item('n', 'queued')], 3).map((u) => u.id)).toEqual(['n', 'a', 'b'])
+  })
+})
+
+describe('upload concurrency', () => {
+  // Each task stands for one photo: decode, PUT, finalize. Selecting photos twice must not double the decodes.
+  it('keeps the limit across separate selections and preserves order', async () => {
+    const run = createTaskLimiter(2)
+    let inFlight = 0
+    let peak = 0
+    const started: number[] = []
+    const gates: (() => void)[] = []
+    const task = (n: number) => () =>
+      new Promise<number>((resolve) => {
+        inFlight++
+        peak = Math.max(peak, inFlight)
+        started.push(n)
+        gates.push(() => {
+          inFlight--
+          resolve(n)
+        })
+      })
+    const first = Promise.all([1, 2, 3].map((n) => run(task(n))))
+    const second = Promise.all([4, 5, 6].map((n) => run(task(n))))
+    const flush = () => new Promise((r) => setTimeout(r, 0))
+    await flush()
+    expect(started).toEqual([1, 2])
+    while (gates.length > 0) {
+      gates.shift()?.()
+      await flush()
+      expect(inFlight).toBeLessThanOrEqual(2)
+    }
+    expect(await first).toEqual([1, 2, 3])
+    expect(await second).toEqual([4, 5, 6])
+    expect(started).toEqual([1, 2, 3, 4, 5, 6])
+    expect(peak).toBe(2)
+  })
+
+  it('frees the slot when a task fails', async () => {
+    const run = createTaskLimiter(1)
+    await expect(run(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom')
+    expect(await run(async () => 'next')).toBe('next')
+  })
+})
+
+describe('client-side size limit', () => {
+  // The client refuses oversized originals before reading them; it must agree with the server contract.
+  it('matches the reserve schema', () => {
+    expect(ORIGINAL_MAX_BYTES).toBe(LIMITS.originalMaxBytes)
   })
 })

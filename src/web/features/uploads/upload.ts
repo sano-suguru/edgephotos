@@ -1,8 +1,9 @@
 import { computed, signal } from '@preact/signals'
 import type { UploadReservation } from '../../../contracts/schemas'
 import { ApiRequestError, api } from '../../lib/api/client'
-import { isHeic, preparePhoto, UnsupportedFileError } from '../../lib/image'
+import { FileTooLargeError, isHeic, preparePhoto, UnsupportedFileError } from '../../lib/image'
 import { putOutcome } from '../../lib/storage-put'
+import { createTaskLimiter } from '../../lib/task-limit'
 import { isActiveUpload, mergeUploadList, type UploadState } from './upload-list'
 
 export type UploadItem = {
@@ -94,30 +95,29 @@ async function uploadOne(item: UploadItem, file: File) {
     libraryVersion.value++
   } catch (err) {
     const message =
-      err instanceof UnsupportedFileError
-        ? isHeic(file)
-          ? 'HEIC は未対応です（JPEG で書き出してから選んでください）'
-          : '対応していない形式です'
-        : err instanceof ApiRequestError
-          ? err.code
-          : err instanceof Error
-            ? err.message
-            : 'error'
+      err instanceof FileTooLargeError
+        ? '100MB を超えるファイルは未対応です'
+        : err instanceof UnsupportedFileError
+          ? isHeic(file)
+            ? 'HEIC は未対応です（JPEG で書き出してから選んでください）'
+            : '対応していない形式です'
+          : err instanceof ApiRequestError
+            ? err.code
+            : err instanceof Error
+              ? err.message
+              : 'error'
     update(item.id, { state: 'error', message })
   }
 }
+
+// Peak memory is dominated by decoded bitmaps (width x height x 4); each extra slot adds one on Chromium.
+// 2 is kept because desktop measurements gave no reason to change it; not verified on iOS (docs/decisions.md D-020).
+// The limit holds across selections: choosing more photos mid-batch queues them instead of decoding more at once.
+const uploadSlot = createTaskLimiter(2)
 
 export async function enqueueFiles(files: FileList | File[]) {
   const list = [...files]
   const items: UploadItem[] = list.map((f) => ({ id: crypto.randomUUID(), name: f.name, state: 'queued' }))
   uploads.value = mergeUploadList(uploads.value, items, 200)
-  // Peak memory is dominated by decoded bitmaps (width x height x 4); each extra worker adds one on Chromium.
-  // 2 is kept because desktop measurements gave no reason to change it; not verified on iOS (docs/decisions.md D-020).
-  const queue = list.map((file, i) => ({ file, item: items[i] }))
-  const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
-    for (let next = queue.shift(); next; next = queue.shift()) {
-      await uploadOne(next.item, next.file)
-    }
-  })
-  await Promise.all(workers)
+  await Promise.all(list.map((file, i) => uploadSlot(() => uploadOne(items[i], file))))
 }
