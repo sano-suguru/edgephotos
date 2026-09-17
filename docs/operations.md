@@ -2,47 +2,7 @@
 
 この文書は、EdgePhotos v1 のセットアップ、更新、backup / restore、uninstall の運用契約を定義します。
 
-> **検証状況（2026-09-16〜17。各項目の日付が優先）:**
-> - local（Miniflare / `vite dev` / `vite preview`）: migration 適用、fail-closed、upload → timeline → album → share → revoke、export / restore / verify を確認済み。
-> - remote-test 環境: D1・R2 の作成、remote D1 migration、`CLOUDFLARE_ENV=remote-test` での build と deploy、未設定 Worker が private / share API を `503` で拒否すること、共有ページの header / CSP、`/share/assets/*` の配信を確認済み。
-> - Access 境界: private path（`/`、`/api/v1/*`）が Access login へ 302、`/share`・`/share/{shareId}`・`/share/api/v1/*`・`/share/assets/*` が Access を通過して Worker に到達することを確認済み。
-> - secret 運用: 7 件を Worker secret 化し、`secrets.required` 未充足時に deploy が不足名を挙げて失敗すること、充足後に fail-closed が解けて share API が `503` から `404 SHARE_UNAVAILABLE` になることを確認済み。
-> - R2 CORS: bucket 限定の rule を適用し、読み戻しを確認済み。`x-amz-checksum-sha256` を AllowedHeaders に加えた rule（[D-018](decisions.md)）も適用・読み戻し済み。
-> - original の checksum（[D-018](decisions.md)）: remote-test で Browser から、canvas で生成した合成 JPEG を使って確認済み（2026-09-16）。reserve が返す original の PUT header に `x-amz-checksum-sha256` が入る。同じ size で 1 byte だけ違う body の PUT は R2 が `400 BadDigest` で拒否し、その時点の finalize は `409 UPLOAD_OBJECT_MISSING`（`original`）。同じ URL へ正しい bytes を PUT し直すと `200`、finalize は `200 created`（S3 API で PUT した object の `checksums.sha256` を binding の `head()` から読めることの実証）。owner 用 GET で読み戻した original の SHA-256 は `assets.sha256` と一致した。確認に使った asset は trash へ移動済み。
-> - upload 経路: owner が Access login を通したうえで、private API の成功応答、`reserve -> PUT -> finalize` が remote-test で通ることを確認済み。PUT の宛先が `*.r2.cloudflarestorage.com` であること（Worker が本体を中継しないこと）を DevTools で確認。`ACCESS_AUD` と `ACCESS_TEAM_DOMAIN` の正しさもこれで確定。
-> - duplicate handling と完全削除: 同一 original の再 upload が `409 DUPLICATE_ASSET` になること、完全削除後は同じ original を再登録できることを確認済み。
-> - share 経路: album 作成 -> asset 追加 -> share 発行 -> 正しい secret で `200` -> revoke -> 同じ secret で `404` までを確認済み。secret 不正・secret 無しはいずれも `404`。`url` は `/share/{id}#{secret}` の形。share から `original` を要求すると `400`（variant は `thumbnail` / `preview` のみ）。derivative は `*.r2.cloudflarestorage.com` から直接取得。
-> - CSRF 境界: 他 origin からの `POST /api/v1/albums` が `403 ORIGIN_NOT_ALLOWED`。
-> - presigned URL の失効: share の derivative URL が発行 300 秒後に R2 で `403 ExpiredRequest` になることを確認済み。revoke 済み share の既発行 URL が残り TTL の間だけ有効なのは [security.md](security.md) §5 の契約どおり。
-> - backup: remote-test に対する `pnpm backup export` と `verify` が通り、original の SHA-256 照合が一致（`ok: true`）。
-> - restore: 空の `edgephotos-restore-test`（D1 / R2 / Access / CORS / secret を別に用意）へ `pnpm backup restore` を実行し、`ok: true` を確認済み。restore 先から export し直して manifest を突き合わせ、asset 数・original の SHA-256・album 構成と membership・主要 metadata（size / content type / filename / width / height / takenAt / isFavorite）が一致することを確認。変わるのは `id` と `createdAt` だけで、[D-015](decisions.md) のとおり。空でない library への restore が拒否されることも確認済み。
-> - 画像形式と orientation: EXIF orientation 1〜8、GPS タグ付き、JPEG / PNG / WebP、160×120 から 6000×4000、1:4 と 40:9 の比率を含む合成 19 枚を upload。orientation 8 種はすべて同じ向き・同じ寸法として登録され、client が EXIF を適用していることを確認。derivative は全件 EXIF・GPS を持たず、thumbnail 512 / preview 2048 の上限を守り、上限より小さい original を拡大しない。
-> - original の byte 保持: export した original を再 hash し、ローカル原本の SHA-256 と全件一致することを確認。trash へ移動して復元した asset も SHA-256 が変わらない。
-> - 20 件規模の restore: restore-test を空にしてから 20 asset・1 album を restore し、restore 先の export と突き合わせて asset 数・SHA-256 集合・album membership・metadata 7 項目が一致、original 20 件の再 hash もズレなしを確認。
-> - 実機由来の画像: 共有経由で保存し直した iPhone の JPEG を 1 枚 upload。`DateTimeOriginal` も GPS も持たない最小限の EXIF でしたが、`takenAt` が `null` になるだけで upload・derivative 生成・SHA-256 保持はいずれも正常でした。
-> - 取り込みの検証（2026-09-17、local の `vite dev`、Playwright の Chromium 151 と WebKit 26.5、macOS）: 公開されている実機サンプル（[metadata-extractor-images](https://github.com/drewnoakes/metadata-extractor-images) と [exif-samples](https://github.com/ianare/exif-samples)。iPhone 4S〜6 Plus、Pixel 2、Galaxy S4〜S8 / Note 8、OnePlus 8、LG G3、Xperia Z3、Moto G、Oppo R7 Plus、Nokia 8.3 ほか）と、Pillow で作った合成 fixture を使った。どちらも repository には入れていない。
->   - metadata: EXIF orientation 1〜8（実機の縦位置 orientation 6 を含む）は、両 engine とも thumbnail の向きが一致した。MakerNote（最大約 60KB）、`OffsetTimeOriginal` あり・なし、`CreateDate` が偽の値（`2002:12:08`）で `DateTimeOriginal` が正しい機種、空白や範囲外の日付、orientation 0 / 9、IFD offset の破損は、いずれも upload が成功した。日付が読めない場合だけ `takenAt` が `null` になる。200 件を upload し、width / height / takenAt を Pillow で求めた期待値と照合して、両 engine とも不一致 0 件。iPhone の HEIC を `sips` で JPEG に変換した画像は、`-04:00` の offset 付きで取り込めた。
->   - 拒否されるもの: 空ファイル、画像でない中身、APP1 の長さが壊れた JPEG、HEIC（専用の文言を表示。[D-019](decisions.md)）。途中で切れた JPEG は、Chromium では decode 失敗として拒否され、WebKit では下半分が灰色のまま成功する。
->   - **見つかって直した問題（[D-020](decisions.md)）:** WebKit の canvas JPEG に APP1 / APP13 が付き、finalize が全件 `422` にしていた（WebKit で 200 件中 200 件が失敗）。PUT が 1 回失敗すると、その写真全体が失敗していた（通信断、応答の喪失、`503` を route で再現）。300 枚を選ぶと、97 件を残して完了表示になっていた。修正後は、WebKit と Chromium で 200 件が全件成功、失敗を注入した 3 件は再試行で成功（応答を失った PUT は `412` を経て成功）、300 件の選択は 300 件とも登録された。
->   - memory（Browser のプロセスツリーの RSS。50ms ごとに採取し、1 枚処理中の増分を記録）: 12MP で約 45〜110MB、48MP / 50MP で約 190〜340MB、108MP で約 440〜840MB、200MP で約 0.9〜1.1GB。decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の ArrayBuffer（最大 23MB）は小さい。200 件の連続 upload（計 920MB、48MP / 50MP を 6 件含む）で RSS は単調増加せず、peak は Chromium 約 1.1GB、WebKit 約 0.9GB（WebContent 単体では約 0.6GB）だった。前処理の並列数 1 / 2 / 3 で 48MP を 6 件処理すると、Chromium の増分は 420 / 682 / 975MB、所要時間は 2.0 / 1.6 / 1.5 秒。WebKit は 527 / 481 / 522MB、所要時間はいずれも約 2.3 秒だった。
->   - Browser の制約で試せなかったこと: WebKit では Playwright で横取りした PUT の Blob 本文が失われるため、再試行の再現は Chromium だけで行った（再試行のコードは engine に依存しない）。
-> - 実 R2 の `412`（2026-09-17、remote-test、Browser の `fetch()` から CORS 越し、canvas で作った合成 JPEG）: 同じ presigned PUT URL へ 2 回目の PUT を送ると、original・thumbnail とも `412` が返り、`res.status` として読めた（network error にはならない）。そのあとの finalize は `200 created` で、再試行で `412` を受けた upload がそのまま ready になれることを確認した。確認に使った asset は trash へ移動済み。
-> - 2026-09-17 の continuous-use 修正（完全削除が止まった写真の再 upload、止まった削除の再開、期限切れ upload の件数、取り込みの並列数、100MB 超の事前拒否、`APP_ORIGIN` の診断）: まず local で確認した。server 側は workerd の自動テスト、並列数は unit test。ライブラリ画面の表示と「削除を再開」、100MB 超の拒否は、Playwright の Chromium で一度だけ確認した（spec は commit していない）。`worker: APP_ORIGIN` は local の `vite dev` に対して CLI を実行し、`localhost` で PASS、`127.0.0.1` で FAIL になることを確認した。同日に remote-test へ deploy して確認した（下の項目）。
-> - continuous-use 修正の remote-test 確認（2026-09-17、owner token 付きの Node script と Browser。写真は marker だけの合成 JPEG で、Worker は decode しない）: `pnpm diagnose` は FAIL なし。`worker: APP_ORIGIN` が PASS、`library: interrupted uploads` が WARN（以前の検証で残った期限切れ 2 件。600 秒待つ新しい中断は作っていない）。止まった削除は、trash 済みのテスト asset を D1 で直接 `purging` にして作った（`UPDATE assets SET status='purging' WHERE id=<テスト asset> AND trashed_at IS NOT NULL`。R2 の削除失敗は remote では起こせないため）。確認できたこと:
->   - `library: unfinished deletes` の WARN、ライブラリ画面の表示、「削除を再開」で削除処理中が 0 になること
->   - 止まった削除と同じ写真の reserve が `409` ではなく `201` を返し、古い asset の R2 object と D1 row が消えること。続く finalize は `200 created`
->   - 削除前に reserve・PUT 済みだった upload の finalize が `200 created` を返し、その original を owner 用 URL から読み戻せること（新しい object を重複として消さない）
->   - 誤った `Origin` の album 作成が `403 ORIGIN_NOT_ALLOWED`、正しい `Origin` では `400 VALIDATION_FAILED` になり、album 数が変わらないこと
->   - 実 D1 での並行実行（各 3 回）: 同じ `purging` asset に `DELETE` 2 本と同じ写真の reserve を同時に送ると、`DELETE` は 204/204 または 204/404（`ASSET_NOT_FOUND`）、reserve はすべて `201`。同じ写真の pending upload 2 件を、`purging` の asset の `DELETE` と同時に finalize すると、どの回も片方が `created`、片方が同じ asset への `duplicate` になり、再送しても同じ結果だった。UNIQUE 競合の fallback を通ったかどうかは外から区別できない。「競合の勝者が `purging`」の分岐は再現していない（コードの確認のみ）
->   - 上の 204/404 のように別の request が先に削除を終えると、「削除を再開」はその 404 で止まっていた。そのあと、404 の ID は飛ばして残りを続けるよう修正した（unit test で確認。この修正は remote-test に deploy していない）
->   - テスト asset はすべて完全削除し、件数は検証前（写真 21、ゴミ箱 2、削除処理中 0、未完了 upload 2、album 1）に戻した。D1 に今回の upload 行は残っていない
-> - **未検証:** iPhone / Android 実機での取り込み。具体的には、iOS Safari の memory 上限（jetsam）と 48MP 以上の decode、iOS 写真ピッカーの HEIC → JPEG 変換と位置情報の扱い、画面ロックやアプリ切り替えで中断した PUT の再開、presigned URL の期限（600 秒）を越える中断。
->
-> restore の検証に使った `edgephotos-restore-test` は drill 用の一時環境で、検証後に Worker・D1・R2 bucket・Access application・R2 API token をすべて削除しました。`wrangler.jsonc` には今後維持する環境だけを残します。再度 drill を行う場合は §2 と §4 の手順で作り直します。
->
-> preview URL は `wrangler.jsonc` で無効にしてあります（`"preview_urls": false`）。有効だと `<version>-<worker>.<subdomain>.workers.dev` という別 hostname が生え、hostname 単位の Access application の対象外になります。実際、無効化前は preview URL 上の private API が Access のリダイレクトを受けず、Worker 自身の JWT 検証だけが `401 UNAUTHENTICATED` で拒否していました。漏洩はありませんでしたが、「private path は必ず Access が前段にいる」と言えなくなるため閉じました。無効化後は preview URL が `404` になることを確認済みです。
->
-> owner 以外の identity を Worker が `403` にする経路は、Access policy が owner のみ Allow である限り Worker まで到達しないため、remote-test では実測できません。この検査は多層防御であり、回帰は unit test 側で担保します。
+どの環境で何を確認済みかは、この文書ではなく [verification.md](verification.md) に記録します。
 
 ## 1. セットアップ目標
 
@@ -125,6 +85,8 @@ R2 credential は対象 bucket だけの Object Read & Write 権限を持つ R2 
 1 の AUD tag を `ACCESS_AUD` に設定します。Access を通過しても `OWNER_EMAIL` と一致しない identity は Worker が `403` にします。
 
 `/share/assets/*`（build 済み JS / CSS）と share API（`/share/api/v1/*`）はどちらも `/share` 配下なので、Bypass 1 つで公開面が揃います（[D-011](decisions.md)）。
+
+Worker の preview URL は無効にします（`wrangler.jsonc` の `"preview_urls": false`）。有効だと `<version>-<worker>.<subdomain>.workers.dev` という別 hostname ができ、hostname 単位の Access application の対象外になります。その場合 private API を守るのは Worker 自身の JWT 検証だけになり、「private path は必ず Access が前段にいる」と言えなくなります。
 
 Bypass policy は identity selector を使えず、request log も残りません。`/share/*` の監査は EdgePhotos 側でのみ取得できます。
 
@@ -346,7 +308,7 @@ share secret が漏れた場合は、その share を revoke するか再発行�
 
 ## 14. 復旧 drill
 
-年に 1 回程度、または大きな変更の前に、restore できることを確かめます。手順は §2〜§4 で空の環境（例: `restore-test`）を作り、§10 の restore を実行するだけです。2026-09-16 の drill の記録は冒頭にあります。
+年に 1 回程度、または大きな変更の前に、restore できることを確かめます。手順は §2〜§4 で空の環境（例: `restore-test`）を作り、§10 の restore を実行するだけです。2026-09-16 の drill の記録は [verification.md](verification.md) にあります。
 
 drill で見るもの:
 

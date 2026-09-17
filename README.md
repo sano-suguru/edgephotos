@@ -8,21 +8,11 @@ EdgePhotos は、利用者自身の Cloudflare アカウントへデプロイす
 
 ## 状態
 
-**private alpha（2026-09-17 時点）**。upload、timeline、favorite、album、期限付き共有と失効、trash と完全削除、export / restore を実装しています。自動テストは local の Workers runtime（Miniflare の D1 / R2）と、Browser（Playwright の Chromium / WebKit）で実行します。
+**private alpha**。upload、timeline、favorite、album、期限付き共有と失効、trash と完全削除、export / restore を実装しています。
 
-実 Cloudflare 環境（`remote-test`）で確認済みのこと:
+実 Cloudflare 環境（`remote-test`）で Access、private R2 への直接 upload、共有と失効、backup / restore を確認済みです。production 環境での deploy と、iPhone / Android 実機での取り込みはまだ確認していません。確認した内容と日付は [検証記録](docs/verification.md) にあります。
 
-- Cloudflare Access が private path を保護し、`/share/*` だけが公開されること
-- Browser から private R2 への presigned PUT / GET（CORS、`If-None-Match`、SHA-256 checksum を含む）
-- 共有リンクの閲覧と、revoke 後の拒否
-- backup の export と verify、空の別環境への restore
-
-まだ確認していないこと:
-
-- production 環境の作成と deploy（`remote-test` と同じ構成で、手順は [運用](docs/operations.md)）
-- iPhone / Android 実機での取り込み（HEIC → JPEG 変換、mobile Safari の memory、画面ロックや回線切り替えで中断した upload）
-
-EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export` を取ってください。詳細は [ロードマップ](docs/roadmap.md) と [運用](docs/operations.md) 冒頭の検証状況を参照してください。
+EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export` を取ってください（[運用](docs/operations.md) §9）。
 
 ## ローカルで試す
 
@@ -113,6 +103,8 @@ Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署�
 - [開発ガイド](docs/development.md) — リポジトリ構成、テスト、CI、開発ルール
 - [運用・デプロイ・復元](docs/operations.md) — セットアップ、更新、backup / restore
 - [設計判断](docs/decisions.md) — 重要な選択とその理由
+- [検証記録](docs/verification.md) — 実環境と Browser で確認した内容
+- [測定](docs/benchmarks.md) — scale と取り込み memory の数値
 - [ロードマップ](docs/roadmap.md) — 実装順序と各段階の到達点
 - [AGENTS.md](AGENTS.md) — AI / 開発支援ツール向けの作業ガードレール
 

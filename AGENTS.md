@@ -99,6 +99,9 @@ D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>`
 - 開発フロー、test、CI、repository layout を変える: `docs/development.md`
 - デプロイ、migration、backup / restore を変える: `docs/operations.md`
 - 優先順位や feature scope を変える: `docs/roadmap.md`
+- 実環境や Browser で確かめた結果を残す: `docs/verification.md`（性能と memory の数値は `docs/benchmarks.md`）
+
+検証の詳しい経過・証拠・測定値を operations / decisions / roadmap / README へ重複して書かないでください。これらの文書には、状態や判断に必要な短い要約だけを置き、詳細は verification / benchmarks へリンクします。
 
 UI の余白変更などで Decision Log を追加しないでください。
 
