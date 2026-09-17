@@ -1,4 +1,4 @@
-import { signal, useSignal, useSignalEffect } from '@preact/signals'
+import { useSignal, useSignalEffect } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import type { Album, AssetSummary } from '../../../contracts/schemas'
 import { cn } from '../../components/ui/button'
@@ -24,9 +24,6 @@ function formatBytes(n: number) {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
-
-// Kept across photos and openings: once the details are shown, browsing keeps them visible.
-const infoOpen = signal(false)
 
 // Signed preview URLs by asset id. Presigned GETs live 600 s (docs/security.md §6); reuse one only while it
 // has plenty of time left, so stepping back and forth does not ask the API again.
@@ -83,6 +80,9 @@ export function AssetViewer(props: {
   const albums = useSignal<Album[]>([])
   const busy = useSignal(false)
   const confirmingPurge = useSignal(false)
+  // Kept while stepping through photos (the viewer stays mounted) and reset when the viewer closes, so a
+  // one-off look at the details does not cover half of every photo opened later on a phone.
+  const infoOpen = useSignal(false)
   // Hidden controls after a tap on the photo (touch only), so nothing covers it.
   const chromeHidden = useSignal(false)
   // List items carry no preview URL (docs/decisions.md D-022). Show the cached thumbnail until the preview

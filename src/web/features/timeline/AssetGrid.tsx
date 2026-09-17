@@ -10,6 +10,7 @@ import { captureParts, formatMonth, monthKey } from '../../lib/dates'
 import { userMessage } from '../../lib/errors'
 import { libraryVersion } from '../uploads/upload'
 import { AssetViewer, type ViewerRemoval } from './AssetViewer'
+import { createPageList } from './page-list'
 
 export type AssetGridProps = {
   load: (cursor: string | null) => Promise<AssetPage>
@@ -36,23 +37,20 @@ function groupByMonth(items: AssetSummary[]): Group[] {
 }
 
 const UNDO: Partial<
-  Record<ViewerRemoval, { done: string; undo: (a: AssetSummary, albumId?: string) => Promise<unknown> }>
+  Record<
+    ViewerRemoval,
+    { done: (name: string) => string; undo: (a: AssetSummary, albumId?: string) => Promise<unknown> }
+  >
 > = {
-  trash: { done: 'ゴミ箱に移動しました', undo: (a) => api.restore(a.id) },
-  restore: { done: '復元しました', undo: (a) => api.trash(a.id) },
+  trash: { done: (name) => `${name}をゴミ箱に移動しました`, undo: (a) => api.restore(a.id) },
+  restore: { done: (name) => `${name}を復元しました`, undo: (a) => api.trash(a.id) },
   'remove-from-album': {
-    done: 'アルバムから外しました',
+    done: (name) => `${name}をアルバムから外しました`,
     undo: (a, albumId) => api.addToAlbum(albumId as string, a.id),
   },
 }
 
 export function AssetGrid(props: AssetGridProps) {
-  const items = useSignal<AssetSummary[]>([])
-  const cursor = useSignal<string | null>(null)
-  const loading = useSignal(false)
-  // 'initial': nothing could be shown. 'more': the loaded photos stay and the next page can be retried.
-  const error = useSignal<{ kind: 'initial' | 'more'; message: string } | null>(null)
-  const loaded = useSignal(false)
   const selectedId = useSignal<string | null>(null)
   const version = useSignal(0)
   // When the first loaded page arrived (performance.now(), so a wrong device clock does not matter).
@@ -64,37 +62,17 @@ export function AssetGrid(props: AssetGridProps) {
   // download every one of them again. A thumbnail that fails leaves this set, so it does get a new URL.
   const shown = useRef(new Set<string>())
   const sentinel = useRef<HTMLDivElement>(null)
-  const inflight = useRef<Promise<void> | null>(null)
-  const pageGeneration = useRef(0)
-
-  function loadPage(reset: boolean): Promise<void> {
-    if (inflight.current && !reset) return inflight.current
-    // A reset supersedes any page still on its way; a stale response must not append to the new list.
-    const generation = reset ? ++pageGeneration.current : pageGeneration.current
-    const run = async () => {
-      loading.value = true
-      error.value = null
-      try {
-        const page = await props.load(reset ? null : cursor.value)
-        if (generation !== pageGeneration.current) return
-        items.value = reset ? page.items : [...items.value, ...page.items]
-        cursor.value = page.nextCursor
-        if (reset) loadedAt.current = performance.now()
-        loaded.value = true
-      } catch (err) {
-        if (generation !== pageGeneration.current) return
-        error.value = { kind: reset || items.value.length === 0 ? 'initial' : 'more', message: userMessage(err) }
-      } finally {
-        if (generation === pageGeneration.current) {
-          loading.value = false
-          inflight.current = null
-        }
-      }
-    }
-    const promise = run()
-    inflight.current = promise
-    return promise
-  }
+  const loadRef = useRef(props.load)
+  loadRef.current = props.load
+  const list = useRef<ReturnType<typeof createPageList<AssetSummary>>>()
+  list.current ??= createPageList<AssetSummary>(
+    (c) => loadRef.current(c),
+    userMessage,
+    () => {
+      loadedAt.current = performance.now()
+    },
+  )
+  const { items, cursor, loading, loaded, error, loadPage } = list.current
 
   useSignalEffect(() => {
     // Refetch when uploads finish or when the parent asks for it.
@@ -127,17 +105,20 @@ export function AssetGrid(props: AssetGridProps) {
   async function refreshUrls() {
     if (refreshing.current || performance.now() - loadedAt.current < 60_000) return
     refreshing.current = true
+    // A reload that starts meanwhile has newer data; do not overwrite it with this refresh.
+    const current = list.current?.snapshot() ?? (() => false)
     try {
       const fresh: AssetSummary[] = []
       let next: string | null = null
       do {
-        const page = await props.load(next)
+        const page = await loadRef.current(next)
         fresh.push(...page.items)
         next = page.nextCursor
       } while (next && fresh.length < items.value.length)
-      const current = new Map(items.value.map((a) => [a.id, a]))
+      if (!current()) return
+      const previous = new Map(items.value.map((a) => [a.id, a]))
       items.value = fresh.map((a) => {
-        const old = current.get(a.id)
+        const old = previous.get(a.id)
         return old && shown.current.has(a.id) ? { ...a, thumbnailUrl: old.thumbnailUrl } : a
       })
       cursor.value = next
@@ -183,7 +164,9 @@ export function AssetGrid(props: AssetGridProps) {
       showToast('完全に削除しました')
       return
     }
-    showToast(undo.done, {
+    // Toasts stack, so each one names its photo.
+    const name = asset.filename ? `「${asset.filename}」` : '写真'
+    showToast(undo.done(name), {
       action: {
         label: '元に戻す',
         run: async () => {

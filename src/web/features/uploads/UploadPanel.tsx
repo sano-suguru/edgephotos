@@ -15,17 +15,6 @@ const LABELS: Record<UploadItem['state'], string> = {
   error: '失敗',
 }
 
-// How far along each state is, for the overall bar. Duplicates and failures count as finished.
-const WEIGHT: Record<UploadItem['state'], number> = {
-  queued: 0,
-  preparing: 0.15,
-  uploading: 0.4,
-  finalizing: 0.85,
-  done: 1,
-  duplicate: 1,
-  error: 1,
-}
-
 export function UploadButton() {
   const input = useRef<HTMLInputElement>(null)
   return (
@@ -68,14 +57,16 @@ export function UploadList() {
       duplicate: count('duplicate'),
       failed: count('error'),
       retryable: list.filter((u) => u.state === 'error' && u.retryable).length,
-      progress: list.reduce((sum, u) => sum + WEIGHT[u.state], 0) / Math.max(list.length, 1),
+      // The file currently being worked on. No byte counts are available, so the bar counts photos.
+      current: list.find((u) => u.state === 'preparing' || u.state === 'uploading' || u.state === 'finalizing'),
     }
   })
   if (uploads.value.length === 0) return null
   const s = summary.value
   const active = activeUploads.value > 0
+  const finished = s.total - activeUploads.value
   const headline = active
-    ? `アップロード中 ${s.total - activeUploads.value} / ${s.total}`
+    ? `${finished} / ${s.total} 枚 完了`
     : s.failed > 0
       ? `${s.failed} 枚をアップロードできませんでした`
       : `${s.done} 枚をアップロードしました${s.duplicate > 0 ? `（${s.duplicate} 枚は登録済み）` : ''}`
@@ -95,18 +86,25 @@ export function UploadList() {
           <span class="text-xs text-muted-foreground">アップロード状況</span>
         </summary>
         {active && (
-          <div
-            class="mx-3 h-1 overflow-hidden rounded-full bg-muted"
-            role="progressbar"
-            aria-label="アップロードの進み具合"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(s.progress * 100)}
-          >
+          <div class="space-y-1 px-3">
             <div
-              class="h-full bg-primary transition-[width] motion-reduce:transition-none"
-              style={{ width: `${s.progress * 100}%` }}
-            />
+              class="h-1 overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-label="完了した枚数"
+              aria-valuemin={0}
+              aria-valuemax={s.total}
+              aria-valuenow={finished}
+            >
+              <div
+                class="h-full bg-primary transition-[width] motion-reduce:transition-none"
+                style={{ width: `${(finished / s.total) * 100}%` }}
+              />
+            </div>
+            {s.current && (
+              <p class="truncate text-xs text-muted-foreground">
+                {LABELS[s.current.state]}: {s.current.name}
+              </p>
+            )}
           </div>
         )}
         <ul class="max-h-48 space-y-1 overflow-auto px-3 py-2">

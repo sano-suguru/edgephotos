@@ -97,6 +97,7 @@ local（`vite dev`、使い捨ての `EDGEPHOTOS_STATE_DIR`）に、reserve → 
 - ゴミ箱へ移動すると viewer は次の写真を表示し、「元に戻す」で server 上も復元される。完全削除とアルバム削除は確認 dialog を出し、キャンセルで何も変わらない
 - storage への PUT を失敗させると日本語の失敗表示と「再試行」が出て、再試行で完了する。一覧 API の 500 では server の英語 message を出さず、再試行で表示が戻る
 - album 一覧は各 album の最新の写真を cover にする（`limit=1` の album assets API。API の変更なし）
+- 2 枚を続けてゴミ箱へ移動すると「元に戻す」が 2 つ並び、それぞれが対応する写真だけを復元する。情報パネルは写真を移動しても開いたままで、viewer を開き直すと閉じている。アップロード中の表示は完了枚数（例: 0 / 3 枚）と処理中のファイル名
 
 常設の回帰は `e2e/keyboard.spec.ts` と `e2e/mobile.spec.ts`（[development.md](development.md) §7）。iPhone / Android の実機での swipe と safe area は未確認。
 
