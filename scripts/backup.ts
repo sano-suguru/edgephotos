@@ -100,6 +100,12 @@ async function main() {
       console.log(
         `exported ${report.assets} photos and ${report.albums} albums (downloaded ${report.downloaded}, already in the directory ${report.skipped})`,
       )
+      if (report.skipped > 0) {
+        console.log(
+          `${report.skipped} file set(s) already in the directory were reused by size only; their contents were NOT re-hashed. ` +
+            'Run `pnpm backup check` to confirm the backup is intact.',
+        )
+      }
       if (report.failed.length > 0) {
         console.error(
           `${report.failed.length} photo(s) could not be copied: their stored original is missing or differs from its recorded SHA-256.`,

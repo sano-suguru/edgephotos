@@ -70,6 +70,10 @@ const TEXT: Record<IssueKind, { tone: Finding['tone']; text: string }> = {
     text: 'どの写真にも結び付かないファイルです。データベースを過去に戻した場合などに残ります。自動では削除しません（docs/operations.md §12）。',
   },
   unexpected_key: { tone: 'info', text: 'EdgePhotos 以外が書き込んだファイルです。触れません。' },
+  audit_incomplete: {
+    tone: 'damage',
+    text: '関係の無いファイルが大量にあり、最後まで確認できなかった写真です。問題なしとは判断していません（pnpm storage audit で詳細を確認できます）。',
+  },
   original_checksum_unrecorded: {
     tone: 'info',
     text: '古い写真で、保存時の SHA-256 記録がありません。pnpm backup verify で照合できます。',

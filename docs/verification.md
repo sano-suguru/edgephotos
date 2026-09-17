@@ -114,6 +114,7 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 ### local（workerd の自動テスト）
 
 - 競合 2 件は、修正前のコードで再現するテストを先に書いて失敗を確認した。完全削除の開始と trash からの復元が交差すると、復元した写真が `purging` になって R2 から消えていた。finalize の D1 batch が commit した後に UNIQUE 違反が報告されると、自分の asset の 3 object を重複として消していた（SQLite 自体は、同じ upload の再送では id の競合を先に検出するため、現在の D1 でこの経路に入る状況は確認していない。防御として直した）
+- storage audit: 1 つの ID の下に layout 外の key を 8,001 個置くと、その ID は `audit_incomplete` になり（`missing_derivative` と誤報しない）、次の写真の点検は続くこと。印を付ける処理を外すとテストが失敗することも確かめた
 - storage audit: 10 分類のすべてを 1 つのライブラリに作り、`limit` を 1・2・3・5・200 にしても同じ結果になること、object の無い asset と行だけの upload がページ境界をまたいでも漏れないこと、audit の前後で D1 と R2 が変わらないことを確認した。ページの終わりを決める処理（asset 側・upload 側）を 1 つずつ外すとテストが失敗することも確かめた
 - storage cleanup: 転送済みの中断 upload は写真になり（元の upload 時刻と撮影日時を保持）、欠けている・行だけの upload と重複の残りだけが消え、写真・trash・止まった削除・object の欠けた写真・どの行も指さない object・1 日以内の upload・進行中の upload は残ること。2 回目は何もしないこと。R2 の障害では何も消さず `failed` に数えること。cleanup が upload を片付けた後に、検査を終えていた finalize が asset を作らない（`410`）こと
 - backup: 2 回目は storage への request が 0、写真を 1 枚足すと 3 request。途中で切れたファイルは取り直し、同じ size で 1 bit 違うファイルは `check` だけが検出すること。original が壊れた写真があっても残りを backup し、その写真を名前で挙げること

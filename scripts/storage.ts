@@ -24,6 +24,8 @@ const EXPLAIN: Record<StorageAuditIssue['kind'], string> = {
   unreferenced_objects:
     'Objects no D1 row refers to (for example after a D1 time-travel restore). Never removed automatically; see docs/operations.md §12.',
   unexpected_key: 'A key outside the EdgePhotos layout, written by something else. Not touched.',
+  audit_incomplete:
+    'NOT FULLY CHECKED: thousands of stray keys under this id; its thumbnail / preview could not be confirmed. Remove the stray keys and audit again.',
 }
 
 async function audit(deep: boolean) {

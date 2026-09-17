@@ -262,6 +262,8 @@ export const STORAGE_AUDIT_ISSUE_KINDS = [
   'unreferenced_objects',
   // A key outside the documented layout.
   'unexpected_key',
+  // The audit could not list every key of this id (thousands of stray keys under it). Not a clean result.
+  'audit_incomplete',
 ] as const
 
 const StorageVariantSchema = z.enum(['original', 'thumbnail', 'preview'])

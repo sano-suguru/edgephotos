@@ -188,6 +188,23 @@ describe('storage audit', () => {
     expect(deep.checked.checksumsUnrecorded).toBe(1)
   })
 
+  it('says an id was not fully checked instead of calling it damaged or clean', async () => {
+    const app = await makeApp()
+    const crowded = (await uploadPhoto(app)).result.asset.id
+    const after = (await uploadPhoto(app)).result.asset.id
+    // More stray keys than the audit lists for one page, all sorting before preview.jpg / thumbnail.jpg.
+    const strays = Array.from({ length: 8001 }, (_, i) => `derivatives/v1/${crowded}/a${String(i).padStart(5, '0')}`)
+    for (let i = 0; i < strays.length; i += 500) {
+      await Promise.all(strays.slice(i, i + 500).map((k) => env.BUCKET.put(k, 'x')))
+    }
+    const { issues } = await auditAll(app)
+    const about = (id: string) => issues.filter((i) => i.assetId === id).map((i) => i.kind)
+    expect(about(crowded)).toEqual(['audit_incomplete'])
+    // The audit still moves on and checks the next photos.
+    expect(about(after)).toEqual([])
+    expect(issues.filter((i) => i.kind === 'unexpected_key').length).toBeGreaterThan(0)
+  }, 60_000)
+
   it('does not write anything', async () => {
     const app = await makeApp()
     await uploadPhoto(app)

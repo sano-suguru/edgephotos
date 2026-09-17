@@ -228,6 +228,10 @@ pnpm backup check ./edgephotos-backup
 
 size が同じまま中身が壊れたファイル（ディスクの劣化など）は、差分の判定では分かりません。`pnpm backup check` を定期的に（backup を別のディスクへ複製したときも）実行し、挙がったファイルを削除してから `export` を再実行します。
 
+`export` の成功は、ディレクトリにあったファイルの中身まで確かめたという意味ではありません。取り直さなかったファイルは size しか見ていないため、CLI はその件数を表示し、`check` の実行を促します。
+
+manifest はページごとに順に読むので、ある一瞬の完全な写しではありません。export の最中に favorite・trash・album を変更すると、変更前と変更後が混ざることがあります（知らない写真を指す membership は捨てます）。backup の間は、まとまった整理操作をしないでください。
+
 保存されている original が壊れている、または無い写真があると、`export` はその写真を名前で挙げて残りを続け、最後に失敗（exit 1）で終わります。原因は `pnpm storage audit --deep` で確認します（§12）。
 
 含めないもの: R2 credential、JWT、share secret、presigned URL。Access token は API request の header にだけ使い、R2 へは送らず、保存もしません。
@@ -317,6 +321,7 @@ EDGEPHOTOS_URL=... EDGEPHOTOS_ACCESS_TOKEN=... pnpm storage cleanup --apply
 | `duplicate_leftover` | 重複と判定された upload の残り object | `cleanup --apply` が削除する |
 | `unreferenced_objects` | どの D1 行も指さない object | 自動では削除しない。D1 を time travel で戻したあとなら、その期間に upload した写真の object の可能性がある。`originals/{id}` を R2 の Dashboard から取り出して upload し直すか、不要と判断できたら Dashboard で削除する |
 | `unexpected_key` | EdgePhotos の layout 外の key | EdgePhotos は触れない。書き込んだものを調べる |
+| `audit_incomplete` | 1 つの ID の下に layout 外の key が数千個あり、その ID の thumbnail / preview を確認しきれなかった | 問題なしとは扱わない（`audit` は exit 1、verify も失敗）。layout 外の key を取り除いてから再実行する |
 
 cleanup は、写真（`assets` 行のある ID の object）、止まった削除、どの行も指さない object、期限から 1 日以内の upload には触れません。期限切れの件数が増え続ける場合は、取り込み中の画面ロックや回線断が多いことを疑います（roadmap の Post-merge verification）。
 

@@ -298,7 +298,7 @@ workerd の test（`pnpm test`）は server の契約を検証しますが、Bro
 D1 と R2 は 1 transaction にできません（architecture.md §5）。以前は、期限切れの `uploads` 行を数えるだけで、R2 側から見た不整合（行の無い object、object の無い asset）を調べる手段がありませんでした。5 年使ったライブラリで original が 1 枚欠けても、backup を取るまで気付けません。
 
 - `GET /api/v1/storage/audit`（読み取りのみ）: R2 の key と D1 の id はどちらも asset ID 順に並ぶので、1 ページ = 1 つの ID 範囲として、`originals/` と `derivatives/v1/` の list、`assets`、`uploads` を突き合わせる。どの source も `limit` 件で止め、ページの終わりは最も手前で止まった ID にする。これで「object の無い asset」と「行の無い object」の両方が見つかる。`deep=true` では、そのページの original を `head()` し、R2 が upload 時に記録した SHA-256 と `assets.sha256` を比べる
-- 分類: `missing_original`・`original_size_mismatch`・`original_checksum_mismatch`・`missing_derivative`（写真の破損）、`unfinished_delete`、`expired_upload`、`duplicate_leftover`、`unreferenced_objects`、`unexpected_key`、`original_checksum_unrecorded`（D-018 より前の original）
+- 分類: `missing_original`・`original_size_mismatch`・`original_checksum_mismatch`・`missing_derivative`（写真の破損）、`unfinished_delete`、`expired_upload`、`duplicate_leftover`、`unreferenced_objects`、`unexpected_key`、`original_checksum_unrecorded`（D-018 より前の original）、`audit_incomplete`（1 つの ID の下に layout 外の key が多すぎて、決めた list 回数で確認しきれなかった。「問題なし」と区別するため）
 - `POST /api/v1/storage/cleanup`: 期限（600 秒）から **さらに 1 日** 過ぎた `pending` の upload だけを扱う。3 object が揃い finalize の検査を通るものは、通常の finalize で写真にする（owner が選んで転送まで終えた写真だから）。object が欠けている・検査に通らないものは、行を先に終端状態（`status = 'duplicate'`、`duplicate_of = NULL`）にし、その upload の key の object を消してから行を消す。`duplicate` の行も 1 日たったら、残った object と行を消す
 - 手動で実行する。ライブラリ画面の「ストレージの点検」と `pnpm storage audit|cleanup`（`--apply` を付けるまで dry run）
 

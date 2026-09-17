@@ -431,6 +431,8 @@ export const DAMAGE_KINDS = new Set<StorageAuditIssue['kind']>([
   'original_size_mismatch',
   'original_checksum_mismatch',
   'missing_derivative',
+  // Not damage, but the library could not be fully checked, so verify cannot report OK.
+  'audit_incomplete',
 ])
 
 export type VerifyReport = {

@@ -80,6 +80,8 @@ export async function auditStorage(
 
   // Derivative keys sort as derivatives/v1/{id}/..., so `${after}0` ('0' > '/') skips every key of `after`.
   let cursor: string | undefined
+  // An id whose derivative keys could not all be listed (thousands of stray keys under it).
+  let incompleteId: string | null = null
   let lastId: string | null = null
   let prevId: string | null = null
   let distinct = 0
@@ -115,7 +117,11 @@ export async function auditStorage(
     if (round === MAX_DERIVATIVE_LISTS - 1) {
       // Pathological (many stray keys under one id): lastId may be partly listed, so end the page before it.
       if (prevId) cap(prevId)
-      else if (lastId) cap(lastId)
+      else if (lastId) {
+        // The whole budget went to this one id: report it as not fully checked instead of guessing.
+        incompleteId = lastId
+        cap(lastId)
+      }
       break
     }
     cursor = page.cursor
@@ -146,6 +152,8 @@ export async function auditStorage(
     objects += found.length
     const asset = assetsById.get(id)
     const upload = uploadsByAsset.get(id)
+    const partial = id === incompleteId
+    if (partial) issues.push({ kind: 'audit_incomplete', assetId: id })
     if (asset) {
       if (asset.status === 'purging') {
         issues.push({ kind: 'unfinished_delete', assetId: id })
@@ -154,8 +162,10 @@ export async function auditStorage(
       if (p.original === undefined) issues.push({ kind: 'missing_original', assetId: id })
       else if (p.original !== asset.original_size) issues.push({ kind: 'original_size_mismatch', assetId: id })
       else if (opts.deep) toCheck.push(asset)
-      const missing = (['thumbnail', 'preview'] as const).filter((v) => !p[v])
+      const missing = partial ? [] : (['thumbnail', 'preview'] as const).filter((v) => !p[v])
       if (missing.length > 0) issues.push({ kind: 'missing_derivative', assetId: id, objects: missing })
+    } else if (partial) {
+      // Leftover and unreferenced classes depend on the derivative keys that were not listed.
     } else if (upload?.status === 'pending') {
       if (Date.parse(upload.expires_at) < now) {
         issues.push({ kind: 'expired_upload', assetId: id, objects: found, uploadId: upload.id })
