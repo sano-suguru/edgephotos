@@ -1,4 +1,4 @@
-import { useSignal, useSignalEffect } from '@preact/signals'
+import { signal, useSignal, useSignalEffect } from '@preact/signals'
 import type { ComponentChildren } from 'preact'
 import { cn } from './components/ui/button'
 import { Albums, Images, Library, Star } from './components/ui/icons'
@@ -11,8 +11,23 @@ import { UploadButton, UploadList } from './features/uploads/UploadPanel'
 import { ApiRequestError, api } from './lib/api/client'
 import { navigate, path, route } from './state/router'
 
-function NavLink(props: { to: string; label: string; icon: ComponentChildren; desktopOnly?: boolean }) {
-  const active = props.to === '/' ? path.value === '/' : path.value.startsWith(props.to)
+// Below Tailwind's md breakpoint the nav is the bottom tab bar, where the trash has no tab of its own.
+const tabBarQuery = window.matchMedia('(width < 48rem)')
+const tabBar = signal(tabBarQuery.matches)
+tabBarQuery.addEventListener('change', (e) => {
+  tabBar.value = e.matches
+})
+
+function NavLink(props: {
+  to: string
+  label: string
+  icon: ComponentChildren
+  desktopOnly?: boolean
+  // Paths that belong to this tab on the tab bar only (their own link is desktop-only).
+  tabBarAlso?: string[]
+}) {
+  const matches = (to: string) => (to === '/' ? path.value === '/' : path.value.startsWith(to))
+  const active = matches(props.to) || (tabBar.value && !!props.tabBarAlso?.some(matches))
   return (
     <a
       href={props.to}
@@ -36,9 +51,23 @@ function NavLink(props: { to: string; label: string; icon: ComponentChildren; de
   )
 }
 
-function PageTitle(props: { children: ComponentChildren; hint?: string }) {
+function PageTitle(props: { children: ComponentChildren; hint?: string; back?: { to: string; label: string } }) {
+  const back = props.back
   return (
     <div class="mb-4">
+      {back && (
+        // Phones only: on desktop the destination is in the header nav.
+        <a
+          href={back.to}
+          class="-ml-2 inline-flex min-h-11 items-center px-2 text-sm text-muted-foreground hover:underline md:hidden"
+          onClick={(e) => {
+            e.preventDefault()
+            navigate(back.to)
+          }}
+        >
+          ← {back.label}
+        </a>
+      )}
       <h1 class="text-xl font-semibold">{props.children}</h1>
       {props.hint && <p class="mt-1 text-sm text-muted-foreground">{props.hint}</p>}
     </div>
@@ -89,7 +118,12 @@ function Page() {
     case 'trash':
       return (
         <>
-          <PageTitle hint="ゴミ箱の写真は、完全に削除するまで残ります。写真を開くと復元できます。">ゴミ箱</PageTitle>
+          <PageTitle
+            back={{ to: '/settings', label: 'ライブラリ' }}
+            hint="ゴミ箱の写真は、完全に削除するまで残ります。写真を開くと復元できます。"
+          >
+            ゴミ箱
+          </PageTitle>
           <AssetGrid
             key="trash"
             mode="trash"
@@ -156,7 +190,7 @@ export function App() {
             <NavLink to="/favorites" label="お気に入り" icon={<Star />} />
             <NavLink to="/albums" label="アルバム" icon={<Albums />} />
             <NavLink to="/trash" label="ゴミ箱" icon={null} desktopOnly />
-            <NavLink to="/settings" label="ライブラリ" icon={<Library />} />
+            <NavLink to="/settings" label="ライブラリ" icon={<Library />} tabBarAlso={['/trash']} />
           </nav>
           <div class="ml-auto">
             <UploadButton />

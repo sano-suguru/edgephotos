@@ -34,22 +34,38 @@ export async function openApp(page: Page, path = '/') {
   await expect(page.getByRole('navigation', { name: 'メイン' })).toBeVisible()
 }
 
+export const uploadPanel = (page: Page) => page.locator('details', { hasText: 'アップロード状況' })
+
 export const uploadRow = (page: Page, name: string) =>
   // Plain locator: the panel collapses once nothing is active, which hides the rows from the a11y tree.
-  page.locator('details', { hasText: 'アップロード状況' }).locator('li').filter({ hasText: name })
+  uploadPanel(page).locator('li').filter({ hasText: name })
 
-// Uploads through the real file input and waits until every file reached a terminal state.
+// Uploads through the real file input and waits until every file reached a terminal state. Returns each row's
+// text as it was at that moment: a batch where everything was added clears its summary a few seconds later.
 export async function uploadFiles(page: Page, files: { name: string; mimeType: string; buffer: Buffer }[]) {
   await page.locator('input[type=file]').setInputFiles(files)
-  for (const file of files) {
-    await expect(uploadRow(page, file.name)).toContainText(/完了|重複|失敗/, { timeout: 30_000 })
-  }
+  const rows = new Map<string, string>()
+  await expect
+    .poll(
+      async () => {
+        for (const file of files) {
+          const text = await uploadRow(page, file.name)
+            .textContent({ timeout: 100 })
+            .catch(() => null)
+          if (text && /完了|重複|失敗/.test(text)) rows.set(file.name, text)
+        }
+        return rows.size
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(files.length)
+  return rows
 }
 
 export async function uploadPhoto(page: Page, name: string, width = 800, height = 600) {
   const buffer = await makeJpeg(page, width, height)
-  await uploadFiles(page, [{ name, mimeType: 'image/jpeg', buffer }])
-  await expect(uploadRow(page, name)).toContainText('完了')
+  const rows = await uploadFiles(page, [{ name, mimeType: 'image/jpeg', buffer }])
+  expect(rows.get(name)).toContain('完了')
 }
 
 // Timeline tiles are buttons labelled with the filename.

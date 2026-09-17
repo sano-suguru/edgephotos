@@ -44,10 +44,12 @@ function ToastItem({ toast }: { toast: Toast }) {
       )}
     >
       <span class="flex-1">{toast.message}</span>
+      {/* The buttons are 44px tall for touch; the negative margin lets them use the toast's padding, so the
+          toast itself does not grow. A gap keeps a tap on ✕ from landing on the undo. */}
       {toast.action && (
         <button
           type="button"
-          class="shrink-0 rounded px-2 py-1 font-semibold text-sky-300 hover:bg-white/10"
+          class="-my-3 min-h-11 shrink-0 rounded px-3 font-semibold text-sky-300 hover:bg-white/10"
           onClick={() => {
             const action = toast.action
             dismiss(toast.id)
@@ -60,7 +62,7 @@ function ToastItem({ toast }: { toast: Toast }) {
       <button
         type="button"
         aria-label="通知を閉じる"
-        class="shrink-0 rounded px-1.5 py-1 text-white/70 hover:bg-white/10"
+        class="-my-3 -mr-2 ml-2 inline-flex size-11 shrink-0 items-center justify-center rounded text-white/70 hover:bg-white/10"
         onClick={() => dismiss(toast.id)}
       >
         ✕

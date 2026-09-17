@@ -7,6 +7,7 @@ import {
   tile,
   uniqueName,
   uploadFiles,
+  uploadPanel,
   uploadPhoto,
   uploadRow,
 } from './fixtures'
@@ -14,12 +15,13 @@ import {
 test('uploads a photo with browser-made derivatives and rejects HEIC', async ({ page }) => {
   await openApp(page)
   const name = `${uniqueName('large')}.jpg`
-  await uploadFiles(page, [
+  const rows = await uploadFiles(page, [
     { name, mimeType: 'image/jpeg', buffer: await makeJpeg(page, 3000, 2000) },
     { name: 'camera.heic', mimeType: 'image/heic', buffer: Buffer.from('not a real HEIC file') },
   ])
   // finalize only succeeds if the canvas JPEGs carry no EXIF/XMP/IPTC segment (WebKit adds them, D-020).
-  await expect(uploadRow(page, name)).toContainText('完了')
+  expect(rows.get(name)).toContain('完了')
+  // A failure keeps the summary (and its rows) until dismissed.
   await expect(uploadRow(page, 'camera.heic')).toContainText('HEIC は未対応')
 
   const thumbnail = tile(page, name).locator('img')
@@ -36,6 +38,41 @@ test('uploads a photo with browser-made derivatives and rejects HEIC', async ({ 
 
   await page.reload()
   await expectImageLoaded(tile(page, name).locator('img'))
+})
+
+test('a clean upload summary clears itself, but not while another upload runs or after a failure', async ({ page }) => {
+  await page.clock.install()
+  await openApp(page)
+  const first = `${uniqueName('clean-a')}.jpg`
+  const second = `${uniqueName('clean-b')}.jpg`
+  const secondBuffer = await makeJpeg(page, 320, 240)
+  await uploadPhoto(page, first)
+
+  // Start the next photo right away and hold its storage PUTs: the pending clear must not run meanwhile.
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route('**/__local/blobs/**', async (route) => {
+    if (route.request().method() === 'PUT') await held
+    return route.continue()
+  })
+  await page.locator('input[type=file]').setInputFiles([{ name: second, mimeType: 'image/jpeg', buffer: secondBuffer }])
+  await expect(uploadRow(page, second)).toContainText('転送中')
+  await page.clock.fastForward('00:30')
+  await expect(uploadRow(page, first)).toContainText('完了')
+  await expect(uploadRow(page, second)).toContainText('転送中')
+
+  release()
+  await expect(uploadRow(page, second)).toContainText('完了')
+  await expect(uploadPanel(page)).toBeVisible()
+  await page.clock.fastForward('00:06')
+  await expect(uploadPanel(page)).toBeHidden()
+
+  await uploadFiles(page, [{ name: 'camera.heic', mimeType: 'image/heic', buffer: Buffer.from('not a real HEIC') }])
+  await page.clock.fastForward('00:30')
+  await expect(uploadRow(page, 'camera.heic')).toContainText('HEIC は未対応')
+  await expect(page.getByRole('button', { name: /再試行/ })).toHaveCount(0)
 })
 
 test('recovers after the presigned image URLs expire', async ({ page }) => {

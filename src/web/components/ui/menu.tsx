@@ -24,7 +24,8 @@ export function DropdownMenu(props: {
       <BaseMenu.Portal>
         {/* Above the full-screen viewer (z-50). */}
         <BaseMenu.Positioner sideOffset={4} className="z-[60]">
-          <BaseMenu.Popup className="min-w-44 rounded-md border border-border bg-white p-1 text-foreground shadow-lg outline-none">
+          {/* A long list (many albums) scrolls inside the space left in the viewport instead of running off it. */}
+          <BaseMenu.Popup className="max-h-[var(--available-height)] min-w-44 overflow-y-auto overscroll-contain rounded-md border border-border bg-white p-1 text-foreground shadow-lg outline-none">
             {props.items.length === 0 && <div class="px-3 py-2 text-sm text-muted-foreground">項目がありません</div>}
             {props.items.map((item) => (
               <BaseMenu.Item

@@ -40,3 +40,10 @@
     contain-intrinsic-size: auto 40rem;
   }
 }
+
+/* Fades in after a delay, so a status that resolves quickly never appears. Opacity only. */
+@keyframes delayed-in {
+  from {
+    opacity: 0;
+  }
+}

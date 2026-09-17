@@ -78,6 +78,8 @@ test('photo viewer steps through photos from the keyboard', async ({ page }) => 
   await tile(page, order[0] as string).focus()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('dialog', { name: order[0] as string })).toBeVisible()
+  // The arrow keys belong to the viewer once Base UI has moved focus into it (a frame after it appears).
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(true)
   await page.keyboard.press('ArrowRight')
   await expect(page.getByRole('dialog', { name: order[1] as string })).toBeVisible()
   await page.keyboard.press('ArrowRight')
