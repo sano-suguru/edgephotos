@@ -211,6 +211,12 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
     // A concurrent upload of the same bytes won the race.
     const winner = await getAssetBySha256(ctx.db, upload.sha256)
     if (winner?.status !== 'ready') throw err
+    // The asset holding these bytes is this upload's own (a replay committed it): not a duplicate.
+    if (winner.id === upload.asset_id) {
+      const fresh = await getUploadRow(ctx.db, upload.id)
+      if (!fresh) throw new ApiError(404, 'UPLOAD_NOT_FOUND', 'Upload not found.')
+      return settledOutcome(ctx, fresh)
+    }
     return markDuplicate(ctx, upload, winner)
   }
 
@@ -229,18 +235,24 @@ async function settledOutcome(ctx: ServiceContext, upload: UploadRow): Promise<F
 }
 
 async function markDuplicate(ctx: ServiceContext, upload: UploadRow, existing: AssetRow): Promise<FinalizeOutcome> {
+  // The objects removed below are keyed by upload.asset_id; they must never belong to an asset.
+  if (existing.id === upload.asset_id) throw new Error('duplicate of its own asset')
   await ctx.db
     .update(uploads)
     .set({ status: 'duplicate', duplicate_of: existing.id, finalized_at: ctx.now().toISOString() })
     .where(and(eq(uploads.id, upload.id), eq(uploads.status, 'pending')))
-  // Only after D1 recorded the duplicate: the reserved keys belong to this upload alone and no asset
-  // references them, so removing them is safe. Best effort; leftovers are harmless.
-  const keys = assetObjectKeys(upload.asset_id)
-  try {
-    await ctx.bucket.delete([keys.original, keys.thumbnail, keys.preview])
-  } catch {
-    // ignore
-  }
   const fresh = await getUploadRow(ctx.db, upload.id)
+  // Only after D1 recorded the duplicate: the reserved keys belong to this upload alone and no asset
+  // references them, so removing them is safe. Best effort; leftovers are removed by storage cleanup.
+  if (fresh?.status === 'duplicate') await deleteUnreferencedObjects(ctx, upload.asset_id).catch(() => {})
   return settledOutcome(ctx, fresh ?? upload)
+}
+
+// Deletes the objects reserved for `assetId` unless an asset row (ready or purging) owns that id.
+// Callers must first make sure no upload can still turn this id into an asset.
+export async function deleteUnreferencedObjects(ctx: ServiceContext, assetId: string): Promise<boolean> {
+  if (await getAssetRow(ctx.db, assetId)) return false
+  const keys = assetObjectKeys(assetId)
+  await ctx.bucket.delete([keys.original, keys.thumbnail, keys.preview])
+  return true
 }

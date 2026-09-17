@@ -1,4 +1,4 @@
-import { and, eq, isNull, or, type SQL, sql } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull, or, type SQL, sql } from 'drizzle-orm'
 import type { Asset, AssetSummary } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, albumAssets, assets, uploads } from '../db/schema'
@@ -133,12 +133,16 @@ export async function trashAsset(ctx: ServiceContext, id: string) {
 export async function restoreAsset(ctx: ServiceContext, id: string) {
   const row = await requireReadyAsset(ctx.db, id)
   if (!row.trashed_at) return row
-  await ctx.db.update(assets).set({ trashed_at: null, updated_at: ctx.now().toISOString() }).where(eq(assets.id, id))
+  await ctx.db
+    .update(assets)
+    .set({ trashed_at: null, updated_at: ctx.now().toISOString() })
+    .where(and(eq(assets.id, id), eq(assets.status, 'ready')))
   return requireReadyAsset(ctx.db, id)
 }
 
 // Permanent delete. Resumable: every step is safe to repeat after a partial failure.
-// 1. D1: mark purging (hidden everywhere) and drop album membership.
+// 1. D1: mark purging (hidden everywhere) and drop album membership, only if the asset is still in trash
+//    (a restore from another tab may land between the read and the update).
 // 2. R2: delete original + derivatives (deleting a missing key is a no-op).
 // 3. D1: remove the asset row and upload records.
 export async function purgeAsset(ctx: ServiceContext, id: string): Promise<void> {
@@ -149,9 +153,24 @@ export async function purgeAsset(ctx: ServiceContext, id: string): Promise<void>
       throw new ApiError(409, 'ASSET_NOT_TRASHED', 'Move the asset to trash before deleting it permanently.')
     }
     await ctx.db.batch([
-      ctx.db.update(assets).set({ status: 'purging', updated_at: ctx.now().toISOString() }).where(eq(assets.id, id)),
-      ctx.db.delete(albumAssets).where(eq(albumAssets.asset_id, id)),
+      ctx.db
+        .update(assets)
+        .set({ status: 'purging', updated_at: ctx.now().toISOString() })
+        .where(and(eq(assets.id, id), eq(assets.status, 'ready'), isNotNull(assets.trashed_at))),
+      ctx.db
+        .delete(albumAssets)
+        .where(
+          and(
+            eq(albumAssets.asset_id, id),
+            sql`EXISTS (SELECT 1 FROM assets WHERE id = ${id} AND status = 'purging')`,
+          ),
+        ),
     ])
+    const marked = await getAssetRow(ctx.db, id)
+    if (!marked) throw new ApiError(404, 'ASSET_NOT_FOUND', 'Asset not found.')
+    if (marked.status !== 'purging') {
+      throw new ApiError(409, 'ASSET_NOT_TRASHED', 'Move the asset to trash before deleting it permanently.')
+    }
   }
   const keys = assetObjectKeys(id)
   await ctx.bucket.delete([keys.original, keys.thumbnail, keys.preview])
