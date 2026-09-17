@@ -167,9 +167,10 @@ export function App() {
 
   return (
     <div class="min-h-screen pb-[calc(3.75rem+env(safe-area-inset-bottom))] md:pb-0">
-      {/* Phones: the header scrolls away and the tabs sit at the bottom, so photos get the height. The header
-          only blurs from md up: a backdrop filter would make it the containing block of the fixed tab bar. */}
-      <header class="bg-background/90 md:sticky md:top-0 md:z-30 md:backdrop-blur">
+      {/* Phones: the header scrolls away and the tabs sit at the bottom, so photos get the height. Both bars are
+          opaque: photos scrolling underneath should not show through the controls. No backdrop filter on the
+          header either, which would make it the containing block of the fixed tab bar. */}
+      <header class="bg-background md:sticky md:top-0 md:z-30">
         <div class="mx-auto flex h-12 max-w-screen-2xl items-center gap-2 px-4 md:h-14">
           <a
             href="/"
@@ -183,7 +184,7 @@ export function App() {
           </a>
           <nav
             aria-label="メイン"
-            class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-black/5 bg-background/95 pb-[env(safe-area-inset-bottom)] md:static md:flex md:flex-1 md:gap-1 md:border-0 md:bg-transparent md:pb-0"
+            class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-black/5 bg-background pb-[env(safe-area-inset-bottom)] md:static md:flex md:flex-1 md:gap-1 md:border-0 md:bg-transparent md:pb-0"
           >
             <NavLink to="/" label="タイムライン" icon={<Images />} />
             <NavLink to="/favorites" label="お気に入り" icon={<Star />} />

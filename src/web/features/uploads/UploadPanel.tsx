@@ -39,11 +39,15 @@ export function UploadButton() {
       />
       <button
         type="button"
-        class={cn(buttonClass('default'), 'px-3 sm:px-4')}
+        // Phones show a plain icon: on a small screen a filled button outweighs the photos next to it.
+        class={cn(
+          buttonClass('default', 'md', true),
+          'px-4 max-sm:h-11 max-sm:min-w-11 max-sm:bg-transparent max-sm:px-2 max-sm:text-foreground max-sm:hover:bg-muted',
+        )}
         aria-label={activeUploads.value > 0 ? `アップロード（残り ${activeUploads.value} 枚）` : 'アップロード'}
         onClick={() => input.current?.click()}
       >
-        <Upload class="size-4" />
+        <Upload class="size-5 sm:size-4" />
         <span class="hidden sm:inline">アップロード</span>
         {activeUploads.value > 0 && <span class="tabular-nums">{activeUploads.value}</span>}
       </button>

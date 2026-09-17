@@ -28,7 +28,7 @@ export function Dialog(props: {
         <BaseDialog.Popup
           finalFocus={props.finalFocus ? () => props.finalFocus?.() ?? true : undefined}
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-2xl bg-background p-6 shadow-lg outline-none',
+            'fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl bg-background p-6 shadow-lg outline-none',
             // A confirmation opened on top has no backdrop of its own; dim this dialog so the top one stands out.
             'transition-[filter] data-[nested-dialog-open]:brightness-60',
             props.wide ? 'max-w-5xl' : 'max-w-md',

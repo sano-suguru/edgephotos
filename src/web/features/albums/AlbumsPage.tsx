@@ -101,7 +101,7 @@ export function AlbumsPage() {
     <section>
       <div class="mb-6 flex items-center justify-between gap-3">
         <h1 class="text-2xl font-semibold tracking-tight">アルバム</h1>
-        <Button variant="secondary" onClick={() => (creating.value = true)}>
+        <Button variant="secondary" pill onClick={() => (creating.value = true)}>
           新規アルバム
         </Button>
       </div>

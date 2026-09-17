@@ -70,7 +70,7 @@ export function AlbumPage({ id }: { id: string }) {
           <h1 class="text-2xl font-semibold tracking-tight">{current.title}</h1>
         </div>
         <div class="flex gap-1">
-          <Button variant="secondary" onClick={() => (sharing.value = true)}>
+          <Button variant="secondary" pill onClick={() => (sharing.value = true)}>
             共有
           </Button>
           <DropdownMenu
