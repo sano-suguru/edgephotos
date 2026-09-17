@@ -25,3 +25,18 @@
     outline-offset: 2px;
   }
 }
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}
+
+@layer utilities {
+  /* Month sections far off screen skip layout and paint; the intrinsic size keeps the scrollbar stable. */
+  .offscreen-skip {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 40rem;
+  }
+}

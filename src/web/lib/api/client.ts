@@ -75,8 +75,8 @@ export const api = {
   createAlbum: (title: string) => request<Album>('POST', '/api/v1/albums', { title }),
   renameAlbum: (id: string, title: string) => request<Album>('PATCH', `/api/v1/albums/${id}`, { title }),
   deleteAlbum: (id: string) => request<void>('DELETE', `/api/v1/albums/${id}`),
-  albumAssets: (id: string, cursor?: string | null) =>
-    request<AssetPage>('GET', `/api/v1/albums/${id}/assets${qs({ cursor })}`),
+  albumAssets: (id: string, cursor?: string | null, limit?: number) =>
+    request<AssetPage>('GET', `/api/v1/albums/${id}/assets${qs({ cursor, limit })}`),
   addToAlbum: (albumId: string, assetId: string) => request<void>('PUT', `/api/v1/albums/${albumId}/assets/${assetId}`),
   removeFromAlbum: (albumId: string, assetId: string) =>
     request<void>('DELETE', `/api/v1/albums/${albumId}/assets/${assetId}`),

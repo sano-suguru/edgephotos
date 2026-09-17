@@ -1,9 +1,12 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
 import type { Album } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
-import { Dialog } from '../../components/ui/dialog'
+import { ConfirmDialog, Dialog } from '../../components/ui/dialog'
+import { Albums } from '../../components/ui/icons'
 import { DropdownMenu } from '../../components/ui/menu'
+import { showToast } from '../../components/ui/toast'
 import { api } from '../../lib/api/client'
+import { userMessage } from '../../lib/errors'
 import { navigate } from '../../state/router'
 import { SharePanel } from '../shares/SharePanel'
 import { AssetGrid } from '../timeline/AssetGrid'
@@ -14,6 +17,9 @@ export function AlbumPage({ id }: { id: string }) {
   const renaming = useSignal(false)
   const sharing = useSignal(false)
   const draft = useSignal('')
+  const deleting = useSignal(false)
+  const busy = useSignal(false)
+  const renameError = useSignal<string | null>(null)
 
   useSignalEffect(() => {
     api
@@ -21,13 +27,30 @@ export function AlbumPage({ id }: { id: string }) {
       .then((a) => {
         album.value = a
       })
-      .catch((err: Error) => {
-        error.value = err.message
+      .catch((err) => {
+        error.value = userMessage(err)
       })
   })
 
-  if (error.value) return <p class="text-sm text-destructive">アルバムを表示できません: {error.value}</p>
-  if (!album.value) return <p class="text-sm text-muted-foreground">読み込み中…</p>
+  if (error.value) {
+    return (
+      <div role="alert" class="py-16 text-center text-sm">
+        <p>アルバムを表示できません。</p>
+        <p class="mt-1 text-muted-foreground">{error.value}</p>
+        <Button variant="outline" class="mt-3" onClick={() => navigate('/albums')}>
+          アルバム一覧へ
+        </Button>
+      </div>
+    )
+  }
+  if (!album.value) {
+    return (
+      <div aria-busy="true">
+        <span class="sr-only">読み込み中…</span>
+        <div class="mb-6 h-12 w-48 rounded bg-muted motion-safe:animate-pulse" />
+      </div>
+    )
+  }
   const current = album.value
 
   return (
@@ -56,16 +79,15 @@ export function AlbumPage({ id }: { id: string }) {
                 label: '名前を変更',
                 onSelect: () => {
                   draft.value = current.title
+                  renameError.value = null
                   renaming.value = true
                 },
               },
               {
                 label: 'アルバムを削除',
                 destructive: true,
-                onSelect: async () => {
-                  if (!window.confirm('アルバムを削除します。写真は削除されず、共有リンクは無効になります。')) return
-                  await api.deleteAlbum(current.id)
-                  navigate('/albums')
+                onSelect: () => {
+                  deleting.value = true
                 },
               },
             ]}
@@ -77,7 +99,13 @@ export function AlbumPage({ id }: { id: string }) {
         key={current.id}
         mode="album"
         albumId={current.id}
-        emptyText="タイムラインの写真から「アルバムに追加」できます"
+        empty={
+          <>
+            <Albums class="size-10 text-muted-foreground/60" />
+            <p>このアルバムにはまだ写真がありません。</p>
+            <p>タイムラインで写真を開き、「アルバムに追加」から追加できます。</p>
+          </>
+        }
         load={(cursor) => api.albumAssets(current.id, cursor)}
       />
 
@@ -86,8 +114,13 @@ export function AlbumPage({ id }: { id: string }) {
           class="flex flex-col gap-3"
           onSubmit={async (e) => {
             e.preventDefault()
-            album.value = await api.renameAlbum(current.id, draft.value)
-            renaming.value = false
+            renameError.value = null
+            try {
+              album.value = await api.renameAlbum(current.id, draft.value)
+              renaming.value = false
+            } catch (err) {
+              renameError.value = userMessage(err)
+            }
           }}
         >
           <input
@@ -98,9 +131,36 @@ export function AlbumPage({ id }: { id: string }) {
             onInput={(e) => (draft.value = (e.currentTarget as HTMLInputElement).value)}
             class="h-9 rounded-md border border-border px-3"
           />
+          {renameError.value && (
+            <p role="alert" class="text-sm text-destructive">
+              {renameError.value}
+            </p>
+          )}
           <Button type="submit">保存</Button>
         </form>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleting.value}
+        onOpenChange={(open) => (deleting.value = open)}
+        title={`「${current.title}」を削除しますか？`}
+        description="アルバム内の写真は削除されません。このアルバムの共有リンクは無効になり、元に戻せません。"
+        confirmLabel="アルバムを削除"
+        busy={busy.value}
+        onConfirm={async () => {
+          busy.value = true
+          try {
+            await api.deleteAlbum(current.id)
+            deleting.value = false
+            showToast(`「${current.title}」を削除しました`)
+            navigate('/albums')
+          } catch (err) {
+            showToast(userMessage(err), { tone: 'error' })
+          } finally {
+            busy.value = false
+          }
+        }}
+      />
 
       <Dialog
         open={sharing.value}

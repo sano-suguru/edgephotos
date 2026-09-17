@@ -134,4 +134,5 @@ v1 の完成条件には含めません。
 - advanced search
 - Queues / background processing
 - client-specific adapter / BFF
+- アルバム一覧の cover を album の response に含める（現在の Web は album ごとに `limit=1` の一覧 API を呼ぶ。album 数に比例して request と署名が増える）
 - 失敗した upload の cleanup（「既知の制約」参照。`expires_at` を使うか、定期実行を入れるかを含めて未定）

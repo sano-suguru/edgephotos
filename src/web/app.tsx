@@ -1,6 +1,8 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
 import type { ComponentChildren } from 'preact'
 import { cn } from './components/ui/button'
+import { Albums, Images, Library, Star } from './components/ui/icons'
+import { Toaster } from './components/ui/toast'
 import { AlbumPage } from './features/albums/AlbumPage'
 import { AlbumsPage } from './features/albums/AlbumsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
@@ -9,7 +11,7 @@ import { UploadButton, UploadList } from './features/uploads/UploadPanel'
 import { ApiRequestError, api } from './lib/api/client'
 import { navigate, path, route } from './state/router'
 
-function NavLink(props: { to: string; children: ComponentChildren }) {
+function NavLink(props: { to: string; label: string; icon: ComponentChildren; desktopOnly?: boolean }) {
   const active = props.to === '/' ? path.value === '/' : path.value.startsWith(props.to)
   return (
     <a
@@ -18,14 +20,28 @@ function NavLink(props: { to: string; children: ComponentChildren }) {
       onClick={(e) => {
         e.preventDefault()
         navigate(props.to)
+        window.scrollTo(0, 0)
       }}
       class={cn(
-        'rounded-md px-3 py-1.5 text-sm',
-        active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted',
+        'flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] md:flex-row md:rounded-md md:px-3 md:py-1.5 md:text-sm',
+        props.desktopOnly ? 'hidden md:flex' : 'flex',
+        active
+          ? 'font-semibold text-primary md:bg-muted md:text-foreground'
+          : 'text-muted-foreground md:hover:bg-muted',
       )}
     >
-      {props.children}
+      <span class="md:hidden">{props.icon}</span>
+      {props.label}
     </a>
+  )
+}
+
+function PageTitle(props: { children: ComponentChildren; hint?: string }) {
+  return (
+    <div class="mb-4">
+      <h1 class="text-xl font-semibold">{props.children}</h1>
+      {props.hint && <p class="mt-1 text-sm text-muted-foreground">{props.hint}</p>}
+    </div>
   )
 }
 
@@ -34,19 +50,37 @@ function Page() {
   switch (r.name) {
     case 'timeline':
       return (
-        <AssetGrid
-          key="timeline"
-          emptyText="写真をアップロードしてください"
-          load={(cursor) => api.listAssets({ cursor })}
-        />
+        <>
+          <h1 class="sr-only">タイムライン</h1>
+          <AssetGrid
+            key="timeline"
+            empty={
+              <>
+                <Images class="size-10 text-muted-foreground/60" />
+                <p>まだ写真がありません。</p>
+                <p>「アップロード」から写真を選ぶと、撮影した月ごとにここへ並びます。</p>
+              </>
+            }
+            load={(cursor) => api.listAssets({ cursor })}
+          />
+        </>
       )
     case 'favorites':
       return (
-        <AssetGrid
-          key="favorites"
-          emptyText="お気に入りはまだありません"
-          load={(cursor) => api.listAssets({ cursor, favorite: true })}
-        />
+        <>
+          <PageTitle>お気に入り</PageTitle>
+          <AssetGrid
+            key="favorites"
+            empty={
+              <>
+                <Star class="size-10 text-muted-foreground/60" />
+                <p>お気に入りはまだありません。</p>
+                <p>写真を開いて ☆ を押すと、ここに集まります。</p>
+              </>
+            }
+            load={(cursor) => api.listAssets({ cursor, favorite: true })}
+          />
+        </>
       )
     case 'albums':
       return <AlbumsPage />
@@ -54,12 +88,15 @@ function Page() {
       return <AlbumPage key={r.id} id={r.id} />
     case 'trash':
       return (
-        <AssetGrid
-          key="trash"
-          mode="trash"
-          emptyText="ゴミ箱は空です"
-          load={(cursor) => api.listAssets({ cursor, trashed: true })}
-        />
+        <>
+          <PageTitle hint="ゴミ箱の写真は、完全に削除するまで残ります。写真を開くと復元できます。">ゴミ箱</PageTitle>
+          <AssetGrid
+            key="trash"
+            mode="trash"
+            empty={<p>ゴミ箱は空です。</p>}
+            load={(cursor) => api.listAssets({ cursor, trashed: true })}
+          />
+        </>
       )
     case 'settings':
       return <SettingsPage />
@@ -96,24 +133,41 @@ export function App() {
   }
 
   return (
-    <div class="min-h-screen">
-      <header class="sticky top-0 z-30 border-b border-border bg-white/90 backdrop-blur">
-        <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-2 px-4 py-2">
-          <span class="mr-4 font-semibold">EdgePhotos</span>
-          <nav class="flex flex-1 flex-wrap gap-1" aria-label="メイン">
-            <NavLink to="/">タイムライン</NavLink>
-            <NavLink to="/favorites">お気に入り</NavLink>
-            <NavLink to="/albums">アルバム</NavLink>
-            <NavLink to="/trash">ゴミ箱</NavLink>
-            <NavLink to="/settings">ライブラリ</NavLink>
+    <div class="min-h-screen pb-[calc(3.75rem+env(safe-area-inset-bottom))] md:pb-0">
+      {/* Phones: the header scrolls away and the tabs sit at the bottom, so photos get the height. The header
+          only blurs from md up: a backdrop filter would make it the containing block of the fixed tab bar. */}
+      <header class="border-b border-border bg-white/90 md:sticky md:top-0 md:z-30 md:backdrop-blur">
+        <div class="mx-auto flex h-12 max-w-screen-2xl items-center gap-2 px-4 md:h-14">
+          <a
+            href="/"
+            class="mr-4 font-semibold"
+            onClick={(e) => {
+              e.preventDefault()
+              navigate('/')
+            }}
+          >
+            EdgePhotos
+          </a>
+          <nav
+            aria-label="メイン"
+            class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border bg-white/95 pb-[env(safe-area-inset-bottom)] md:static md:flex md:flex-1 md:gap-1 md:border-0 md:bg-transparent md:pb-0"
+          >
+            <NavLink to="/" label="タイムライン" icon={<Images />} />
+            <NavLink to="/favorites" label="お気に入り" icon={<Star />} />
+            <NavLink to="/albums" label="アルバム" icon={<Albums />} />
+            <NavLink to="/trash" label="ゴミ箱" icon={null} desktopOnly />
+            <NavLink to="/settings" label="ライブラリ" icon={<Library />} />
           </nav>
-          <UploadButton />
+          <div class="ml-auto">
+            <UploadButton />
+          </div>
         </div>
       </header>
-      <main class="mx-auto max-w-7xl px-4 py-4">
+      <main class="mx-auto max-w-screen-2xl px-4 py-4">
         <UploadList />
         <Page />
       </main>
+      <Toaster />
     </div>
   )
 }

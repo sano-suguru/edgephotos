@@ -87,6 +87,20 @@ server 側は workerd の自動テスト、並列数は unit test。ライブラ
 - 上の 204/404 のように別の request が先に削除を終えると、「削除を再開」はその 404 で止まっていた。そのあと、404 の ID は飛ばして残りを続けるよう修正した（unit test で確認。この修正は remote-test に deploy していない）
 - テスト asset はすべて完全削除し、件数は検証前（写真 21、ゴミ箱 2、削除処理中 0、未完了 upload 2、album 1）に戻した。D1 に今回の upload 行は残っていない
 
+## 閲覧 UI の改善（2026-09-17）
+
+local（`vite dev`、使い捨ての `EDGEPHOTOS_STATE_DIR`）に、reserve → PUT → finalize で合成 JPEG 90 枚（撮影日時を約 4 か月に分散）と album 3 件を入れ、Playwright script で確認した。実写真は使っていない。
+
+- desktop Chromium（1440×900）: viewer の ←/→ で前後の写真へ移動し、60 枚目を越えると次のページを読み込んで移動を続けられる。先頭では「前の写真」が出ない。Escape で閉じると最後に表示した写真の tile に focus が戻る
+- phone（WebKit iPhone 13 相当）: 横スクロールなし、header 49px、タブは画面下に固定。viewer の「次の写真」、情報パネルの表示
+- phone（Chromium Pixel 7 相当、CDP の touch event）: 左右スワイプで前後に移動、タップで操作ボタンを隠す
+- ゴミ箱へ移動すると viewer は次の写真を表示し、「元に戻す」で server 上も復元される。完全削除とアルバム削除は確認 dialog を出し、キャンセルで何も変わらない
+- storage への PUT を失敗させると日本語の失敗表示と「再試行」が出て、再試行で完了する。一覧 API の 500 では server の英語 message を出さず、再試行で表示が戻る
+- album 一覧は各 album の最新の写真を cover にする（`limit=1` の album assets API。API の変更なし）
+- 2 枚を続けてゴミ箱へ移動すると「元に戻す」が 2 つ並び、それぞれが対応する写真だけを復元する。情報パネルは写真を移動しても開いたままで、viewer を開き直すと閉じている。アップロード中の表示は完了枚数（例: 0 / 3 枚）と処理中のファイル名
+
+常設の回帰は `e2e/keyboard.spec.ts` と `e2e/mobile.spec.ts`（[development.md](development.md) §7）。iPhone / Android の実機での swipe と safe area は未確認。
+
 ## 未検証
 
 iPhone / Android 実機での取り込みは未確認です。desktop の WebKit では代用できません。[roadmap.md](roadmap.md) の Post-merge verification で、次を確認します。

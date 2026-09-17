@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { openApp, uniqueName } from './fixtures'
+import { makeJpeg, openApp, tile, uniqueName, uploadFiles } from './fixtures'
 
 // Base UI through preact/compat: focus trap, Escape, focus restore and menu keyboard navigation
 // (docs/development.md §4). These only exist in a real browser.
@@ -53,4 +53,52 @@ test('dialog and menu are usable from the keyboard', async ({ page }) => {
   await expect(page.getByRole('heading', { name: `${title} renamed` })).toBeVisible()
   // Focus must not be stranded on a removed element.
   expect(await page.evaluate(() => document.activeElement?.isConnected)).toBe(true)
+})
+
+// The photo viewer: arrow keys step through the grid, menus keep their own arrow keys, and closing
+// returns focus to the photo that was shown last.
+test('photo viewer steps through photos from the keyboard', async ({ page }) => {
+  await openApp(page)
+  const names = [uniqueName('kb-a'), uniqueName('kb-b'), uniqueName('kb-c')].map((n) => `${n}.jpg`)
+  const files = []
+  for (const name of names) files.push({ name, mimeType: 'image/jpeg', buffer: await makeJpeg(page, 320, 240) })
+  await uploadFiles(page, files)
+  // Uploads run two at a time and the grid reloads as each one finishes, so read the order from a fresh
+  // page (no capture time: it follows the finalize time) instead of assuming it.
+  await page.reload()
+  for (const name of names) await expect(tile(page, name)).toBeVisible()
+  const order = await page
+    .locator('[data-asset-id]')
+    .evaluateAll(
+      (els, wanted) => els.map((e) => e.getAttribute('aria-label')).filter((n) => wanted.includes(n ?? '')),
+      names,
+    )
+  expect(order).toHaveLength(3)
+
+  await tile(page, order[0] as string).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog', { name: order[0] as string })).toBeVisible()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('dialog', { name: order[1] as string })).toBeVisible()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('dialog', { name: order[2] as string })).toBeVisible()
+  await page.keyboard.press('ArrowLeft')
+  const viewer = page.getByRole('dialog', { name: order[1] as string })
+  await expect(viewer).toBeVisible()
+
+  // Inside the "more" menu the arrow keys move between items and do not change the photo.
+  const more = viewer.getByRole('button', { name: 'その他の操作' })
+  await more.focus()
+  await page.keyboard.press('ArrowDown')
+  await expect(page.getByRole('menu')).toBeVisible()
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowLeft')
+  await expect(viewer).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toBeHidden()
+  await expect(more).toBeFocused()
+
+  await page.keyboard.press('Escape')
+  await expect(viewer).toBeHidden()
+  await expect(tile(page, order[1] as string)).toBeFocused()
 })

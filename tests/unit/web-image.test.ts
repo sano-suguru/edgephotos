@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { LIMITS } from '../../src/contracts/schemas'
 import { resumePurges } from '../../src/web/features/settings/resume-purges'
 import { mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
+import { captureParts, formatDate, monthKey } from '../../src/web/lib/dates'
 import { exifDateToIso } from '../../src/web/lib/exif-date'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
@@ -9,6 +10,24 @@ import { putOutcome } from '../../src/web/lib/storage-put'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
 import { scanJpegForMetadata } from '../../src/worker/storage/inspect'
 import { syntheticJpeg } from '../helpers'
+
+describe('capture date for grouping', () => {
+  it('uses the camera wall-clock digits whether or not takenAt has an offset', () => {
+    const createdAt = '2026-01-01T00:00:00.000Z'
+    // 23:30 at -05:00 is already the next day in UTC; the photo still belongs to the day it was taken.
+    const west = captureParts({ takenAt: '2024-05-31T23:30:00-05:00', createdAt })
+    expect([monthKey(west), west.day, west.known]).toEqual(['2024-05', 31, true])
+    const bare = captureParts({ takenAt: '2024-12-31T23:59:59', createdAt })
+    expect(monthKey(bare)).toBe('2024-12')
+    expect(formatDate(bare)).toBe('2024年12月31日（火）')
+  })
+
+  it('falls back to the upload time when the capture time is unknown', () => {
+    const parts = captureParts({ takenAt: null, createdAt: '2026-03-15T12:00:00.000Z' })
+    expect(parts.known).toBe(false)
+    expect(monthKey(parts)).toBe('2026-03')
+  })
+})
 
 describe('EXIF date conversion', () => {
   it('keeps the offset when EXIF provides one', () => {

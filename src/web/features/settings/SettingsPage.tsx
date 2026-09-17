@@ -1,6 +1,9 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
 import { Button } from '../../components/ui/button'
+import { Trash } from '../../components/ui/icons'
 import { api } from '../../lib/api/client'
+import { userMessage } from '../../lib/errors'
+import { navigate } from '../../state/router'
 import { resumePurges } from './resume-purges'
 
 type Diagnostics = Awaited<ReturnType<typeof api.diagnostics>>
@@ -16,8 +19,8 @@ export function SettingsPage() {
       .then((d) => {
         diag.value = d
       })
-      .catch((err: Error) => {
-        error.value = err.message
+      .catch((err) => {
+        error.value = userMessage(err)
       })
 
   useSignalEffect(() => {
@@ -25,7 +28,12 @@ export function SettingsPage() {
   })
 
   async function downloadManifest() {
-    const manifest = await api.exportManifest()
+    error.value = null
+    const manifest = await api.exportManifest().catch((err) => {
+      error.value = userMessage(err)
+      return null
+    })
+    if (!manifest) return
     const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -42,7 +50,7 @@ export function SettingsPage() {
     try {
       await resumePurges(ids, api.purge)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      error.value = userMessage(err)
     } finally {
       resuming.value = false
       await load()
@@ -52,7 +60,25 @@ export function SettingsPage() {
   return (
     <section class="max-w-2xl space-y-6">
       <h1 class="text-xl font-semibold">ライブラリ</h1>
-      {error.value && <p class="text-sm text-destructive">{error.value}</p>}
+      {error.value && (
+        <p role="alert" class="text-sm text-destructive">
+          {error.value}
+        </p>
+      )}
+      <a
+        href="/trash"
+        onClick={(e) => {
+          e.preventDefault()
+          navigate('/trash')
+        }}
+        class="flex items-center gap-3 rounded-lg border border-border bg-white p-4 text-sm hover:bg-muted"
+      >
+        <Trash class="size-5 text-muted-foreground" />
+        <span class="flex-1 font-medium">ゴミ箱</span>
+        <span class="text-muted-foreground">
+          {diag.value ? `${diag.value.counts.trashed} 枚` : ''} <span aria-hidden="true">›</span>
+        </span>
+      </a>
       {diag.value && (
         <dl class="grid grid-cols-2 gap-2 rounded-lg border border-border bg-white p-4 text-sm">
           <dt class="text-muted-foreground">写真</dt>
