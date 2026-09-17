@@ -39,7 +39,7 @@ function ToastItem({ toast }: { toast: Toast }) {
   return (
     <div
       class={cn(
-        'pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-lg px-4 py-3 text-sm shadow-lg motion-safe:animate-[toast-in_160ms_ease-out]',
+        'pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-xl px-4 py-3 text-sm shadow-md motion-safe:animate-[toast-in_160ms_ease-out]',
         toast.tone === 'error' ? 'bg-destructive text-white' : 'bg-neutral-900 text-white',
       )}
     >
@@ -49,7 +49,7 @@ function ToastItem({ toast }: { toast: Toast }) {
       {toast.action && (
         <button
           type="button"
-          class="-my-3 min-h-11 shrink-0 rounded px-3 font-semibold text-sky-300 hover:bg-white/10"
+          class="-my-3 min-h-11 shrink-0 rounded px-3 font-semibold text-white underline underline-offset-4 hover:bg-white/10"
           onClick={() => {
             const action = toast.action
             dismiss(toast.id)

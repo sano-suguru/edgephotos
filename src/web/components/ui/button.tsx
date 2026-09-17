@@ -4,11 +4,14 @@ export function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ')
 }
 
+// One filled button per screen (default); everything else sits back as a tonal, ghost or text control.
+// A filled red button is for the confirming step of an irreversible action.
 const variants = {
-  default: 'bg-primary text-primary-foreground hover:opacity-90',
-  outline: 'border border-border bg-white hover:bg-muted',
+  default: 'bg-primary text-primary-foreground hover:opacity-85',
+  secondary: 'bg-muted hover:bg-border',
   ghost: 'hover:bg-muted',
   destructive: 'bg-destructive text-white hover:opacity-90',
+  'destructive-ghost': 'text-destructive hover:bg-destructive/10',
 } as const
 
 type ButtonProps = JSX.HTMLAttributes<HTMLButtonElement> & {
@@ -21,7 +24,7 @@ type ButtonProps = JSX.HTMLAttributes<HTMLButtonElement> & {
 
 export function buttonClass(variant: keyof typeof variants = 'default', size: 'sm' | 'md' | 'icon' = 'md') {
   return cn(
-    'inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition disabled:pointer-events-none disabled:opacity-50',
+    'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition disabled:pointer-events-none disabled:opacity-50',
     variants[variant],
     size === 'sm' && 'h-8 px-3',
     size === 'md' && 'h-9 px-4',

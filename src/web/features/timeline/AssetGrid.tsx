@@ -195,7 +195,7 @@ export function AssetGrid(props: AssetGridProps) {
       <div role="alert" class="flex flex-col items-center gap-3 py-16 text-center text-sm">
         <p>写真を読み込めませんでした。</p>
         <p class="text-muted-foreground">{error.value.message}</p>
-        <Button variant="outline" onClick={() => loadPage(true)}>
+        <Button variant="secondary" onClick={() => loadPage(true)}>
           再試行
         </Button>
       </div>
@@ -206,7 +206,7 @@ export function AssetGrid(props: AssetGridProps) {
     return (
       <div aria-busy="true">
         <span class="sr-only">読み込み中…</span>
-        <div class="mb-2 mt-1 h-5 w-24 rounded bg-muted motion-safe:animate-pulse" />
+        <div class="mb-3 mt-1 h-5 w-24 rounded-md bg-muted motion-safe:animate-pulse" />
         <div class="grid grid-cols-3 gap-0.5 sm:grid-cols-4 sm:gap-1 md:grid-cols-6 lg:grid-cols-8">
           {Array.from({ length: 24 }, (_, i) => (
             <div key={i} class="aspect-square bg-muted motion-safe:animate-pulse" />
@@ -225,11 +225,11 @@ export function AssetGrid(props: AssetGridProps) {
   return (
     <div>
       {groups.value.map((group) => (
-        <section key={`${group.key}-${group.items[0].index}`} class="offscreen-skip mb-6" aria-label={group.label}>
-          <h2 class="mb-2 px-1 text-base font-semibold sm:px-0">{group.label}</h2>
+        <section key={`${group.key}-${group.items[0].index}`} class="offscreen-skip mb-8" aria-label={group.label}>
+          <h2 class="mb-3 text-lg font-semibold tracking-tight">{group.label}</h2>
           <ul class="grid grid-cols-3 gap-0.5 sm:grid-cols-4 sm:gap-1 md:grid-cols-6 lg:grid-cols-8">
             {group.items.map(({ asset }) => (
-              <li key={asset.id} class="group relative aspect-square overflow-hidden bg-muted sm:rounded-sm">
+              <li key={asset.id} class="group relative aspect-square overflow-hidden bg-muted">
                 <button
                   type="button"
                   class="block h-full w-full focus-visible:outline-offset-[-3px]"
@@ -269,7 +269,7 @@ export function AssetGrid(props: AssetGridProps) {
       <div ref={sentinel} class="flex min-h-12 flex-col items-center justify-center gap-2 py-4 text-sm">
         {error.value?.kind === 'more' && <p class="text-destructive">{error.value.message}</p>}
         {cursor.value && (
-          <Button variant="outline" disabled={loading.value} onClick={() => loadPage(false)}>
+          <Button variant="secondary" disabled={loading.value} onClick={() => loadPage(false)}>
             {loading.value ? '読み込み中…' : error.value ? '再試行' : 'さらに読み込む'}
           </Button>
         )}

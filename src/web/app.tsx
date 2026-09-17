@@ -38,11 +38,10 @@ function NavLink(props: {
         window.scrollTo(0, 0)
       }}
       class={cn(
-        'flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] md:flex-row md:rounded-md md:px-3 md:py-1.5 md:text-sm',
+        'flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] md:flex-row md:px-3 md:py-1.5 md:text-sm',
         props.desktopOnly ? 'hidden md:flex' : 'flex',
-        active
-          ? 'font-semibold text-primary md:bg-muted md:text-foreground'
-          : 'text-muted-foreground md:hover:bg-muted',
+        // The current place reads by weight and color; no pill behind it.
+        active ? 'font-semibold text-accent md:text-foreground' : 'text-muted-foreground md:hover:text-foreground',
       )}
     >
       <span class="md:hidden">{props.icon}</span>
@@ -54,7 +53,7 @@ function NavLink(props: {
 function PageTitle(props: { children: ComponentChildren; hint?: string; back?: { to: string; label: string } }) {
   const back = props.back
   return (
-    <div class="mb-4">
+    <div class="mb-6">
       {back && (
         // Phones only: on desktop the destination is in the header nav.
         <a
@@ -68,7 +67,7 @@ function PageTitle(props: { children: ComponentChildren; hint?: string; back?: {
           ← {back.label}
         </a>
       )}
-      <h1 class="text-xl font-semibold">{props.children}</h1>
+      <h1 class="text-2xl font-semibold tracking-tight">{props.children}</h1>
       {props.hint && <p class="mt-1 text-sm text-muted-foreground">{props.hint}</p>}
     </div>
   )
@@ -85,7 +84,7 @@ function Page() {
             key="timeline"
             empty={
               <>
-                <Images class="size-10 text-muted-foreground/60" />
+                <Images class="size-8 text-muted-foreground/50" />
                 <p>まだ写真がありません。</p>
                 <p>「アップロード」から写真を選ぶと、撮影した月ごとにここへ並びます。</p>
               </>
@@ -102,7 +101,7 @@ function Page() {
             key="favorites"
             empty={
               <>
-                <Star class="size-10 text-muted-foreground/60" />
+                <Star class="size-8 text-muted-foreground/50" />
                 <p>お気に入りはまだありません。</p>
                 <p>写真を開いて ☆ を押すと、ここに集まります。</p>
               </>
@@ -170,11 +169,11 @@ export function App() {
     <div class="min-h-screen pb-[calc(3.75rem+env(safe-area-inset-bottom))] md:pb-0">
       {/* Phones: the header scrolls away and the tabs sit at the bottom, so photos get the height. The header
           only blurs from md up: a backdrop filter would make it the containing block of the fixed tab bar. */}
-      <header class="border-b border-border bg-white/90 md:sticky md:top-0 md:z-30 md:backdrop-blur">
+      <header class="bg-background/90 md:sticky md:top-0 md:z-30 md:backdrop-blur">
         <div class="mx-auto flex h-12 max-w-screen-2xl items-center gap-2 px-4 md:h-14">
           <a
             href="/"
-            class="mr-4 font-semibold"
+            class="mr-4 font-semibold tracking-tight"
             onClick={(e) => {
               e.preventDefault()
               navigate('/')
@@ -184,7 +183,7 @@ export function App() {
           </a>
           <nav
             aria-label="メイン"
-            class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border bg-white/95 pb-[env(safe-area-inset-bottom)] md:static md:flex md:flex-1 md:gap-1 md:border-0 md:bg-transparent md:pb-0"
+            class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-black/5 bg-background/95 pb-[env(safe-area-inset-bottom)] md:static md:flex md:flex-1 md:gap-1 md:border-0 md:bg-transparent md:pb-0"
           >
             <NavLink to="/" label="タイムライン" icon={<Images />} />
             <NavLink to="/favorites" label="お気に入り" icon={<Star />} />
@@ -197,7 +196,7 @@ export function App() {
           </div>
         </div>
       </header>
-      <main class="mx-auto max-w-screen-2xl px-4 py-4">
+      <main class="mx-auto max-w-screen-2xl px-4 pb-8 pt-2 md:pt-4">
         <UploadList />
         <Page />
       </main>

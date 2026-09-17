@@ -1,7 +1,8 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import type { ComponentChildren } from 'preact'
 import { useRef } from 'preact/hooks'
-import { Button, cn } from './button'
+import { Button, buttonClass, cn } from './button'
+import { Close } from './icons'
 
 // Base UI's generated ids (useId through preact/compat) can repeat between a dialog and one nested in it,
 // which labels the inner dialog with the outer one's text. Each Dialog names its own title and description.
@@ -23,17 +24,19 @@ export function Dialog(props: {
   return (
     <BaseDialog.Root open={props.open} onOpenChange={(open) => props.onOpenChange(open)}>
       <BaseDialog.Portal>
-        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black/50" />
+        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black/40" />
         <BaseDialog.Popup
           finalFocus={props.finalFocus ? () => props.finalFocus?.() ?? true : undefined}
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg bg-white p-5 shadow-xl outline-none',
+            'fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-2xl bg-background p-6 shadow-lg outline-none',
+            // A confirmation opened on top has no backdrop of its own; dim this dialog so the top one stands out.
+            'transition-[filter] data-[nested-dialog-open]:brightness-60',
             props.wide ? 'max-w-5xl' : 'max-w-md',
           )}
         >
-          <div class="mb-4 flex items-start justify-between gap-4">
+          <div class="mb-5 flex items-start justify-between gap-4">
             <div>
-              <BaseDialog.Title id={`${id.current}-title`} className="text-base font-semibold">
+              <BaseDialog.Title id={`${id.current}-title`} className="text-lg font-semibold">
                 {props.title}
               </BaseDialog.Title>
               {props.description && (
@@ -42,8 +45,11 @@ export function Dialog(props: {
                 </BaseDialog.Description>
               )}
             </div>
-            <BaseDialog.Close className="rounded-md px-2 py-1 text-sm hover:bg-muted" aria-label="閉じる">
-              ✕
+            <BaseDialog.Close
+              className={cn(buttonClass('ghost', 'icon'), '-mr-2 -mt-1 shrink-0 text-muted-foreground')}
+              aria-label="閉じる"
+            >
+              <Close class="size-4" />
             </BaseDialog.Close>
           </div>
           {props.children}
@@ -102,7 +108,7 @@ export function ConfirmDialog(props: {
       finalFocus={props.finalFocus}
     >
       <div class="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => props.onOpenChange(false)}>
+        <Button variant="ghost" onClick={() => props.onOpenChange(false)}>
           キャンセル
         </Button>
         <Button variant="destructive" disabled={props.busy} onClick={props.onConfirm}>

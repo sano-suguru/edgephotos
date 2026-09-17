@@ -103,6 +103,10 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 
 常設の回帰は `e2e/keyboard.spec.ts`、`e2e/mobile.spec.ts`、`e2e/viewer.spec.ts`（[development.md](development.md) §7）。iPhone / Android の実機での swipe と safe area は未確認。
 
+## visual の整理（2026-09-17）
+
+機能・情報設計・API は変えず、色・枠・影・ボタンの強弱だけを見直した（token は無彩色にし、塗りのボタンは header のアップロードと各画面の主操作に限る。accent は現在地・focus・進捗に限る）。local（`vite dev`、使い捨ての `EDGEPHOTOS_STATE_DIR`）に合成 JPEG 18 枚と album 2 件を入れ、Playwright で desktop Chromium（1440×900）と WebKit iPhone 13 相当の timeline・album・共有 dialog・確認 dialog・ライブラリ・viewer を変更前後で撮って比べた。共有ページは `vite dev` だと CSP（`style-src 'self'`）が inline style を拒否して CSS が当たらないため、`vite build` + `vite preview` で share API を mock して確認した。入れ子の確認 dialog では外側の dialog を暗くする。`pnpm check` と `pnpm test:e2e`（13 件）が通った。
+
 ## 未検証
 
 iPhone / Android 実機での取り込みは未確認です。desktop の WebKit では代用できません。[roadmap.md](roadmap.md) の Post-merge verification で、次を確認します。
