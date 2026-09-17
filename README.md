@@ -21,7 +21,6 @@ EdgePhotos は、利用者自身の Cloudflare アカウントへデプロイす
 
 - production 環境の作成と deploy（`remote-test` と同じ構成で、手順は [運用](docs/operations.md)）
 - iPhone / Android 実機での取り込み（HEIC → JPEG 変換、mobile Safari の memory、画面ロックや回線切り替えで中断した upload）
-- 最新の修正（[ロードマップ](docs/roadmap.md) の Continuous-use hardening の続き）の remote-test への deploy
 
 EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export` を取ってください。詳細は [ロードマップ](docs/roadmap.md) と [運用](docs/operations.md) 冒頭の検証状況を参照してください。
 
