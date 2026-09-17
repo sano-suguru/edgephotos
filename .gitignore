@@ -8,3 +8,6 @@ dist/
 !.dev.vars.example
 playwright-report/
 test-results/
+
+# Claude Code runtime state
+.claude/scheduled_tasks.lock
