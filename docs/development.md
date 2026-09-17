@@ -29,6 +29,8 @@ src/
     lib/
       api/client.ts        fetch client for /api/v1
       image.ts             SHA-256, EXIF, canvas derivatives
+      task-limit.ts        upload concurrency shared across selections
+      original-limit.ts    original size limit checked before reading a file
     share/main.tsx         share page (no private app code)
     state/router.ts
   worker/

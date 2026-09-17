@@ -62,13 +62,19 @@ export async function buildExport(db: Db, now: Date): Promise<ExportManifest> {
   }
 }
 
-export async function diagnostics(db: Db) {
+// Pending uploads past expires_at can no longer be PUT: they are interrupted uploads, not ones in flight.
+// Nothing cleans them up (docs/roadmap.md); the count only makes the leftovers visible.
+// Purging assets are hidden everywhere, so their ids are listed here to let the owner resume the delete.
+const PURGING_IDS_MAX = 100
+
+export async function diagnostics(db: Db, now: Date) {
   const row = await db.get<
     | {
         assets: number
         trashed: number
         purging: number
         pending_uploads: number
+        expired_uploads: number
         albums: number
         last_export_at: string | null
       }
@@ -79,6 +85,7 @@ export async function diagnostics(db: Db) {
         (SELECT COUNT(*) FROM assets WHERE status = 'ready' AND trashed_at IS NOT NULL) AS trashed,
         (SELECT COUNT(*) FROM assets WHERE status = 'purging') AS purging,
         (SELECT COUNT(*) FROM uploads WHERE status = 'pending') AS pending_uploads,
+        (SELECT COUNT(*) FROM uploads WHERE status = 'pending' AND expires_at < ${now.toISOString()}) AS expired_uploads,
         (SELECT COUNT(*) FROM albums) AS albums,
         (SELECT value FROM settings WHERE key = 'last_export_at') AS last_export_at`,
   )
@@ -86,15 +93,23 @@ export async function diagnostics(db: Db) {
   const migration = await db
     .get<{ name: string } | undefined>(sql`SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1`)
     .catch(() => null)
+  const purging = await db
+    .select({ id: assets.id })
+    .from(assets)
+    .where(eq(assets.status, 'purging'))
+    .orderBy(asc(assets.updated_at), asc(assets.id))
+    .limit(PURGING_IDS_MAX)
   return {
     counts: {
       assets: row?.assets ?? 0,
       trashed: row?.trashed ?? 0,
       purging: row?.purging ?? 0,
       pendingUploads: row?.pending_uploads ?? 0,
+      expiredUploads: row?.expired_uploads ?? 0,
       albums: row?.albums ?? 0,
     },
     lastExportAt: row?.last_export_at ?? null,
     latestMigration: migration?.name ?? null,
+    purgingAssetIds: purging.map((r) => r.id),
   }
 }

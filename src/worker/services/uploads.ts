@@ -1,5 +1,5 @@
 import type { z } from '@hono/zod-openapi'
-import { and, eq, ne } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { UploadReserveSchema } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
@@ -8,7 +8,7 @@ import { toHex } from '../lib/crypto'
 import { INSPECT_HEAD_BYTES, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
 import { assetObjectKeys } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
-import { getAssetRow, sortAtFor } from './assets'
+import { getAssetRow, purgeAsset, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
 
 type ReserveInput = z.infer<typeof UploadReserveSchema>
@@ -22,7 +22,7 @@ function duplicateError(existing: AssetRow) {
 
 // Step 1 of reserve -> presigned PUT -> finalize. The server chooses ids and object keys.
 export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
-  const existing = await getAssetBySha256(ctx.db, input.original.sha256)
+  const existing = await findStoredAsset(ctx, input.original.sha256)
   if (existing) throw duplicateError(existing)
 
   const now = ctx.now()
@@ -139,6 +139,26 @@ function getAssetBySha256(db: Db, sha256: string): Promise<AssetRow | undefined>
   return db.select().from(assets).where(eq(assets.sha256, sha256)).get()
 }
 
+// The asset that already stores these bytes, if any. A `purging` row still holds the SHA-256 after an
+// interrupted permanent delete, but the owner has already deleted that photo and it is hidden everywhere.
+// Finish that delete (it is resumable) instead of calling the bytes a duplicate: otherwise a re-upload is
+// reported as "already stored", or finalize removes the new objects as a duplicate of a deleted photo.
+async function findStoredAsset(ctx: ServiceContext, sha256: string, exceptId?: string) {
+  const existing = await getAssetBySha256(ctx.db, sha256)
+  if (!existing || existing.id === exceptId) return undefined
+  if (existing.status === 'purging') {
+    try {
+      await purgeAsset(ctx, existing.id)
+    } catch (err) {
+      // A concurrent request finished the same delete first (not reproducible in the local test runtime,
+      // which serializes requests).
+      if (!(err instanceof ApiError && err.code === 'ASSET_NOT_FOUND')) throw err
+    }
+    return undefined
+  }
+  return existing
+}
+
 function getUploadRow(db: Db, id: string): Promise<UploadRow | undefined> {
   return db.select().from(uploads).where(eq(uploads.id, id)).get()
 }
@@ -155,11 +175,7 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
 
   await verifyObjects(ctx, upload)
 
-  const existing = await ctx.db
-    .select()
-    .from(assets)
-    .where(and(eq(assets.sha256, upload.sha256), ne(assets.id, upload.asset_id)))
-    .get()
+  const existing = await findStoredAsset(ctx, upload.sha256, upload.asset_id)
   if (existing) return markDuplicate(ctx, upload, existing)
 
   const now = ctx.now()
@@ -194,7 +210,7 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
     if (!isUniqueViolation(err)) throw err
     // A concurrent upload of the same bytes won the race.
     const winner = await getAssetBySha256(ctx.db, upload.sha256)
-    if (!winner) throw err
+    if (winner?.status !== 'ready') throw err
     return markDuplicate(ctx, upload, winner)
   }
 

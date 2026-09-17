@@ -512,17 +512,20 @@ export function createApp(options: AppOptions) {
               trashed: z.number(),
               purging: z.number(),
               pendingUploads: z.number(),
+              expiredUploads: z.number(),
               albums: z.number(),
             }),
             lastExportAt: z.string().nullable(),
             latestMigration: z.string().nullable(),
+            // Permanent deletes that did not finish (oldest first, at most 100). DELETE each to resume.
+            purgingAssetIds: z.array(IdSchema),
           }),
           'Non-sensitive library diagnostics',
         ),
         ...errorResponses,
       },
     }),
-    async (c) => c.json(await diagnostics(svc(c).db), 200),
+    async (c) => c.json(await diagnostics(svc(c).db, now()), 200),
   )
 
   // OpenAPI document (private).

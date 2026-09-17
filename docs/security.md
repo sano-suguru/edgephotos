@@ -121,7 +121,7 @@ X-Robots-Tag: noindex, nofollow, noarchive
 
 CSP は `self` を基準にし、third-party analytics、外部 font、不要な script を share page へ追加しません。
 
-private write API は GET で状態変更しません。Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま信用しません。
+private write API は GET で状態変更しません。例外は `GET /api/v1/export` で、最終 export 日時（`settings.last_export_at`）だけを記録します。写真・album・share には触れません。Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま信用しません。
 
 - `Origin` がある書き込み request は、`APP_ORIGIN` と完全一致しなければ `403 ORIGIN_NOT_ALLOWED` とします。
 - `Origin` がなく `Sec-Fetch-Site` が `same-origin` / `none` 以外の場合も拒否します。
@@ -176,6 +176,7 @@ D1 に参照がない R2 object を即座に「ゴミ」と判定しません。
 - upload finalize 再送で重複 asset が生じない。
 - 申告 SHA-256 と一致しない original を保存しない・`ready` にしない。
 - D1 障害時に upload を成功扱いしない。
+- 完全削除が途中で止まった asset を、同じ写真の再 upload で「重複」と扱わない（reserve で登録済みと報告しない、finalize で新しい object を消さない）。
 
 上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Chromium と WebKit で確認しています。WebKit の encoder が付ける APP1 / APP13（撮影 metadata は含まない）は、Client が PUT 前に取り除きます。自動テストの対象は、その除去処理と Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）です。server 側の保証は変わりません（[D-020](decisions.md)）。
 

@@ -89,8 +89,10 @@ export const api = {
 
   exportManifest: () => request<ExportManifest>('GET', '/api/v1/export'),
   diagnostics: () =>
-    request<{ counts: Record<string, number>; lastExportAt: string | null; latestMigration: string | null }>(
-      'GET',
-      '/api/v1/diagnostics',
-    ),
+    request<{
+      counts: Record<string, number>
+      lastExportAt: string | null
+      latestMigration: string | null
+      purgingAssetIds: string[]
+    }>('GET', '/api/v1/diagnostics'),
 }

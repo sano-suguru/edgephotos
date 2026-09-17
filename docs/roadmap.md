@@ -2,7 +2,7 @@
 
 この文書は、v1 を完成させるための実装順序と各段階の到達点だけを管理します。
 
-状態の凡例: ✅ 実装・自動テスト済み / 🟡 実装済みだが一部未検証 / ⬜ 未着手（2026-09-16 時点）設計の理由は [decisions.md](decisions.md)、不変条件は [architecture.md](architecture.md) と [security.md](security.md) を参照してください。
+状態の凡例: ✅ 実装・自動テスト済み / 🟡 実装済みだが一部未検証 / ⬜ 未着手（2026-09-17 時点）設計の理由は [decisions.md](decisions.md)、不変条件は [architecture.md](architecture.md) と [security.md](security.md) を参照してください。
 
 ## Foundation
 
@@ -97,11 +97,23 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 
 v1 の完成条件には含めませんが、後から迷わないよう記録します。
 
-**失敗した upload の行が残り続ける。** `reserve` 済みで finalize されなかった `uploads` row は削除されません。`expires_at` は書き込まれますが現状どこからも読まれず、期限切れ row を掃除する経路もありません。R2 object が残る場合も同様です。
+**失敗した upload の行が残り続ける。** `reserve` 済みで finalize されなかった `uploads` row は削除されません。期限切れ row を掃除する経路はありません。R2 object が残る場合も同様です。`expires_at` を過ぎた件数だけは diagnostics（ライブラリ画面と `pnpm diagnose`）で分かります。R2 に残った object の量は、D1 から分からないため数えていません。
 
-これはデータの汚れであって、認証やデータ整合性の問題ではありません。`finalizeUpload()` は R2 に object が実在することを確認してから `ready` にするため、期限切れ reserve を後から finalize しようとしても presigned URL が R2 側で失効しており PUT が通りません。
+写真のデータ整合性は壊れません。finalize されていない upload は asset にならず、timeline・album・share・export のどれにも出ないためです。`finalizeUpload()` は R2 に object が実在することを確認してから `ready` にします。期限内に PUT が済んでいれば、期限後の finalize も成立します（background に回した tab の復帰を拒否しないため、finalize は期限を見ません）。PUT が済んでいない reserve は、presigned URL が失効しているため後から完了できません。
 
-自動 cleanup を始めると Cron / Queues へスコープが広がるため、要求か測定結果が出るまで着手しません（[AGENTS.md](../AGENTS.md) §6）。
+ただし、運用には影響します。残骸が増えるほど、次の問題が大きくなります。
+
+- R2 の保存料金が増える
+- R2 の使用量と backup の大きさが一致しなくなる
+- diagnostics の WARN が常に出て、新しい異常に気付きにくくなる
+- 後で cleanup するときに、消してよい object の判定が難しくなる
+
+同じ写真の upload を同時に finalize した場合、重複になった側の object も残ることがあります。D1 に重複と記録したあと best effort で削除するだけで、削除の失敗は再試行しないためです（[D-014](decisions.md)）。
+
+現時点では、残骸がどの程度発生するかを測れておらず、自動 cleanup の要求も出ていません。そのため diagnostics で件数を観測するだけに留めています（[AGENTS.md](../AGENTS.md) §6）。実利用で残骸が増え続け、運用上の問題になった場合は、Cron / Queues なども候補に含めて最小の cleanup 方法を選びます。判断の目安は次の 2 つです。
+
+- `library: interrupted uploads` の件数が増え続ける
+- Cloudflare Dashboard の R2 使用量が、export manifest の `originalSize` の合計を大きく上回る。manifest には thumbnail / preview の size が無いので、その分の差は正常
 
 **WebP の EXIF は読まない。** `exifr` は WebP の EXIF を解析しないため、WebP の `takenAt` は常に `null` です。WebP の EXIF orientation は、WebKit では適用され、Chromium では適用されません。そのため同じ WebP でも、Browser によって width / height と derivative の向きが変わります。カメラが WebP を出力することはまれなので、v1 では扱いません。
 
@@ -115,6 +127,16 @@ private alpha を継続利用に近づけるための段階です。新しい構
 - ✅ read-only の設定診断 `pnpm diagnose`（[operations.md](operations.md) §7）。production 用の top-level 設定が secret と衝突する形だったのを修正
 - ✅ 1,000 / 10,000 件の scale 測定（[benchmarks.md](benchmarks.md)）
 - ✅ Actions の SHA 固定、Dependabot、release / rollback / credential 更新 / 復旧 drill の手順（operations.md §8、§13、§14）
+
+続き（2026-09-17、local で確認したあと remote-test へ deploy して確認。iPhone / Android 実機は未確認。確認方法は operations.md 冒頭）:
+
+- ✅ 完全削除が途中で止まった写真を選び直すと「登録済み」と表示され、実際には登録されない不具合を修正。止まる前に reserve していた upload の finalize が、新しい object を重複として消す不具合も同じ原因（[D-014](decisions.md)）
+- ✅ 止まった完全削除を、ライブラリ画面から再開できるようにした（以前は対象が画面に出ず、再開できなかった）
+- ✅ 期限切れの未完了 upload を、進行中のものと分けて数える（ライブラリ画面、`pnpm diagnose` の WARN）
+- ✅ 取り込み中に写真を選び直すと、同時に decode する枚数が 2 を超えていた不具合を修正（[D-020](decisions.md)）
+- ✅ 100MB を超えるファイルは、読み込む前に専用の文言で拒否する（以前は全体を memory に読み、decode してから `VALIDATION_FAILED` で失敗していた）
+- ✅ 撮影日時の offset が無い場合の扱いを明文化（architecture.md §6）
+- ✅ `pnpm diagnose` が `APP_ORIGIN` と実際の URL の不一致を検出する（状態を変えない probe。operations.md §7）
 
 ## Release polish
 

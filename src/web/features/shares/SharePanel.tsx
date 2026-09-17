@@ -127,7 +127,8 @@ export function SharePanel({ albumId }: { albumId: string }) {
         ))}
       </ul>
       <p class="text-xs text-muted-foreground">
-        無効化すると以後のアクセスは拒否されますが、すでに閲覧・保存された画像を取り消すことはできません。
+        無効化すると以後のアクセスは拒否されます。ただし、開いているページに発行済みの画像 URL は最長 5
+        分間有効なままで、すでに閲覧・保存された画像を取り消すこともできません。
       </p>
     </div>
   )

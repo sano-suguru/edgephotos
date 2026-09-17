@@ -2,7 +2,7 @@
 
 この文書は、EdgePhotos v1 のセットアップ、更新、backup / restore、uninstall の運用契約を定義します。
 
-> **検証状況（2026-09-16）:**
+> **検証状況（2026-09-16〜17。各項目の日付が優先）:**
 > - local（Miniflare / `vite dev` / `vite preview`）: migration 適用、fail-closed、upload → timeline → album → share → revoke、export / restore / verify を確認済み。
 > - remote-test 環境: D1・R2 の作成、remote D1 migration、`CLOUDFLARE_ENV=remote-test` での build と deploy、未設定 Worker が private / share API を `503` で拒否すること、共有ページの header / CSP、`/share/assets/*` の配信を確認済み。
 > - Access 境界: private path（`/`、`/api/v1/*`）が Access login へ 302、`/share`・`/share/{shareId}`・`/share/api/v1/*`・`/share/assets/*` が Access を通過して Worker に到達することを確認済み。
@@ -27,6 +27,15 @@
 >   - memory（Browser のプロセスツリーの RSS。50ms ごとに採取し、1 枚処理中の増分を記録）: 12MP で約 45〜110MB、48MP / 50MP で約 190〜340MB、108MP で約 440〜840MB、200MP で約 0.9〜1.1GB。decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の ArrayBuffer（最大 23MB）は小さい。200 件の連続 upload（計 920MB、48MP / 50MP を 6 件含む）で RSS は単調増加せず、peak は Chromium 約 1.1GB、WebKit 約 0.9GB（WebContent 単体では約 0.6GB）だった。前処理の並列数 1 / 2 / 3 で 48MP を 6 件処理すると、Chromium の増分は 420 / 682 / 975MB、所要時間は 2.0 / 1.6 / 1.5 秒。WebKit は 527 / 481 / 522MB、所要時間はいずれも約 2.3 秒だった。
 >   - Browser の制約で試せなかったこと: WebKit では Playwright で横取りした PUT の Blob 本文が失われるため、再試行の再現は Chromium だけで行った（再試行のコードは engine に依存しない）。
 > - 実 R2 の `412`（2026-09-17、remote-test、Browser の `fetch()` から CORS 越し、canvas で作った合成 JPEG）: 同じ presigned PUT URL へ 2 回目の PUT を送ると、original・thumbnail とも `412` が返り、`res.status` として読めた（network error にはならない）。そのあとの finalize は `200 created` で、再試行で `412` を受けた upload がそのまま ready になれることを確認した。確認に使った asset は trash へ移動済み。
+> - 2026-09-17 の continuous-use 修正（完全削除が止まった写真の再 upload、止まった削除の再開、期限切れ upload の件数、取り込みの並列数、100MB 超の事前拒否、`APP_ORIGIN` の診断）: まず local で確認した。server 側は workerd の自動テスト、並列数は unit test。ライブラリ画面の表示と「削除を再開」、100MB 超の拒否は、Playwright の Chromium で一度だけ確認した（spec は commit していない）。`worker: APP_ORIGIN` は local の `vite dev` に対して CLI を実行し、`localhost` で PASS、`127.0.0.1` で FAIL になることを確認した。同日に remote-test へ deploy して確認した（下の項目）。
+> - continuous-use 修正の remote-test 確認（2026-09-17、owner token 付きの Node script と Browser。写真は marker だけの合成 JPEG で、Worker は decode しない）: `pnpm diagnose` は FAIL なし。`worker: APP_ORIGIN` が PASS、`library: interrupted uploads` が WARN（以前の検証で残った期限切れ 2 件。600 秒待つ新しい中断は作っていない）。止まった削除は、trash 済みのテスト asset を D1 で直接 `purging` にして作った（`UPDATE assets SET status='purging' WHERE id=<テスト asset> AND trashed_at IS NOT NULL`。R2 の削除失敗は remote では起こせないため）。確認できたこと:
+>   - `library: unfinished deletes` の WARN、ライブラリ画面の表示、「削除を再開」で削除処理中が 0 になること
+>   - 止まった削除と同じ写真の reserve が `409` ではなく `201` を返し、古い asset の R2 object と D1 row が消えること。続く finalize は `200 created`
+>   - 削除前に reserve・PUT 済みだった upload の finalize が `200 created` を返し、その original を owner 用 URL から読み戻せること（新しい object を重複として消さない）
+>   - 誤った `Origin` の album 作成が `403 ORIGIN_NOT_ALLOWED`、正しい `Origin` では `400 VALIDATION_FAILED` になり、album 数が変わらないこと
+>   - 実 D1 での並行実行（各 3 回）: 同じ `purging` asset に `DELETE` 2 本と同じ写真の reserve を同時に送ると、`DELETE` は 204/204 または 204/404（`ASSET_NOT_FOUND`）、reserve はすべて `201`。同じ写真の pending upload 2 件を、`purging` の asset の `DELETE` と同時に finalize すると、どの回も片方が `created`、片方が同じ asset への `duplicate` になり、再送しても同じ結果だった。UNIQUE 競合の fallback を通ったかどうかは外から区別できない。「競合の勝者が `purging`」の分岐は再現していない（コードの確認のみ）
+>   - 上の 204/404 のように別の request が先に削除を終えると、「削除を再開」はその 404 で止まっていた。そのあと、404 の ID は飛ばして残りを続けるよう修正した（unit test で確認。この修正は remote-test に deploy していない）
+>   - テスト asset はすべて完全削除し、件数は検証前（写真 21、ゴミ箱 2、削除処理中 0、未完了 upload 2、album 1）に戻した。D1 に今回の upload 行は残っていない
 > - **未検証:** iPhone / Android 実機での取り込み。具体的には、iOS Safari の memory 上限（jetsam）と 48MP 以上の decode、iOS 写真ピッカーの HEIC → JPEG 変換と位置情報の扱い、画面ロックやアプリ切り替えで中断した PUT の再開、presigned URL の期限（600 秒）を越える中断。
 >
 > restore の検証に使った `edgephotos-restore-test` は drill 用の一時環境で、検証後に Worker・D1・R2 bucket・Access application・R2 API token をすべて削除しました。`wrangler.jsonc` には今後維持する環境だけを残します。再度 drill を行う場合は §2 と §4 の手順で作り直します。
@@ -186,8 +195,11 @@ production は `--env` を付けません。確認する内容と、失敗時に
 | `access: private path` | 匿名 request が Access login へ redirect されない（Access application の hostname） |
 | `access: share bypass + worker config` | `/share` の Bypass application。`503` なら secret の欠落か形式違い（`ACCESS_TEAM_DOMAIN` は host のみ、`R2_ACCOUNT_ID` は 32 桁 hex） |
 | `owner API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `OWNER_EMAIL` |
+| `worker: APP_ORIGIN` | `APP_ORIGIN` が `EDGEPHOTOS_URL` の origin と一致しない（scheme、host、custom domain 追加後の更新漏れ）。不一致だと Browser からの書き込みが `403 ORIGIN_NOT_ALLOWED` になり、共有リンクも別の origin を指す。確認には中身が空の album 作成を送る。Worker は body を検証する前に Origin を検査するため、どちらの場合も何も作られない |
 | `worker: D1 schema` | Worker が見ている D1 の最新 migration と checkout の不一致（別 DB を bind している、migration 未適用） |
 | `r2: presigned GET` | Worker が署名した URL を R2 が拒否（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`）。library が空なら SKIP |
+| `library: interrupted uploads`（WARN） | finalize されないまま期限（600 秒）を過ぎた upload がある。設定の誤りではない。写真が timeline に無ければ選び直す。R2 object は自動では消えない（roadmap の既知の制約） |
+| `library: unfinished deletes`（WARN） | 完全削除が途中で止まった写真がある。ライブラリ画面の「削除を再開」で完了させる |
 
 Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠落・不正な設定の**名前**が `{"problem":"misconfigured","settings":[...]}` として出ます（値は出しません）。
 
@@ -198,7 +210,7 @@ Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠�
 
 設定不足時に写真機能を匿名公開する fallback はありません。設定が欠けていれば `503 SERVER_MISCONFIGURED` です。
 
-remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload` が FAIL になることも確認した。
+remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS（`worker: APP_ORIGIN` と `library: *` を足す前の check 構成）。追加後の構成でも FAIL なし（`worker: APP_ORIGIN` は PASS、`library: interrupted uploads` は既存の期限切れ 2 件で WARN）。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload` が FAIL になることも確認した。
 
 ## 8. Update（release と migration）
 
@@ -302,14 +314,14 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 利用者自身の Cloudflare Dashboard（Workers Logs）と、アプリ内の非機密 diagnostics（`GET /api/v1/diagnostics`、ライブラリ画面）を使います。
 
 - asset / trash / album 件数
-- 未完了 upload（`pending`）件数
-- 削除処理中（`purging`）件数
+- 未完了 upload（`pending`）件数と、そのうち期限切れ（`expires_at` を過ぎた = 中断した）件数
+- 削除処理中（`purging`）件数と、その asset ID（ライブラリ画面の「削除を再開」で完了できる）
 - 最終 export 日時
 - 適用済み migration
 
 Worker のエラーログは request ID・route・例外名だけを出し、header・token・URL・body を出しません。
 
-未完了 upload の R2 object は自動削除しません（Cron を置かない方針）。件数は diagnostics で確認できます。
+未完了 upload の R2 object は、現時点では自動削除しません（必要性が観測されるまで cleanup を入れない。roadmap の既知の制約）。件数は diagnostics で確認できます。期限切れの件数が増え続ける場合は、取り込み中の画面ロックや回線断が多いことを疑います（roadmap の Post-merge verification）。
 
 ## 13. R2 credential の更新と漏洩対応
 

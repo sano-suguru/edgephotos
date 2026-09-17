@@ -136,6 +136,7 @@ async function main() {
         blob: (url, init) => fetch(url, { ...init, redirect: 'error' }),
         token,
         latestLocalMigration: local.at(-1),
+        origin: new URL(baseUrl).origin,
       })),
     )
   } else if (!offline) {

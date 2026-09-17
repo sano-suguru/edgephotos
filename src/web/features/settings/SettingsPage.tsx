@@ -1,12 +1,14 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
 import { Button } from '../../components/ui/button'
 import { api } from '../../lib/api/client'
+import { resumePurges } from './resume-purges'
 
 type Diagnostics = Awaited<ReturnType<typeof api.diagnostics>>
 
 export function SettingsPage() {
   const diag = useSignal<Diagnostics | null>(null)
   const error = useSignal<string | null>(null)
+  const resuming = useSignal(false)
 
   const load = () =>
     api
@@ -34,6 +36,19 @@ export function SettingsPage() {
     await load()
   }
 
+  async function resume(ids: string[]) {
+    resuming.value = true
+    error.value = null
+    try {
+      await resumePurges(ids, api.purge)
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : String(err)
+    } finally {
+      resuming.value = false
+      await load()
+    }
+  }
+
   return (
     <section class="max-w-2xl space-y-6">
       <h1 class="text-xl font-semibold">ライブラリ</h1>
@@ -47,7 +62,10 @@ export function SettingsPage() {
           <dt class="text-muted-foreground">アルバム</dt>
           <dd>{diag.value.counts.albums}</dd>
           <dt class="text-muted-foreground">未完了のアップロード</dt>
-          <dd>{diag.value.counts.pendingUploads}</dd>
+          <dd>
+            {diag.value.counts.pendingUploads}
+            {diag.value.counts.expiredUploads > 0 && `（うち期限切れ ${diag.value.counts.expiredUploads}）`}
+          </dd>
           <dt class="text-muted-foreground">削除処理中</dt>
           <dd>{diag.value.counts.purging}</dd>
           <dt class="text-muted-foreground">最終 export</dt>
@@ -55,6 +73,26 @@ export function SettingsPage() {
           <dt class="text-muted-foreground">Migration</dt>
           <dd>{diag.value.latestMigration ?? '—'}</dd>
         </dl>
+      )}
+      {diag.value && diag.value.counts.expiredUploads > 0 && (
+        <p class="text-sm text-muted-foreground">
+          期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。写真がタイムラインに無ければ、もう一度選んでアップロードしてください。
+        </p>
+      )}
+      {diag.value && diag.value.purgingAssetIds.length > 0 && (
+        <div class="space-y-2 rounded-lg border border-border bg-white p-4 text-sm">
+          <h2 class="font-medium">中断した完全削除</h2>
+          <p class="text-muted-foreground">
+            {`完全削除が途中で止まった写真が ${diag.value.counts.purging} 枚あります。どの画面にも表示されず、元に戻せません。削除を最後まで実行します。${diag.value.purgingAssetIds.length < diag.value.counts.purging ? `1 回に処理するのは古い順に ${diag.value.purgingAssetIds.length} 枚までです。残りは、終わったあとにもう一度押してください。` : ''}`}
+          </p>
+          <Button
+            variant="destructive"
+            disabled={resuming.value}
+            onClick={() => resume(diag.value?.purgingAssetIds ?? [])}
+          >
+            削除を再開
+          </Button>
+        </div>
       )}
       <div class="space-y-2 rounded-lg border border-border bg-white p-4 text-sm">
         <h2 class="font-medium">Export</h2>

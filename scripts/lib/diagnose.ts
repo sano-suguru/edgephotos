@@ -126,6 +126,27 @@ async function errorCode(res: Response): Promise<string> {
   return body?.error?.code ?? `HTTP ${res.status}`
 }
 
+// The Worker compares Origin with APP_ORIGIN before it validates the body, so an empty album creation is
+// refused either way and changes nothing: 400 means the origin is APP_ORIGIN, 403 ORIGIN_NOT_ALLOWED means not.
+async function checkAppOrigin(api: Fetch, auth: Record<string, string>, origin: string): Promise<Check> {
+  const name = 'worker: APP_ORIGIN'
+  const res = await api('/api/v1/albums', {
+    method: 'POST',
+    headers: { ...auth, origin, 'content-type': 'application/json' },
+    body: '{}',
+  })
+  const code = await errorCode(res)
+  if (res.status === 400 && code === 'VALIDATION_FAILED') return check(name, 'pass', `matches ${origin}`)
+  if (res.status === 403 && code === 'ORIGIN_NOT_ALLOWED') {
+    return check(
+      name,
+      'fail',
+      `is not ${origin}: the browser cannot save changes and share links point to another origin (set it to exactly ${origin})`,
+    )
+  }
+  return check(name, 'warn', `origin probe got ${res.status} ${code}`)
+}
+
 const PROBE_SHARE_ID = 'diagnoseProbe'.padEnd(22, '0')
 const PROBE_SECRET = 'diagnoseProbe'.padEnd(43, '0')
 
@@ -136,8 +157,10 @@ export async function checkDeployment(opts: {
   blob: Fetch
   token?: string
   latestLocalMigration?: string
+  // The origin the owner opens in the browser (EDGEPHOTOS_URL). Compared with APP_ORIGIN by the Worker.
+  origin?: string
 }): Promise<Check[]> {
-  const { api, blob, token, latestLocalMigration } = opts
+  const { api, blob, token, latestLocalMigration, origin } = opts
   const results: Check[] = []
 
   const anonymous = await api('/api/v1/me')
@@ -218,6 +241,8 @@ export async function checkDeployment(opts: {
   }
   results.push(check('owner API', 'pass', 'owner token accepted (ACCESS_AUD, ACCESS_TEAM_DOMAIN, OWNER_EMAIL)'))
 
+  if (origin) results.push(await checkAppOrigin(api, auth, origin))
+
   const diag = (await (await api('/api/v1/diagnostics', { headers: auth })).json()) as {
     counts: Record<string, number>
     latestMigration: string | null
@@ -235,10 +260,23 @@ export async function checkDeployment(opts: {
       ),
     )
   }
-  // Unfinished reservations are expected and never cleaned up (docs/roadmap.md, known limitations).
+  // Interrupted uploads are never cleaned up (docs/roadmap.md, known limitations); they are only reported.
+  if (diag.counts.expiredUploads > 0) {
+    results.push(
+      check(
+        'library: interrupted uploads',
+        'warn',
+        `${diag.counts.expiredUploads} uploads expired before finalize (not in the library; their R2 objects, if any, remain)`,
+      ),
+    )
+  }
   if (diag.counts.purging > 0) {
     results.push(
-      check('library', 'warn', `${diag.counts.purging} permanent deletes did not finish; delete them again to resume`),
+      check(
+        'library: unfinished deletes',
+        'warn',
+        `${diag.counts.purging} permanent deletes did not finish; resume them from the Library page`,
+      ),
     )
   }
 
