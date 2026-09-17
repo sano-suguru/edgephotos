@@ -105,7 +105,11 @@ describe('setup diagnostics', () => {
       if (!owner) return redirect()
       if (path === '/api/v1/me') return Response.json({ email: 'o@example.test' })
       if (path === '/api/v1/diagnostics') {
-        return Response.json({ counts: { pendingUploads: 3, purging: 0 }, latestMigration: '0001_initial.sql' })
+        // Pending uploads that have not expired are in flight and not worth a warning.
+        return Response.json({
+          counts: { pendingUploads: 3, expiredUploads: 0, purging: 0 },
+          latestMigration: '0001_initial.sql',
+        })
       }
       return Response.json({ items: [{ thumbnailUrl: 'https://r2.example/t' }] })
     }
@@ -118,11 +122,24 @@ describe('setup diagnostics', () => {
     })
     expect(status(checks, 'owner API')).toBe('pass')
     expect(status(checks, 'worker: D1 schema')).toBe('fail')
-    expect(status(checks, 'library')).toBeUndefined()
+    expect(status(checks, 'library: interrupted uploads')).toBeUndefined()
+    expect(status(checks, 'library: unfinished deletes')).toBeUndefined()
     const r2 = checks.find((c) => c.name === 'r2: presigned GET')
     expect(r2?.status).toBe('fail')
     expect(r2?.detail).toContain('SignatureDoesNotMatch')
     expect(r2?.detail).not.toContain('r2.example')
+
+    const leftovers: Fetch = async (path, init) =>
+      path === '/api/v1/diagnostics'
+        ? Response.json({
+            counts: { pendingUploads: 3, expiredUploads: 2, purging: 1 },
+            latestMigration: '0001_initial.sql',
+          })
+        : base(path, init)
+    const warned = await checkDeployment({ api: leftovers, blob: denied, token: 'token' })
+    expect(status(warned, 'library: interrupted uploads')).toBe('warn')
+    expect(warned.find((c) => c.name === 'library: interrupted uploads')?.detail).toMatch(/^2 /)
+    expect(status(warned, 'library: unfinished deletes')).toBe('warn')
 
     const notOwner: Fetch = async (path, init) =>
       path === '/api/v1/me' && new Headers(init?.headers).has('cf-access-token')

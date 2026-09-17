@@ -1,6 +1,18 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { call, callJson, makeApp, uploadPhoto } from '../helpers'
+import type { UploadFinalizeResult, UploadReservation } from '../../src/contracts/schemas'
+import {
+  assetIdFromTarget,
+  call,
+  callJson,
+  clock,
+  makeApp,
+  type PhotoFixture,
+  photo,
+  putObject,
+  reserve,
+  uploadPhoto,
+} from '../helpers'
 
 // These tests share one D1 per file, so each test works on the assets it created.
 
@@ -181,6 +193,37 @@ describe('albums', () => {
   })
 })
 
+// R2 binding whose delete() throws while `fail` is set.
+function failingDeletes() {
+  const state = {
+    fail: false,
+    bucket: new Proxy(env.BUCKET, {
+      get(target, prop, receiver) {
+        if (prop === 'delete' && state.fail) {
+          return async () => {
+            throw new Error('simulated R2 outage')
+          }
+        }
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }),
+  }
+  return state
+}
+
+// A trashed asset whose permanent delete failed in R2, leaving a hidden `purging` row.
+async function interruptedPurge() {
+  const r2 = failingDeletes()
+  const app = await makeApp({ env: { BUCKET: r2.bucket } })
+  const fixture = await photo()
+  const oldId = (await uploadPhoto(app, fixture)).result.asset.id
+  await callJson(app, 'POST', `/api/v1/assets/${oldId}/trash`, { expect: 200 })
+  r2.fail = true
+  expect((await call(app, 'DELETE', `/api/v1/assets/${oldId}`)).status).toBe(500)
+  return { app, fixture, oldId, recover: () => (r2.fail = false) }
+}
+
 describe('trash, restore and permanent delete', () => {
   it('moves to trash (hidden from timeline and albums) and restores', async () => {
     const app = await makeApp()
@@ -261,6 +304,71 @@ describe('trash, restore and permanent delete', () => {
     expect(await env.DB.prepare('SELECT id FROM assets WHERE id = ?').bind(id).first()).toBeNull()
   })
 
+  // An interrupted purge leaves a hidden `purging` row that still holds the SHA-256. Re-uploading the same
+  // photo must not be reported as "already stored", and must not delete the new bytes as a duplicate.
+  describe('re-upload while a purge is unfinished', () => {
+    async function putAll(app: Awaited<ReturnType<typeof makeApp>>, r: UploadReservation, p: PhotoFixture) {
+      for (const v of ['original', 'thumbnail', 'preview'] as const) {
+        expect((await putObject(app, r.targets[v], p[v])).ok).toBe(true)
+      }
+    }
+
+    it('finishes the purge at reserve and stores the photo again', async () => {
+      const { app, fixture, oldId, recover } = await interruptedPurge()
+      recover()
+      const { result } = await uploadPhoto(app, fixture)
+      expect(result.result).toBe('created')
+      expect(result.asset.id).not.toBe(oldId)
+      expect(await env.DB.prepare('SELECT id FROM assets WHERE id = ?').bind(oldId).first()).toBeNull()
+      expect(await env.BUCKET.head(`originals/${oldId}`)).toBeNull()
+      expect(await env.BUCKET.head(`originals/${result.asset.id}`)).not.toBeNull()
+    })
+
+    it('does not report a duplicate while the purge still cannot finish', async () => {
+      const { app, fixture } = await interruptedPurge()
+      const res = await call(app, 'POST', '/api/v1/uploads', {
+        body: {
+          original: { size: fixture.original.byteLength, contentType: 'image/jpeg', sha256: fixture.sha256 },
+          thumbnail: { size: fixture.thumbnail.byteLength },
+          preview: { size: fixture.preview.byteLength },
+        },
+      })
+      expect(res.status).toBe(500)
+    })
+
+    it('keeps the new bytes when a reservation made before the purge is finalized', async () => {
+      const r2 = failingDeletes()
+      const app = await makeApp({ env: { BUCKET: r2.bucket } })
+      const fixture = await photo()
+      const first = await reserve(app, fixture)
+      const second = await reserve(app, fixture)
+      await putAll(app, first, fixture)
+      await putAll(app, second, fixture)
+      const oldId = (
+        await callJson<UploadFinalizeResult>(app, 'POST', `/api/v1/uploads/${first.upload.id}/finalize`, {
+          expect: 200,
+        })
+      ).asset.id
+      await callJson(app, 'POST', `/api/v1/assets/${oldId}/trash`, { expect: 200 })
+      r2.fail = true
+      expect((await call(app, 'DELETE', `/api/v1/assets/${oldId}`)).status).toBe(500)
+
+      // While R2 is still failing, finalize fails and leaves everything retryable.
+      expect((await call(app, 'POST', `/api/v1/uploads/${second.upload.id}/finalize`)).status).toBe(500)
+      const secondAssetId = assetIdFromTarget(second.targets.original.url).replace('originals/', '')
+      expect(await env.BUCKET.head(`originals/${secondAssetId}`)).not.toBeNull()
+
+      r2.fail = false
+      const done = await callJson<UploadFinalizeResult>(app, 'POST', `/api/v1/uploads/${second.upload.id}/finalize`, {
+        expect: 200,
+      })
+      expect(done.result).toBe('created')
+      expect(done.asset.id).toBe(secondAssetId)
+      expect(await env.BUCKET.head(`originals/${secondAssetId}`)).not.toBeNull()
+      expect(await env.DB.prepare('SELECT id FROM assets WHERE id = ?').bind(oldId).first()).toBeNull()
+    })
+  })
+
   it('reports diagnostics without sensitive data', async () => {
     const app = await makeApp()
     const diag = await callJson(app, 'GET', '/api/v1/diagnostics', { expect: 200 })
@@ -268,6 +376,42 @@ describe('trash, restore and permanent delete', () => {
     const latest = env.TEST_MIGRATIONS.at(-1)?.name
     expect(latest).toMatch(/^\d{4}_.+\.sql$/)
     expect(diag.latestMigration).toBe(latest)
-    expect(Object.keys(diag.counts).sort()).toEqual(['albums', 'assets', 'pendingUploads', 'purging', 'trashed'])
+    expect(Object.keys(diag.counts).sort()).toEqual([
+      'albums',
+      'assets',
+      'expiredUploads',
+      'pendingUploads',
+      'purging',
+      'trashed',
+    ])
+    expect(diag.purgingAssetIds).toEqual(expect.any(Array))
+  })
+
+  it('tells interrupted uploads apart from ones still in flight', async () => {
+    // Later than every row other tests created, so their pending uploads are already expired here.
+    const time = clock(Date.now() + 86_400_000)
+    const app = await makeApp({ clock: time })
+    const before = (await callJson(app, 'GET', '/api/v1/diagnostics', { expect: 200 })).counts
+    await reserve(app, await photo())
+    const inFlight = (await callJson(app, 'GET', '/api/v1/diagnostics', { expect: 200 })).counts
+    expect(inFlight.pendingUploads).toBe(before.pendingUploads + 1)
+    expect(inFlight.expiredUploads).toBe(before.expiredUploads)
+    time.advance(601_000)
+    const later = (await callJson(app, 'GET', '/api/v1/diagnostics', { expect: 200 })).counts
+    expect(later.expiredUploads).toBe(before.expiredUploads + 1)
+    expect(later.pendingUploads).toBe(inFlight.pendingUploads)
+  })
+
+  it('lists unfinished permanent deletes so they can be resumed', async () => {
+    const { app, oldId, recover } = await interruptedPurge()
+    const diag = await callJson(app, 'GET', '/api/v1/diagnostics', { expect: 200 })
+    expect(diag.purgingAssetIds).toContain(oldId)
+    recover()
+    for (const id of diag.purgingAssetIds) {
+      expect((await call(app, 'DELETE', `/api/v1/assets/${id}`)).status).toBe(204)
+    }
+    const after = await callJson(app, 'GET', '/api/v1/diagnostics', { expect: 200 })
+    expect(after.purgingAssetIds).toEqual([])
+    expect(after.counts.purging).toBe(0)
   })
 })

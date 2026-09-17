@@ -235,10 +235,23 @@ export async function checkDeployment(opts: {
       ),
     )
   }
-  // Unfinished reservations are expected and never cleaned up (docs/roadmap.md, known limitations).
+  // Interrupted uploads are never cleaned up (docs/roadmap.md, known limitations); they are only reported.
+  if (diag.counts.expiredUploads > 0) {
+    results.push(
+      check(
+        'library: interrupted uploads',
+        'warn',
+        `${diag.counts.expiredUploads} uploads expired before finalize (not in the library; their R2 objects, if any, remain)`,
+      ),
+    )
+  }
   if (diag.counts.purging > 0) {
     results.push(
-      check('library', 'warn', `${diag.counts.purging} permanent deletes did not finish; delete them again to resume`),
+      check(
+        'library: unfinished deletes',
+        'warn',
+        `${diag.counts.purging} permanent deletes did not finish; resume them from the Library page`,
+      ),
     )
   }
 
