@@ -116,7 +116,7 @@ private alpha を継続利用に近づけるための段階です。新しい構
 - ✅ 1,000 / 10,000 件の scale 測定（[benchmarks.md](benchmarks.md)）
 - ✅ Actions の SHA 固定、Dependabot、release / rollback / credential 更新 / 復旧 drill の手順（operations.md §8、§13、§14）
 
-続き（2026-09-17、local の自動テストで確認。remote-test には未 deploy）:
+続き（2026-09-17、local だけで確認。remote-test には未 deploy。確認方法は operations.md 冒頭）:
 
 - ✅ 完全削除が途中で止まった写真を選び直すと「登録済み」と表示され、実際には登録されない不具合を修正。止まる前に reserve していた upload の finalize が、新しい object を重複として消す不具合も同じ原因（[D-014](decisions.md)）
 - ✅ 止まった完全削除を、ライブラリ画面から再開できるようにした（以前は対象が画面に出ず、再開できなかった）

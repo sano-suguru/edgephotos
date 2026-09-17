@@ -83,7 +83,7 @@ export function SettingsPage() {
         <div class="space-y-2 rounded-lg border border-border bg-white p-4 text-sm">
           <h2 class="font-medium">中断した完全削除</h2>
           <p class="text-muted-foreground">
-            {`完全削除が途中で止まった写真が ${diag.value.counts.purging} 枚あります。どの画面にも表示されず、元に戻せません。削除を最後まで実行します。`}
+            {`完全削除が途中で止まった写真が ${diag.value.counts.purging} 枚あります。どの画面にも表示されず、元に戻せません。削除を最後まで実行します。${diag.value.purgingAssetIds.length < diag.value.counts.purging ? `1 回に処理するのは古い順に ${diag.value.purgingAssetIds.length} 枚までです。残りは、終わったあとにもう一度押してください。` : ''}`}
           </p>
           <Button
             variant="destructive"

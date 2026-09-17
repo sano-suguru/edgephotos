@@ -27,7 +27,7 @@
 >   - memory（Browser のプロセスツリーの RSS。50ms ごとに採取し、1 枚処理中の増分を記録）: 12MP で約 45〜110MB、48MP / 50MP で約 190〜340MB、108MP で約 440〜840MB、200MP で約 0.9〜1.1GB。decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の ArrayBuffer（最大 23MB）は小さい。200 件の連続 upload（計 920MB、48MP / 50MP を 6 件含む）で RSS は単調増加せず、peak は Chromium 約 1.1GB、WebKit 約 0.9GB（WebContent 単体では約 0.6GB）だった。前処理の並列数 1 / 2 / 3 で 48MP を 6 件処理すると、Chromium の増分は 420 / 682 / 975MB、所要時間は 2.0 / 1.6 / 1.5 秒。WebKit は 527 / 481 / 522MB、所要時間はいずれも約 2.3 秒だった。
 >   - Browser の制約で試せなかったこと: WebKit では Playwright で横取りした PUT の Blob 本文が失われるため、再試行の再現は Chromium だけで行った（再試行のコードは engine に依存しない）。
 > - 実 R2 の `412`（2026-09-17、remote-test、Browser の `fetch()` から CORS 越し、canvas で作った合成 JPEG）: 同じ presigned PUT URL へ 2 回目の PUT を送ると、original・thumbnail とも `412` が返り、`res.status` として読めた（network error にはならない）。そのあとの finalize は `200 created` で、再試行で `412` を受けた upload がそのまま ready になれることを確認した。確認に使った asset は trash へ移動済み。
-> - 2026-09-17 の continuous-use 修正（完全削除が止まった写真の再 upload、止まった削除の再開、期限切れ upload の件数、取り込みの並列数）: local の自動テスト（workerd と Playwright の Chromium / WebKit）だけで確認した。remote-test には未 deploy で、`pnpm diagnose` の `worker: APP_ORIGIN` と `library: *` の 2 項目も remote では未実行。
+> - 2026-09-17 の continuous-use 修正（完全削除が止まった写真の再 upload、止まった削除の再開、期限切れ upload の件数、取り込みの並列数、100MB 超の事前拒否、`APP_ORIGIN` の診断）: local だけで確認した。server 側は workerd の自動テスト、並列数は unit test。ライブラリ画面の表示と「削除を再開」、100MB 超の拒否は、Playwright の Chromium で一度だけ確認した（spec は commit していない）。`worker: APP_ORIGIN` は local の `vite dev` に対して CLI を実行し、`localhost` で PASS、`127.0.0.1` で FAIL になることを確認した。remote-test には未 deploy で、`pnpm diagnose` の新しい 3 項目（`worker: APP_ORIGIN`、`library: interrupted uploads`、`library: unfinished deletes`）は remote では未実行。
 > - **未検証:** iPhone / Android 実機での取り込み。具体的には、iOS Safari の memory 上限（jetsam）と 48MP 以上の decode、iOS 写真ピッカーの HEIC → JPEG 変換と位置情報の扱い、画面ロックやアプリ切り替えで中断した PUT の再開、presigned URL の期限（600 秒）を越える中断。
 >
 > restore の検証に使った `edgephotos-restore-test` は drill 用の一時環境で、検証後に Worker・D1・R2 bucket・Access application・R2 API token をすべて削除しました。`wrangler.jsonc` には今後維持する環境だけを残します。再度 drill を行う場合は §2 と §4 の手順で作り直します。
@@ -202,7 +202,7 @@ Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠�
 
 設定不足時に写真機能を匿名公開する fallback はありません。設定が欠けていれば `503 SERVER_MISCONFIGURED` です。
 
-remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS（`worker: APP_ORIGIN` と `library: *` の 2 項目を足す前の check 構成）。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload` が FAIL になることも確認した。
+remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS（`worker: APP_ORIGIN` と `library: *` を足す前の check 構成）。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload` が FAIL になることも確認した。
 
 ## 8. Update（release と migration）
 
