@@ -10,7 +10,7 @@
 
 初期版では機能数を限定します。一方、データ保全、認証、API、storage boundary を「後で本方式へ置き換えるための仮実装」にはしません。
 
-実需要や測定結果に基づく architecture evolution は許容します。
+実需要や測定結果に基づく構成変更は許容します。
 
 ## D-002: Web stack は Preact + Signals + Vite を採用する
 
@@ -183,19 +183,7 @@ Migration:
 - `drizzle-kit push` と `drizzle-kit migrate` は使わない。`drizzle.config.ts` に D1 credential を置かないため、そもそも実行できない
 - `pnpm db:check` が schema と `migrations/meta/` の snapshot のずれを検出する。`tests/integration/migrations.test.ts` が、migration 適用後の D1 と `schema.ts` の一致を検証する
 
-既存 migration の扱い（baseline）:
-
-- `0001_initial.sql` は手書きのまま変更しない。production の `d1_migrations` は file 名で記録されているため、改名や再生成はしない
-- `migrations/meta/0001_snapshot.json` は、同じ schema を drizzle-kit で生成したときの snapshot。journal の entry は `idx: 1` / `tag: 0001_initial` とした。drizzle-kit は次の番号を「最後の idx + 1」で決めるため、以後の生成 migration は `0002_*` から始まる。この journal を `idx: 0` へ「直さない」こと
-- `0001_initial.sql` と snapshot の差は次の 2 点だけで、どちらも既存データに影響しない
-  - SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
-  - `uploads.asset_id` の UNIQUE は SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
-- この差が原因で生成 SQL が誤っていれば、CI で検出される。test の setup は本番と同じく空の D1 へ `0001` から順に全 migration を適用し、そのあと drift test が `schema.ts` と比較する。つまり生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通る
-  - この rehearsal が保証するのは DDL として適用できることだけ。table は空なので、既存データの保存（table 作り直し時の列の対応、値の変換、NOT NULL や CHECK の強化）は検証しない。データを変換する migration を初めて書くときは、その migration 用の fixture を追加する
-  - 確認済みの例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗する。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通る
-- production DB の再作成は不要
-
-`wrangler` と `readD1Migrations` は `.sql` だけを読むため、`migrations/meta/` は適用対象になりません。
+既存の `0001_initial.sql` は手書きのまま baseline として扱い、drizzle-kit の snapshot と journal を後から合わせました。production DB の再作成は不要です。baseline の具体的な扱い（journal の `idx: 1`、SQL と snapshot の差、CI の rehearsal が保証する範囲）は [development.md](development.md) §6 を正本とします。
 
 ## D-018: original の SHA-256 を R2 に upload 時に検証させる
 
@@ -230,10 +218,12 @@ v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Cl
 
 前提になる事実（2026-09 時点）:
 
-- iPhone の Safari では、`<input type=file>` の `accept` が HEIC を含まない場合、写真ピッカーの既定（「自動」）が HEIC を JPEG に変換して渡す（Apple Developer Forums の報告。実機では未確認）。これは Safari / iOS の実装上の挙動で、Web 標準の保証ではない。`accept` も選択候補の hint にすぎない。EdgePhotos が前提にするのは「HEIC が届いたら明示的なエラーにする」経路だけで、変換は利用しているだけである。変換の挙動が将来変わっても、黙って壊れることはなく、エラーとして表に出るEdgePhotos の `accept` は `image/jpeg,image/png,image/webp` なので、iPhone の通常操作では JPEG が届く。`accept` に `image/heic` を足すと、Safari 17 以降は HEIC のまま渡し、JPEG まで HEIC へ変換することがある（同フォーラムの報告）。そのため `image/heic` は足さない
-- 変換後の JPEG は ImageIO が書き出すと推定している（iOS 上では未確認）。macOS の `sips`（同じ ImageIO）で iPhone の HEIC を変換すると、`DateTimeOriginal`・`OffsetTimeOriginal`・MakerNote は残った。EdgePhotos での取り込み結果も正しかった（width / height / takenAt）
-- 手元の WebKit（Playwright WebKit 26.5）は `createImageBitmap` で HEIC を decode できる。Chromium はできない（`InvalidStateError`）
-- Cloudflare Images は HEIC を入力にでき、Worker から binding で呼べる（入力は 20MB まで、変換は月 5,000 件まで無料、以降は 1,000 件あたり $0.50）
+- iPhone の Safari では、`<input type=file>` の `accept` が HEIC を含まない場合、写真ピッカーの既定（「自動」）が HEIC を JPEG に変換して渡す（Apple Developer Forums の報告。実機では未確認）。これは Safari / iOS の実装上の挙動で、Web 標準の保証ではない
+- `accept` に `image/heic` を足すと、Safari 17 以降は HEIC のまま渡し、JPEG まで HEIC へ変換することがある（同フォーラムの報告）。そのため EdgePhotos の `accept` は `image/jpeg,image/png,image/webp` のままにする
+- EdgePhotos は変換を利用しているだけで、前提にはしない。HEIC が届いた場合は明示的なエラーにするので、変換の挙動が将来変わっても黙って壊れない
+- 変換後の JPEG の metadata と取り込み結果は、macOS の `sips` による代替で確認した（[verification.md](verification.md)）
+- WebKit は `createImageBitmap` で HEIC を decode でき、Chromium はできない
+- Cloudflare Images は HEIC を入力にでき、Worker から binding で呼べる。変換は月 5,000 件まで無料で、以降は従量課金
 
 比較した案:
 
@@ -244,7 +234,7 @@ v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Cl
 | 3. Browser 側で変換（libheif の WASM など） | WASM 数 MB を bundle へ追加し、更新も追う | WASM heap に加えて decode 後の bitmap。mobile Safari で最も危うい | 変換結果を original にすると元の byte 列を失う。derivative 専用にすれば案 2 と同じ | Safari は native で decode できるので不要。恩恵を受けるのは desktop Chrome / Firefox だけ | なし |
 | 4. Server / Cloudflare 側で変換（Images binding） | Worker に Images binding を追加。Worker 内の WASM decode は CPU とメモリの上限から不採用 | Client の負担は小さい | original は HEIC のまま保持できる | 最も透過的 | 1 枚あたり変換 2 回（thumbnail / preview）。finalize の中で呼べば遅延と失敗経路が増え、非同期化すれば Queues が要る（D-009） |
 
-採用理由: personal photo appliance としては、iPhone の通常経路（Safari → JPEG）が追加コードなしで成立します。v1 で解くべき HEIC 固有の問題は「黙って失敗しないこと」だけです。案 2〜4 はどれも upload 形式か derivative 生成の経路を増やし、original の定義（どの byte 列を保存するか）も変わります。
+採用理由: 個人の写真置き場としては、iPhone の通常経路（Safari → JPEG）が追加コードなしで成立します。v1 で解くべき HEIC 固有の問題は「黙って失敗しないこと」だけです。案 2〜4 はどれも upload 形式か derivative 生成の経路を増やし、original の定義（どの byte 列を保存するか）も変わります。
 
 影響と制約:
 
