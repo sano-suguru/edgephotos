@@ -102,6 +102,8 @@ SSR、RSC、Server Actions を中心要件にせず、vinext や Astro をアプ
 
 **状態:** 採用（SHA-256 の扱いは [D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で更新）
 
+最後の段落は、`assets.sha256` を client-asserted content identity として扱う判断です。この判断は [D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で置き換えられており、現在の契約ではありません。現在の SHA-256 の契約は D-018 を正本とします。finalize の確認項目と、Worker が original 全体を hash しない方針は現在も有効です。
+
 finalize では Worker が R2 binding で次を確認してから asset を `ready` にします。
 
 - reserve した 3 object がすべて存在する
@@ -111,7 +113,7 @@ finalize では Worker が R2 binding で次を確認してから asset を `rea
 
 original の SHA-256 は Client が reserve 時に申告し、重複判定の索引として使います。Worker は finalize 時に original 全体を hash しません。Workers の CPU 上限内で大きな original を毎回 hash するのは現実的でないためです。保存済み original の SHA-256 は backup / restore / verify（`pnpm backup`）で R2 から再取得して検証します。
 
-したがって `assets.sha256` は **client-asserted content identity** です。server が byte 列から計算し直した verified identity ではありません。v1 は 1 owner で、脅威は「owner が自分自身に嘘をつく」ことになるため、この区別を許容します。将来 multi-user や untrusted client を扱う場合は、この前提が崩れるため再検討が必要です。
+当時は、`assets.sha256` を **client-asserted content identity** として扱いました。server が byte 列から計算し直した verified identity ではありません。v1 は 1 owner で、脅威は「owner が自分自身に嘘をつく」ことになるため、この区別を許容しました。この前提は D-018 で見直し、R2 が upload 時に申告値との一致を検証するようにしました。
 
 ## D-013: presigned PUT は `If-None-Match: *` と `Content-Type` を署名対象にする
 
@@ -125,7 +127,7 @@ Browser はこの 2 header を送るため、R2 CORS の AllowedHeaders に `con
 
 **状態:** 採用
 
-`assets.sha256` は UNIQUE です（値の出所は client 申告であり、上記 [D-012](#d-012-finalize-の保存確認は存在サイズ形式派生画像-metadataとする) の区別が前提です）。reserve 時に同じ original が存在すれば `409 DUPLICATE_ASSET` を返します。reserve 後の競合で finalize 時に重複が判明した場合は、既存 asset を返し、その upload 専用の object を D1 記録後に削除します。ゴミ箱内の asset も重複として扱います。
+`assets.sha256` は UNIQUE です。値は client が reserve 時に申告し、D-018 以降の upload では R2 が original の byte 列と照合します（[D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる)）。reserve 時に同じ original が存在すれば `409 DUPLICATE_ASSET` を返します。reserve 後の競合で finalize 時に重複が判明した場合は、既存 asset を返し、その upload 専用の object を D1 記録後に削除します。ゴミ箱内の asset も重複として扱います。
 
 完全削除が途中で止まった asset（`purging`）は重複として扱いません（2026-09-17 追記）。reserve と finalize は、その asset の完全削除を最後まで実行してから先へ進みます。R2 がまだ削除に失敗する場合は `500` を返し、upload は `pending` のまま再試行できます。
 
