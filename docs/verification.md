@@ -1,8 +1,10 @@
 # 検証記録
 
-この文書は、EdgePhotos が実環境と Browser で実際に動くことを、いつ・どの環境で・何を使って確かめたかを記録します。
+この文書は、EdgePhotos を実環境と Browser で確認した結果と、まだ確認していない項目を記録します。確認済みの項目には、環境・日付・使ったデータ・結果を書きます。
 
-ここにあるのは証拠であり、運用の手順ではありません。手順は [operations.md](operations.md)、性能と memory の数値は [benchmarks.md](benchmarks.md)、判断は [decisions.md](decisions.md) を正本とします。
+運用の手順は [operations.md](operations.md)、性能と memory の数値は [benchmarks.md](benchmarks.md)、判断は [decisions.md](decisions.md) を正本とします。
+
+同じ対象を確認し直したときは、既存の記述を最新の結果で更新します。追記するのは、新しい対象を確認したときと、経緯を残す必要があるときだけです。
 
 ## 現在の状況
 
