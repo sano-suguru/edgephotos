@@ -105,9 +105,9 @@ original と再生成可能な derivative を物理的にも分離します。
 
 Web と将来 Native で認証の入口が変わっても、application logic へ渡す identity は統一します。
 
-Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証します。検証した identity は、application-level の `AppPrincipal` に正規化します。application logic は `AppPrincipal` だけを受け取り、Access の具体的な claim structure に依存しません。こうしておけば、認証の入口が変わっても application logic は変わりません。
+Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証します。検証した identity は、application-level の `AppPrincipal` に正規化します。application logic は `AppPrincipal` だけを受け取り、Access の具体的な claim structure に依存しません。こうすることで、認証の入口の変更を application logic から分離できます。
 
-`AppPrincipal` のフィールドは `src/worker/auth/access.ts` の型定義を正本とします。
+`AppPrincipal` のフィールドは [`src/worker/auth/access.ts`](../src/worker/auth/access.ts) の型定義を正本とします。
 
 v1 は 1 owner です。Access を通過した全ユーザーを owner とみなさず、設定された owner identity と一致する principal だけが private API を利用できます。
 

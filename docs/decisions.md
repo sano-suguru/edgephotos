@@ -102,7 +102,7 @@ SSR、RSC、Server Actions を中心要件にせず、vinext や Astro をアプ
 
 **状態:** 採用（SHA-256 の扱いは [D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で更新）
 
-最後の段落は、`assets.sha256` を client-asserted content identity として扱う判断です。この判断は [D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で置き換えられており、現在の契約ではありません。現在の SHA-256 の契約は D-018 を正本とします。finalize の確認項目と、Worker が original 全体を hash しない方針は現在も有効です。
+`assets.sha256` を client-asserted content identity とする判断は、[D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で置き換えられており、現在の契約ではありません。現在の SHA-256 の契約は D-018 を正本とします。finalize の確認項目と、Worker が original 全体を hash しない方針は現在も有効です。
 
 finalize では Worker が R2 binding で次を確認してから asset を `ready` にします。
 
