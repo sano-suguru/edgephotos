@@ -16,8 +16,8 @@ const MESSAGES: Record<string, string> = {
   VALIDATION_FAILED: '入力内容を確認してください。',
   UPLOAD_OBJECT_MISSING: '転送が完了していません。もう一度お試しください。',
   UPLOAD_OBJECT_INVALID: '転送したファイルを確認できませんでした。もう一度お試しください。',
-  UPLOAD_NOT_FOUND: 'アップロードの有効期限が切れました。もう一度お試しください。',
-  UPLOAD_RESULT_GONE: 'アップロードの結果を確認できません。もう一度お試しください。',
+  UPLOAD_NOT_FOUND: 'アップロードの記録が見つかりません。もう一度お試しください。',
+  UPLOAD_RESULT_GONE: 'この写真は登録後に削除されたか、登録が取り消されました。もう一度お試しください。',
 }
 
 export function userMessage(err: unknown): string {

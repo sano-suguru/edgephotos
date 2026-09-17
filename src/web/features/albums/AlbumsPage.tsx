@@ -1,59 +1,38 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
-import type { Album } from '../../../contracts/schemas'
+import { useEffect, useRef } from 'preact/hooks'
+import type { AlbumListItem } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { Dialog } from '../../components/ui/dialog'
 import { Albums } from '../../components/ui/icons'
 import { api } from '../../lib/api/client'
 import { userMessage } from '../../lib/errors'
-import { createTaskLimiter } from '../../lib/task-limit'
 import { navigate } from '../../state/router'
 
-// The album API has no cover field, so each card asks for its newest photo (one signed thumbnail URL).
-// A few at a time keeps a long album list from firing every request at once.
-const coverSlot = createTaskLimiter(4)
-
-function AlbumCover(props: { album: Album }) {
-  const url = useSignal<string | null>(null)
+// Cover URLs come with the album list (one request). An expired URL (the page sat open) asks the page to
+// reload the list, which the page does at most once a minute.
+function AlbumCover(props: { album: AlbumListItem; onExpired: () => boolean }) {
   const failed = useSignal(false)
-  const retried = useSignal(false)
-
-  const load = () =>
-    coverSlot(() => api.albumAssets(props.album.id, null, 1))
-      .then((page) => {
-        url.value = page.items[0]?.thumbnailUrl ?? null
-      })
-      .catch(() => {
-        failed.value = true
-      })
-
-  useSignalEffect(() => {
-    if (props.album.assetCount > 0) void load()
-  })
+  const url = props.album.coverThumbnailUrl
+  // A reloaded list brings a new URL: try it.
+  useEffect(() => {
+    failed.value = false
+  }, [url])
 
   return (
     <div class="relative aspect-square overflow-hidden rounded-lg bg-muted">
-      {url.value && !failed.value ? (
+      {url && !failed.value ? (
         <img
-          src={url.value}
+          src={url}
           alt=""
           loading="lazy"
           decoding="async"
           class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transition-none"
           onError={() => {
-            // An expired URL (the page sat open): ask once more.
-            if (retried.value) failed.value = true
-            else {
-              retried.value = true
-              void load()
-            }
+            if (!props.onExpired()) failed.value = true
           }}
         />
       ) : (
-        <div
-          class={`flex h-full w-full items-center justify-center text-muted-foreground/50 ${
-            props.album.assetCount > 0 && !failed.value ? 'motion-safe:animate-pulse' : ''
-          }`}
-        >
+        <div class="flex h-full w-full items-center justify-center text-muted-foreground/50">
           <Albums class="size-10" />
         </div>
       )}
@@ -62,7 +41,8 @@ function AlbumCover(props: { album: Album }) {
 }
 
 export function AlbumsPage() {
-  const albums = useSignal<Album[] | null>(null)
+  const albums = useSignal<AlbumListItem[] | null>(null)
+  const loadedAt = useRef(0)
   const creating = useSignal(false)
   const title = useSignal('')
   const error = useSignal<string | null>(null)
@@ -71,8 +51,9 @@ export function AlbumsPage() {
   const load = () => {
     error.value = null
     return api
-      .listAlbums()
+      .listAlbums({ covers: true })
       .then((r) => {
+        loadedAt.current = performance.now()
         albums.value = r.items
       })
       .catch((err) => {
@@ -83,6 +64,14 @@ export function AlbumsPage() {
   useSignalEffect(() => {
     void load()
   })
+
+  // Returns false when the list was loaded less than a minute ago: the image is really unavailable.
+  const refreshExpired = () => {
+    if (performance.now() - loadedAt.current < 60_000) return false
+    loadedAt.current = performance.now()
+    void load()
+    return true
+  }
 
   async function create(e: Event) {
     e.preventDefault()
@@ -142,7 +131,7 @@ export function AlbumsPage() {
               }}
               class="group block rounded-lg"
             >
-              <AlbumCover album={album} />
+              <AlbumCover album={album} onExpired={refreshExpired} />
               <div class="mt-2 truncate text-sm font-medium">{album.title}</div>
               <div class="text-xs text-muted-foreground tabular-nums">{album.assetCount} 枚</div>
             </a>

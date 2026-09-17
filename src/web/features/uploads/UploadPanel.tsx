@@ -83,7 +83,7 @@ export function UploadList() {
   const headline = active
     ? `${finished} / ${s.total} 枚 完了`
     : s.failed > 0
-      ? `${s.failed} 枚をアップロードできませんでした`
+      ? `${s.failed} 枚をアップロードできませんでした${s.done > 0 ? `（${s.done} 枚は追加済み）` : ''}`
       : `${s.done} 枚をアップロードしました${s.duplicate > 0 ? `（${s.duplicate} 枚は登録済み）` : ''}`
 
   return (

@@ -1,8 +1,10 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
-import type { Album } from '../../contracts/schemas'
+import type { Album, AlbumListItem } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AlbumRow, albumAssets, albums, shares } from '../db/schema'
 import { ApiError } from '../http/errors'
+import { objectKey } from '../storage/keys'
+import { OWNER_GET_URL_TTL_SECONDS } from '../storage/signer'
 import { requireReadyAsset } from './assets'
 import type { ServiceContext } from './context'
 
@@ -23,9 +25,30 @@ function toAlbum(row: AlbumWithCount): Album {
   }
 }
 
-export async function listAlbums(db: Db): Promise<Album[]> {
-  const rows = await db.all<AlbumWithCount>(sql`${SELECT_ALBUM} ORDER BY al.created_at DESC, al.id DESC`)
-  return rows.map(toAlbum)
+// One grouped pass over the memberships gives each album's count and newest photo (the cover). With a bare
+// column next to MAX(), SQLite takes a.id from a row holding the maximum; among photos with the same sort_at
+// any one of them may become the cover.
+export async function listAlbums(ctx: ServiceContext, opts: { covers: boolean }): Promise<AlbumListItem[]> {
+  const rows = await ctx.db.all<AlbumWithCount & { cover_asset_id: string | null }>(
+    sql`WITH stats AS (
+          SELECT aa.album_id, COUNT(*) AS n, MAX(a.sort_at) AS newest, a.id AS cover_asset_id
+          FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
+          WHERE a.status = 'ready' AND a.trashed_at IS NULL
+          GROUP BY aa.album_id
+        )
+        SELECT al.*, COALESCE(s.n, 0) AS asset_count, s.cover_asset_id
+        FROM albums al LEFT JOIN stats s ON s.album_id = al.id
+        ORDER BY al.created_at DESC, al.id DESC`,
+  )
+  if (!opts.covers) return rows.map(toAlbum)
+  return Promise.all(
+    rows.map(async (row) => ({
+      ...toAlbum(row),
+      coverThumbnailUrl: row.cover_asset_id
+        ? (await ctx.signer.signGet(objectKey(row.cover_asset_id, 'thumbnail'), OWNER_GET_URL_TTL_SECONDS)).url
+        : null,
+    })),
+  )
 }
 
 export async function getAlbum(db: Db, id: string): Promise<Album> {

@@ -142,7 +142,13 @@ export const AlbumSchema = z
   })
   .openapi('Album')
 
-export const AlbumListSchema = z.object({ items: z.array(AlbumSchema) }).openapi('AlbumList')
+export const AlbumListItemSchema = AlbumSchema.extend({
+  // With ?covers=true: the newest photo's thumbnail, or null for an empty album. One request for the whole
+  // list instead of one per album.
+  coverThumbnailUrl: z.url().nullable().optional(),
+}).openapi('AlbumListItem')
+
+export const AlbumListSchema = z.object({ items: z.array(AlbumListItemSchema) }).openapi('AlbumList')
 
 export const AlbumInputSchema = z
   .object({ title: z.string().trim().min(1).max(LIMITS.albumTitleMax) })
@@ -331,6 +337,7 @@ export type UploadReserve = z.input<typeof UploadReserveSchema>
 export type UploadReservation = z.infer<typeof UploadReservationSchema>
 export type UploadFinalizeResult = z.infer<typeof UploadFinalizeResultSchema>
 export type Album = z.infer<typeof AlbumSchema>
+export type AlbumListItem = z.infer<typeof AlbumListItemSchema>
 export type Share = z.infer<typeof ShareSchema>
 export type ShareCreated = z.infer<typeof ShareCreatedSchema>
 export type SharedAlbum = z.infer<typeof SharedAlbumSchema>

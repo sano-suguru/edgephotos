@@ -328,9 +328,11 @@ export function createApp(options: AppOptions) {
       method: 'get',
       path: '/api/v1/albums',
       tags: tag('albums'),
-      responses: { 200: json(AlbumListSchema, 'Albums'), ...errorResponses },
+      request: { query: z.object({ covers: boolQuery }) },
+      responses: { 200: json(AlbumListSchema, 'Albums, newest first'), ...errorResponses },
     }),
-    async (c) => c.json({ items: await albums.listAlbums(svc(c).db) }, 200),
+    async (c) =>
+      c.json({ items: await albums.listAlbums(svc(c), { covers: c.req.valid('query').covers ?? false }) }, 200),
   )
 
   app.openapi(
