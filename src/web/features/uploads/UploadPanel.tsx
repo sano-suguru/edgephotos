@@ -1,9 +1,13 @@
 import { useComputed } from '@preact/signals'
-import { useRef } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { Button, buttonClass, cn } from '../../components/ui/button'
 import { Upload } from '../../components/ui/icons'
 import { SUPPORTED_TYPES } from '../../lib/image'
 import { activeUploads, clearFinishedUploads, enqueueFiles, retryUploads, type UploadItem, uploads } from './upload'
+import { canAutoDismissUploads } from './upload-list'
+
+// Same as an info toast.
+const AUTO_DISMISS_MS = 5_000
 
 const LABELS: Record<UploadItem['state'], string> = {
   queued: '待機中',
@@ -61,6 +65,13 @@ export function UploadList() {
       current: list.find((u) => u.state === 'preparing' || u.state === 'uploading' || u.state === 'finalizing'),
     }
   })
+  const autoDismiss = useComputed(() => canAutoDismissUploads(uploads.value))
+  useEffect(() => {
+    if (!autoDismiss.value) return
+    // A new selection makes the list active again, which cancels this timer.
+    const timer = setTimeout(clearFinishedUploads, AUTO_DISMISS_MS)
+    return () => clearTimeout(timer)
+  }, [autoDismiss.value])
   if (uploads.value.length === 0) return null
   const s = summary.value
   const active = activeUploads.value > 0

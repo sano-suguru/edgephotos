@@ -71,12 +71,27 @@ test('a guest opens a shared album and loses access after revoke', async ({ page
   await expect.poll(() => thumbnail.getAttribute('src')).not.toBe(shownUrl)
   await expectImageLoaded(thumbnail)
 
-  await guest.getByRole('button', { name: '拡大表示' }).click()
-  const preview = guest.getByRole('dialog', { name: '写真' }).locator('img')
+  // The enlarged photo takes focus, keeps it away from the page behind, and gives it back on close.
+  const opener = guest.getByRole('button', { name: '拡大表示' })
+  await opener.click()
+  const overlay = guest.getByRole('dialog', { name: '写真' })
+  const preview = overlay.locator('img')
   await expectImageLoaded(preview)
   expect(await preview.getAttribute('src')).not.toContain('original')
+  const closeOverlay = overlay.getByRole('button', { name: '閉じる' })
+  await expect(closeOverlay).toBeFocused()
+  for (let i = 0; i < 3; i++) {
+    await guest.keyboard.press('Tab')
+    expect(await guest.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(true)
+  }
   await guest.keyboard.press('Escape')
-  await expect(guest.getByRole('dialog', { name: '写真' })).toBeHidden()
+  await expect(overlay).toBeHidden()
+  await expect(opener).toBeFocused()
+  await opener.click()
+  await expect(closeOverlay).toBeFocused()
+  await closeOverlay.click()
+  await expect(overlay).toBeHidden()
+  await expect(opener).toBeFocused()
 
   // The secret travels only in the Authorization header, never in the page request or a cookie.
   expect(new URL(guest.url()).hash).not.toBe('')
@@ -86,9 +101,43 @@ test('a guest opens a shared album and loses access after revoke', async ({ page
     expect(headers.cookie).toBeUndefined()
   }
 
-  await sharing.getByRole('button', { name: '無効化' }).click()
-  await expect(sharing.getByText('無効化済み')).toBeVisible()
+  // Regenerating ends the current link, so it asks first; cancelling changes nothing.
+  await sharing.getByRole('button', { name: '再発行' }).click()
+  const confirmRegenerate = page.getByRole('dialog', { name: '共有リンクを再発行しますか？' })
+  await expect(confirmRegenerate).toContainText('現在のリンクは使えなくなり')
+  await confirmRegenerate.getByRole('button', { name: 'キャンセル' }).click()
+  await expect(confirmRegenerate).toBeHidden()
+  await expect(sharing).toBeVisible()
+  await expect(sharing.getByLabel('共有リンク')).toHaveValue(url)
+  await expect(sharing.getByText('無効化済み')).toHaveCount(0)
+
+  await sharing.getByRole('button', { name: '再発行' }).click()
+  await confirmRegenerate.getByRole('button', { name: '再発行する' }).click()
+  await expect(confirmRegenerate).toBeHidden()
+  await expect(sharing.getByLabel('共有リンク')).not.toHaveValue(url)
+  const regenerated = await sharing.getByLabel('共有リンク').inputValue()
+  await expect(sharing.getByText('無効化済み')).toHaveCount(1)
+  // Focus stays inside the share dialog, not on a button that the refreshed list removed.
+  expect(await sharing.evaluate((el) => el.contains(document.activeElement))).toBe(true)
   await guest.reload()
+  await expect(guest.getByText('このリンクは無効か、期限切れです。')).toBeVisible()
+
+  // Revoking asks too; Escape closes only the confirmation.
+  await sharing.getByRole('button', { name: '無効化' }).click()
+  const confirmRevoke = page.getByRole('dialog', { name: '共有リンクを無効化しますか？' })
+  await expect(confirmRevoke).toContainText('元に戻せません')
+  await expect.poll(() => confirmRevoke.evaluate((el) => el.contains(document.activeElement))).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(confirmRevoke).toBeHidden()
+  await expect(sharing).toBeVisible()
+  await expect(sharing.getByText('無効化済み')).toHaveCount(1)
+  // Opened again, it is still labelled by its own title (not the share dialog's text).
+  await sharing.getByRole('button', { name: '無効化' }).click()
+  await confirmRevoke.getByRole('button', { name: '無効化する' }).click()
+  await expect(sharing.getByText('無効化済み')).toHaveCount(2)
+  await expect(sharing.getByRole('button', { name: '無効化' })).toHaveCount(0)
+  expect(await sharing.evaluate((el) => el.contains(document.activeElement))).toBe(true)
+  await guest.goto(regenerated)
   await expect(guest.getByText('このリンクは無効か、期限切れです。')).toBeVisible()
   await guestContext.close()
 })

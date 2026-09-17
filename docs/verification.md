@@ -99,7 +99,9 @@ local（`vite dev`、使い捨ての `EDGEPHOTOS_STATE_DIR`）に、reserve → 
 - album 一覧は各 album の最新の写真を cover にする（`limit=1` の album assets API。API の変更なし）
 - 2 枚を続けてゴミ箱へ移動すると「元に戻す」が 2 つ並び、それぞれが対応する写真だけを復元する。情報パネルは写真を移動しても開いたままで、viewer を開き直すと閉じている。アップロード中の表示は完了枚数（例: 0 / 3 枚）と処理中のファイル名
 
-常設の回帰は `e2e/keyboard.spec.ts` と `e2e/mobile.spec.ts`（[development.md](development.md) §7）。iPhone / Android の実機での swipe と safe area は未確認。
+Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化の確認 dialog、viewer の preview 失敗表示と再試行、共有ページ拡大表示の focus 管理、Undo toast の touch target、長い menu のスクロール、phone のゴミ箱の現在地表示、共有 dialog の入力欄 16px、全件完了したアップロード表示の自動消去を Playwright（Chromium / WebKit iPhone 13 相当）で確認した。各 spec は対応する修正を戻すと失敗することも確認した。修正中に、入れ子の Dialog で Base UI の生成 id が重複し、確認 dialog が外側の dialog の説明文で名前付けされる不具合を見つけて直した。iOS Safari 実機での入力時 zoom と touch 操作は未確認。
+
+常設の回帰は `e2e/keyboard.spec.ts`、`e2e/mobile.spec.ts`、`e2e/viewer.spec.ts`（[development.md](development.md) §7）。iPhone / Android の実機での swipe と safe area は未確認。
 
 ## 未検証
 

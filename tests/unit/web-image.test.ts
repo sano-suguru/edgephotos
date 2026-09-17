@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { LIMITS } from '../../src/contracts/schemas'
 import { resumePurges } from '../../src/web/features/settings/resume-purges'
-import { mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
+import { canAutoDismissUploads, mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
 import { captureParts, formatDate, monthKey } from '../../src/web/lib/dates'
 import { exifDateToIso } from '../../src/web/lib/exif-date'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
@@ -145,6 +145,21 @@ describe('upload list merging', () => {
   it('fills the remaining room with the most recent finished items', () => {
     const previous = [item('a', 'done'), item('b', 'duplicate'), item('c', 'error')]
     expect(mergeUploadList(previous, [item('n', 'queued')], 3).map((u) => u.id)).toEqual(['n', 'a', 'b'])
+  })
+})
+
+describe('upload summary auto-dismiss', () => {
+  const list = (...states: UploadListItem['state'][]) => states.map((state, i) => ({ id: String(i), state }))
+
+  it('clears itself only when every photo was added', () => {
+    expect(canAutoDismissUploads(list('done', 'done'))).toBe(true)
+    expect(canAutoDismissUploads(list())).toBe(false)
+  })
+
+  it('stays while anything is running or needs attention', () => {
+    for (const other of ['queued', 'preparing', 'uploading', 'finalizing', 'error', 'duplicate'] as const) {
+      expect(canAutoDismissUploads(list('done', other))).toBe(false)
+    }
   })
 })
 

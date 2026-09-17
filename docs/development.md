@@ -216,10 +216,11 @@ workerd の test では見えない、Browser 固有の部分だけを対象に�
 
 | spec | 確認すること | project |
 | --- | --- | --- |
-| `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC の拒否表示。presigned URL の期限切れ後に画像が回復すること | chromium, mobile-webkit |
-| `share.spec.ts` | album 作成 → viewer の menu から追加 → 共有リンク → 別 context の guest が閲覧（secret は Authorization header だけ、Cookie なし。thumbnail URL の期限切れから回復）→ revoke 後は無効表示 | chromium |
+| `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC の拒否表示。presigned URL の期限切れ後に画像が回復すること。全件完了したアップロード表示だけが数秒後に消えること（実行中・失敗ありでは残る） | chromium, mobile-webkit |
+| `share.spec.ts` | album 作成 → viewer の menu から追加 → 共有リンク → 別 context の guest が閲覧（secret は Authorization header だけ、Cookie なし。thumbnail URL の期限切れから回復）→ 拡大表示の focus（閉じるボタンへ移り、Tab でも dialog 内に留まり、閉じると元の写真へ戻る）→ 再発行・無効化の確認 dialog（キャンセル・Escape では何も変わらない）→ 旧リンクと無効化したリンクは無効表示 | chromium |
 | `keyboard.spec.ts` | Base UI の Dialog / Menu の keyboard 操作と focus。viewer の ←/→ での移動（Menu 内では写真が変わらない）と、閉じたあとに最後の写真へ focus が戻ること | chromium |
-| `mobile.spec.ts` | iPhone 相当の viewport で横スクロールがないこと、下部タブが scroll 後も画面内にあり、ゴミ箱へはライブラリから行けること、tap で viewer（写真が画面幅か高さいっぱい）・共有 dialog が開き、画面内に収まること | mobile-webkit |
+| `viewer.spec.ts` | preview の取得失敗・読み込み失敗で「高画質で表示できませんでした」と再試行が出ること。album が多い menu が画面内に収まり、keyboard で末尾までスクロールできること | chromium |
+| `mobile.spec.ts` | iPhone 相当の viewport で横スクロールがないこと、下部タブが scroll 後も画面内にあり、ゴミ箱へはライブラリから行け、ゴミ箱ではライブラリのタブが現在地になり戻れること、Undo toast のボタンが 44px 以上で離れていること、共有 dialog の入力欄が 16px 以上であること、tap で viewer（写真が画面幅か高さいっぱい）・共有 dialog が開き、画面内に収まること | mobile-webkit |
 
 ```bash
 pnpm exec playwright install --only-shell chromium webkit   # 初回のみ

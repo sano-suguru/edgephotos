@@ -86,24 +86,33 @@ export function AssetViewer(props: {
   // Hidden controls after a tap on the photo (touch only), so nothing covers it.
   const chromeHidden = useSignal(false)
   // List items carry no preview URL (docs/decisions.md D-022). Show the cached thumbnail until the preview
-  // URL arrives; if the preview fails (e.g. it expired before loading), fetch once more.
+  // URL arrives; if the preview fails (e.g. it expired before loading), fetch once more. If that fails too,
+  // the thumbnail stays with a notice, so a blurry photo is not mistaken for the real one.
   const preview = useSignal<{ id: string; url: string; retried: boolean } | null>(null)
+  const previewFailed = useSignal<string | null>(null)
   const direction = useRef<-1 | 1>(1)
   const swipe = useRef<{ x: number; y: number; id: number } | null>(null)
 
   function loadPreview(retried: boolean) {
     const id = asset.id
+    if (previewFailed.peek() === id) previewFailed.value = null
     const known = retried ? null : cachedPreview(id)
     if (known) {
       preview.value = { id, url: known, retried }
       return
     }
-    if (retried) previews.delete(id)
+    if (retried) {
+      previews.delete(id)
+      // Back to the thumbnail while re-signing; the failed URL would otherwise show (and fail) again.
+      if (preview.peek()?.id === id) preview.value = null
+    }
     fetchPreview(id)
       .then((url) => {
         if (props.asset.id === id) preview.value = { id, url, retried }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (props.asset.id === id) previewFailed.value = id
+      })
   }
 
   useEffect(() => loadPreview(false), [asset.id])
@@ -120,7 +129,8 @@ export function AssetViewer(props: {
     }
   }, [])
 
-  const shownPreview = preview.value?.id === asset.id ? preview.value : null
+  const failed = previewFailed.value === asset.id
+  const shownPreview = preview.value?.id === asset.id && !failed ? preview.value : null
 
   useSignalEffect(() => {
     if (props.mode !== 'trash') {
@@ -336,9 +346,35 @@ export function AssetViewer(props: {
             draggable={false}
             class="absolute inset-0 h-full w-full select-none object-contain"
             onError={() => {
-              if (shownPreview && !shownPreview.retried) loadPreview(true)
+              if (!shownPreview) return
+              if (shownPreview.retried) previewFailed.value = asset.id
+              else loadPreview(true)
             }}
           />
+          {!shownPreview && !failed && (
+            // Only shows when the preview is slow (cached ones arrive at once), so stepping does not flicker.
+            <span
+              aria-hidden="true"
+              class="pointer-events-none absolute bottom-[calc(3rem+env(safe-area-inset-bottom))] right-3 size-4 animate-[delayed-in_150ms_ease-out_500ms_both] rounded-full border-2 border-white/30 border-t-white/80 motion-safe:animate-[delayed-in_150ms_ease-out_500ms_both,spin_1s_linear_infinite]"
+            />
+          )}
+          {failed && (
+            <div
+              class={cn(
+                'absolute bottom-[calc(3rem+env(safe-area-inset-bottom))] left-1/2 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-black/70 py-1 pl-3 pr-1 text-xs text-white/90',
+                chrome,
+              )}
+            >
+              <span role="status">高画質で表示できませんでした</span>
+              <button
+                type="button"
+                class="min-h-8 rounded-full px-3 font-semibold hover:bg-white/15"
+                onClick={() => loadPreview(true)}
+              >
+                再試行
+              </button>
+            </div>
+          )}
           <button
             type="button"
             aria-label="前の写真"
