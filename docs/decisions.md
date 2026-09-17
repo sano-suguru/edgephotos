@@ -223,7 +223,7 @@ v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Cl
 - `accept` は選択候補の hint にすぎない。EdgePhotos が前提にするのは「HEIC が届いたら明示的なエラーにする」経路だけで、変換は利用しているだけである。変換の挙動が将来変わっても、黙って壊れずにエラーとして表に出る
 - 変換後の JPEG の metadata と取り込み結果は、macOS の `sips` で代わりに確認した。iOS 上の変換結果そのものは未確認（[verification.md](verification.md)）
 - WebKit は `createImageBitmap` で HEIC を decode でき、Chromium はできない
-- Cloudflare Images は HEIC を入力にでき、Worker から binding で呼べる。変換は月 5,000 件まで無料で、以降は従量課金
+- Cloudflare Images は HEIC を入力にでき、Worker から binding で呼べる（費用と構成への影響は下表の案 4）
 
 比較した案:
 
