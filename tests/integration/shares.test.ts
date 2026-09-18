@@ -159,6 +159,38 @@ describe('public share API', () => {
     expect((await call(app, 'POST', `/api/v1/shares/${regenerated.share.id}/revoke`)).status).toBe(200)
   })
 
+  // A revoke is the owner deciding this link is over. Regenerate reads the share, then writes; a regenerate
+  // decided before that revoke (another tab, a retried request) must not put a live link back on the album.
+  // The guard is the INSERT ... SELECT itself, so this is the same condition a real interleaving would hit.
+  it('does not bring a revoked link back to life when a regenerate arrives after the revoke', async () => {
+    const app = await makeApp()
+    const { album, created } = await sharedAlbumWith(app, 1)
+    await callJson(app, 'POST', `/api/v1/shares/${created.share.id}/revoke`, { expect: 200 })
+
+    const res = await call(app, 'POST', `/api/v1/shares/${created.share.id}/regenerate`)
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('SHARE_UNAVAILABLE')
+
+    const list = await callJson(app, 'GET', `/api/v1/albums/${album.id}/shares`)
+    expect(list.items).toHaveLength(1)
+    expect(list.items[0].status).toBe('revoked')
+  })
+
+  it('refuses to regenerate a share that has expired, leaving no new link behind', async () => {
+    const c = clock()
+    const app = await makeApp({ clock: c })
+    const { album, created } = await sharedAlbumWith(app, 1)
+    c.advance(7 * 86_400_000 + 1)
+    const res = await call(app, 'POST', `/api/v1/shares/${created.share.id}/regenerate`)
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('SHARE_UNAVAILABLE')
+    // A refusal leaves the share exactly as it was: the failed call must not revoke it as a side effect.
+    const list = await callJson(app, 'GET', `/api/v1/albums/${album.id}/shares`)
+    expect(list.items).toHaveLength(1)
+    expect(list.items[0].status).toBe('expired')
+    expect(list.items[0].revokedAt).toBeNull()
+  })
+
   it('expires, and never issues URLs beyond the share expiry', async () => {
     const c = clock()
     const app = await makeApp({ clock: c })
@@ -191,6 +223,41 @@ describe('public share API', () => {
 
     expect((await call(app, 'DELETE', `/api/v1/albums/${album.id}`)).status).toBe(204)
     expect((await guest(app, `/shares/${created.share.id}`, created.secret)).status).toBe(404)
+  })
+
+  // A permanent delete hides the photo in two independent ways: it drops the album membership and it marks
+  // the asset. Either alone is enough, which matters because the objects outlive the D1 change: between the
+  // two, R2 still holds the original. A share must not hand out a URL for a photo that is being deleted, and
+  // no share request may put it back into the album.
+  it('stops serving a photo as soon as its permanent delete starts, membership row or not', async () => {
+    const app = await makeApp()
+    const { assets, created } = await sharedAlbumWith(app, 2)
+
+    // An unfinished purge, as diagnostics reports it: marked, with the membership row still there.
+    await env.DB.prepare(`UPDATE assets SET status = 'purging' WHERE id = ?`).bind(assets[0]).run()
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS n FROM album_assets WHERE asset_id = ?')
+        .bind(assets[0])
+        .first<{ n: number }>(),
+    ).toEqual({ n: 1 })
+    const listed = (await (await guest(app, `/shares/${created.share.id}`, created.secret)).json()) as {
+      items: { id: string }[]
+    }
+    expect(listed.items.map((i) => i.id)).toEqual([assets[1]])
+    for (const variant of ['thumbnail', 'preview'] as const) {
+      expect(
+        (await guest(app, `/shares/${created.share.id}/assets/${assets[0]}/${variant}`, created.secret)).status,
+      ).toBe(404)
+    }
+
+    // Finishing the delete changes nothing for the share, and the rest of the album keeps working.
+    expect((await call(app, 'DELETE', `/api/v1/assets/${assets[0]}`)).status).toBe(204)
+    expect((await guest(app, `/shares/${created.share.id}/assets/${assets[0]}/preview`, created.secret)).status).toBe(
+      404,
+    )
+    expect((await guest(app, `/shares/${created.share.id}/assets/${assets[1]}/preview`, created.secret)).status).toBe(
+      200,
+    )
   })
 
   it('share owner endpoints still require Access', async () => {

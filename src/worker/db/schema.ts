@@ -61,7 +61,9 @@ export const uploads = sqliteTable(
     width: integer(),
     height: integer(),
     taken_at: text(),
-    // status 'duplicate' with duplicate_of NULL: an interrupted upload that storage cleanup gave up on.
+    // status 'duplicate' with duplicate_of NULL: an interrupted upload that storage cleanup gave up on, or
+    // one whose duplicate was permanently deleted. Either way the row exists only so cleanup can remove the
+    // objects reserved under this row's own asset_id.
     duplicate_of: text(),
     created_at: text().notNull(),
     expires_at: text().notNull(),

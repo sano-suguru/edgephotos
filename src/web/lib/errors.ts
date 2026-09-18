@@ -1,3 +1,4 @@
+import { ExportSnapshotError } from '../../contracts/export-manifest'
 import { ApiRequestError } from './api/client'
 
 // The API returns machine-readable codes with English messages for developers (contracts/errors.ts).
@@ -13,6 +14,8 @@ const MESSAGES: Record<string, string> = {
   ASSET_NOT_TRASHED: '先にゴミ箱へ移動してください。',
   ALBUM_NOT_FOUND: 'アルバムが見つかりません。すでに削除された可能性があります。',
   SHARE_NOT_FOUND: '共有リンクが見つかりません。',
+  // Another tab revoked it, or it expired, while this screen still showed it as active.
+  SHARE_UNAVAILABLE: 'この共有リンクは無効化済みか期限切れです。新しい共有リンクを作成してください。',
   VALIDATION_FAILED: '入力内容を確認してください。',
   UPLOAD_OBJECT_MISSING: '転送が完了していません。もう一度お試しください。',
   UPLOAD_OBJECT_INVALID: '転送したファイルを確認できませんでした。もう一度お試しください。',
@@ -22,6 +25,10 @@ const MESSAGES: Record<string, string> = {
 
 export function userMessage(err: unknown): string {
   console.warn(err)
+  // The library changed under the paged export; nothing is wrong with it and nothing was written.
+  if (err instanceof ExportSnapshotError) {
+    return 'エクスポート中にライブラリが変化したため、内容が揃いませんでした。もう一度実行してください。'
+  }
   if (err instanceof ApiRequestError) {
     return MESSAGES[err.code] ?? (err.status >= 500 ? 'サーバーで問題が発生しました。' : '操作を完了できませんでした。')
   }

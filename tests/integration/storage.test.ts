@@ -381,6 +381,47 @@ describe('storage cleanup', () => {
     expect(n?.n).toBe(0)
   })
 
+  // A duplicate upload's own objects are removed on a best-effort basis, so they can outlive the call that
+  // settled it. Cleanup is what finishes the job, and it finds them through the upload row. Deleting the
+  // photo the duplicate pointed at must not take that row away with it: the row is the only record that
+  // those keys are nobody's, and without it the objects stay in R2 for good.
+  it("still removes a duplicate upload's leftover objects after the photo it duplicated is deleted", async () => {
+    const t0 = clock(Date.now() - 3 * DAY)
+    const p = await photo()
+    const winner = await makeApp({ clock: t0 })
+    const keepObjects = new Proxy(env.BUCKET, {
+      get(target, prop, receiver) {
+        if (prop === 'delete') return async () => {}
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const loser = await makeApp({ clock: t0, env: { BUCKET: keepObjects } })
+
+    // Both reservations are taken before either is finalized: reserve itself refuses a known duplicate.
+    const r1 = await reserve(winner, p)
+    const r2 = await reserve(loser, p)
+    for (const v of ['original', 'thumbnail', 'preview'] as const) {
+      await putObject(winner, r1.targets[v], p[v])
+      await putObject(loser, r2.targets[v], p[v])
+    }
+    const created = await callJson(winner, 'POST', `/api/v1/uploads/${r1.upload.id}/finalize`, { expect: 200 })
+    const settled = await callJson(loser, 'POST', `/api/v1/uploads/${r2.upload.id}/finalize`, { expect: 200 })
+    expect(settled.result).toBe('duplicate')
+    const stranded = assetIdFromTarget(r2.targets.original.url).slice('originals/'.length)
+    for (const k of keysOf(stranded)) expect(await exists(k)).toBe(true)
+
+    const app = await makeApp()
+    await callJson(app, 'POST', `/api/v1/assets/${created.asset.id}/trash`, { expect: 200 })
+    expect((await call(app, 'DELETE', `/api/v1/assets/${created.asset.id}`)).status).toBe(204)
+
+    const res: StorageCleanupResult = await callJson(app, 'POST', '/api/v1/storage/cleanup', { expect: 200 })
+    expect(res).toMatchObject({ cleared: 1, failed: 0 })
+    for (const k of keysOf(stranded)) expect(await exists(k)).toBe(false)
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM uploads').first<{ n: number }>()).toEqual({ n: 0 })
+    expect((await auditAll(app)).issues).toEqual([])
+  })
+
   it('keeps an upload that failed for a transient reason and reports it', async () => {
     const t0 = clock(Date.now() - 3 * DAY)
     const old = await makeApp({ clock: t0 })

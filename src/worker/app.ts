@@ -509,7 +509,7 @@ export function createApp(options: AppOptions) {
       request: { params: ShareParams },
       responses: {
         201: json(ShareCreatedSchema, 'Old link revoked, new link issued'),
-        409: json(ErrorSchema, 'Share expired'),
+        409: json(ErrorSchema, 'The share is already revoked or expired; no new link is issued'),
         ...errorResponses,
       },
     }),
