@@ -301,7 +301,7 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 - asset / trash / album 件数
 - 未完了 upload（`pending`）件数と、そのうち期限切れ（`expires_at` を過ぎた = 中断した）件数
 - 削除処理中（`purging`）件数と、その asset ID（ライブラリ画面の「削除を再開」で完了できる）
-- 最終 export 日時（manifest を最後まで組み立てた時刻。ライブラリ画面のダウンロードと `pnpm backup` の export / verify / restore を含む）
+- 最終 manifest 取得日時（manifest を最後まで組み立てた時刻。ライブラリ画面のダウンロードと `pnpm backup` の export / verify / restore を含む）。**写真のファイルが backup された時刻ではありません。** manifest を読むだけの操作でも更新されるので、これを backup 済みの根拠に使わないでください
 - 適用済み migration
 
 Worker のエラーログは request ID・route・例外名だけを出し、header・token・URL・body を出しません。
