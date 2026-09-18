@@ -236,7 +236,8 @@ export function SettingsPage() {
           <p class="mt-3 text-sm text-muted-foreground">
             「最終 manifest 取得」は metadata を最後まで読んだ時刻です。写真のファイルが保存された時刻ではありません（
             <code>pnpm backup verify</code> など、manifest を読むだけの操作でも更新されます）。元ファイルを含む backup
-            を取った時刻は <code>pnpm backup export</code> 側で確認してください。
+            をいつ取ったかは、この画面では分かりません。backup ディレクトリの <code>manifest.json</code> にある{' '}
+            <code>exportedAt</code> と、<code>pnpm backup check</code> の結果で確認してください。
           </p>
           {diag.value.counts.expiredUploads > 0 && (
             <p class="mt-3 text-sm text-muted-foreground">
