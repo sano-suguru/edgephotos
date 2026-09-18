@@ -224,7 +224,7 @@ describe('derivative repair', () => {
     ]
 
     for (const c of cases) {
-      it(`${c.name}: is removed so the photo falls back to "missing", never "present but broken"`, async () => {
+      it(`${c.name}: is reported and replaced in place, never deleted`, async () => {
         const { result } = await uploadPhoto(app)
         const id = result.asset.id
         const before = await snapshot(id)
@@ -237,10 +237,14 @@ describe('derivative repair', () => {
         const second = await repair(app, id)
         expect(second.rejected).toEqual([{ object: 'thumbnail', problem: c.problem }])
         expect(second.missing).toEqual(['thumbnail'])
-        expect(await env.BUCKET.head(objectKey(id, 'thumbnail'))).toBeNull()
+        // Not deleted: the target replaces exactly this object instead.
+        const stillThere = await env.BUCKET.head(objectKey(id, 'thumbnail'))
+        expect(stillThere).not.toBeNull()
+        expect(second.targets.thumbnail?.headers['if-match']).toBe(stillThere?.httpEtag)
+        expect(second.targets.thumbnail?.headers['if-none-match']).toBeUndefined()
         expect(await snapshot(id)).toEqual(before)
 
-        // The reissued target lets the client try again on the now-free key.
+        // The replacing target overwrites the unusable object with a good one.
         expect((await putObject(app, second.targets.thumbnail as never, syntheticJpeg())).status).toBe(200)
         expect((await repair(app, id)).status).toBe('ok')
         expect(await auditAll(app)).toEqual([])
@@ -257,7 +261,9 @@ describe('derivative repair', () => {
       expect((await putObject(app, first.targets.thumbnail as never, huge)).status).toBe(200)
       const second = await repair(app, id)
       expect(second.rejected).toEqual([{ object: 'thumbnail', problem: 'too_large' }])
-      expect(await env.BUCKET.head(objectKey(id, 'thumbnail'))).toBeNull()
+      expect(await env.BUCKET.head(objectKey(id, 'thumbnail'))).not.toBeNull()
+      expect((await putObject(app, second.targets.thumbnail as never, syntheticJpeg())).status).toBe(200)
+      expect((await repair(app, id)).status).toBe('ok')
     })
   })
 
@@ -292,6 +298,45 @@ describe('derivative repair', () => {
       expect(await sha256(new Uint8Array(await (stored as R2ObjectBody).arrayBuffer()))).toBe(await sha256(winner))
       expect((await repair(app, id)).status).toBe('ok')
       expect(await auditAll(app)).toEqual([])
+    })
+
+    // Two repairs inspect the SAME unusable object; one gets the photo fixed, and the other then acts on the
+    // view it took earlier. What is pinned here is that a stale view can only be refused, never destructive:
+    // the straggler's target is bound to the object it inspected, so it cannot touch the newer one.
+    // This is why an unusable derivative is replaced rather than deleted first. A delete is unconditional in
+    // R2, so a straggler that deleted "the broken object" would remove whatever is at that key by then --
+    // including the good thumbnail the other repair just wrote. The interleaving itself is not reproducible
+    // here (the local runtime serializes requests, as noted in services/uploads.ts); the condition on the
+    // target is what makes it impossible (docs/decisions.md D-026).
+    it('cannot undo a newer repair: a straggler holding a stale view of a broken object is refused', async () => {
+      const { result } = await uploadPhoto(app)
+      const id = result.asset.id
+      const before = await snapshot(id)
+      await env.BUCKET.delete(objectKey(id, 'thumbnail'))
+      // Both tabs find the same unusable thumbnail.
+      await putObject(app, (await repair(app, id)).targets.thumbnail as never, syntheticJpeg({ exif: true }))
+
+      const straggler = await repair(app, id)
+      const winner = await repair(app, id)
+      expect(straggler.rejected).toEqual([{ object: 'thumbnail', problem: 'metadata_segment' }])
+      expect(winner.rejected).toEqual([{ object: 'thumbnail', problem: 'metadata_segment' }])
+
+      // The winner repairs the photo.
+      const good = syntheticJpeg()
+      expect((await putObject(app, winner.targets.thumbnail as never, good)).status).toBe(200)
+      expect((await repair(app, id)).status).toBe('ok')
+      const repaired = await derivativeState(id)
+
+      // The straggler now acts on a view of the world that is out of date.
+      expect((await putObject(app, straggler.targets.thumbnail as never, syntheticJpeg())).status).toBe(412)
+
+      // The good thumbnail is still there, byte for byte, and the photo is still healthy.
+      expect(await derivativeState(id)).toEqual(repaired)
+      const stored = await env.BUCKET.get(objectKey(id, 'thumbnail'))
+      expect(await sha256(new Uint8Array(await (stored as R2ObjectBody).arrayBuffer()))).toBe(await sha256(good))
+      expect((await repair(app, id)).status).toBe('ok')
+      expect(await auditAll(app)).toEqual([])
+      expect(await snapshot(id)).toEqual(before)
     })
 
     it('never overwrites a derivative that is already valid', async () => {

@@ -18,13 +18,16 @@ import type { ServiceContext } from './context'
 // The whole protocol is this one call, and it holds no state of its own:
 //
 //   1. the asset must be `ready` and its original must be exactly the one finalize verified
-//   2. any derivative object found at its key is checked the way finalize checks it; an unusable one is
-//      deleted, so the photo returns to `missing_derivative` rather than staying silently broken
-//   3. a short-lived GET for the original and presigned PUTs for the still-missing derivative keys are
-//      returned; `status: 'ok'` when nothing is missing
+//   2. any derivative object found at its key is checked the way finalize checks it
+//   3. a short-lived GET for the original and presigned PUTs for the keys that need one are returned;
+//      `status: 'ok'` when both derivatives are present and pass
 //
 // Calling it again is the retry, the verification and the way a second tab converges. Nothing here writes to
-// D1, and the only R2 writes it can ever authorise are the two derivative keys of this asset.
+// D1, and **this endpoint never deletes an object**: an unusable derivative is replaced by a conditional PUT
+// bound to the ETag we inspected, not deleted first. R2 supports If-Match on PutObject but has no conditional
+// delete, so "delete then create" could only ever be two steps with a gap between them: a second repair that
+// inspected the same broken object could delete the good one the first had just written. Replacement has no
+// such gap (D-026).
 
 // Shorter than an upload: the client already holds the original when it PUTs, and a narrow window limits how
 // long a PUT can outlive a permanent delete that starts after the URLs were issued.
@@ -64,24 +67,27 @@ type Rejection = DerivativeRepair['rejected'][number]
 // Exactly the contract finalize enforces (D-012): a plain JPEG with no EXIF/XMP (APP1) or IPTC (APP13), so a
 // repaired thumbnail can no more leak capture metadata than an uploaded one. The size limit is the one
 // reserve would have applied.
-async function inspectDerivative(
-  ctx: ServiceContext,
-  assetId: string,
-  variant: DerivativeVariant,
-): Promise<{ present: false } | { present: true; rejection: Rejection | null }> {
+type Inspected =
+  // Nothing at the key: a PUT may create one.
+  | { present: false }
+  // Something is there. `rejection` names why it is unusable; `etag` is what a replacement must still match,
+  // in the quoted HTTP form (`httpEtag`), which is what an `If-Match` header requires.
+  | { present: true; etag: string; rejection: Rejection | null }
+
+async function inspectDerivative(ctx: ServiceContext, assetId: string, variant: DerivativeVariant): Promise<Inspected> {
   const key = objectKey(assetId, variant)
   const head = await ctx.bucket.head(key)
   if (!head) return { present: false }
-  if (head.size > MAX_BYTES[variant]) return { present: true, rejection: { object: variant, problem: 'too_large' } }
-  // An empty object has no header to read, and a zero-length range is not a request R2 answers. Rejecting it
-  // here is what keeps the key recoverable: `If-None-Match: *` means a PUT can never replace it, so an empty
-  // object that this call left in place would block every later repair of that photo.
-  if (head.size === 0) return { present: true, rejection: { object: variant, problem: 'not_jpeg' } }
+  const etag = head.httpEtag
+  if (head.size > MAX_BYTES[variant])
+    return { present: true, etag, rejection: { object: variant, problem: 'too_large' } }
+  // An empty object has no header to read, and a zero-length range is not a request R2 answers.
+  if (head.size === 0) return { present: true, etag, rejection: { object: variant, problem: 'not_jpeg' } }
   const body = await ctx.bucket.get(key, { range: { offset: 0, length: Math.min(head.size, INSPECT_HEAD_BYTES) } })
-  // Vanished between the head and the read: treat it as absent and let this call reissue a target.
+  // Vanished between the head and the read: treat it as absent and let this call issue a create-only target.
   if (!body) return { present: false }
   const scan = scanJpegForMetadata(new Uint8Array(await body.arrayBuffer()))
-  return { present: true, rejection: scan.ok ? null : { object: variant, problem: scan.reason } }
+  return { present: true, etag, rejection: scan.ok ? null : { object: variant, problem: scan.reason } }
 }
 
 export async function repairDerivatives(ctx: ServiceContext, assetId: string): Promise<DerivativeRepair> {
@@ -90,12 +96,15 @@ export async function repairDerivatives(ctx: ServiceContext, assetId: string): P
   const inspected = await Promise.all(VARIANTS.map((v) => inspectDerivative(ctx, assetId, v)))
   const rejected: Rejection[] = []
   const missing: DerivativeVariant[] = []
+  // What each target must be conditioned on: create-only, or replace exactly the object we just inspected.
+  const replaces = new Map<DerivativeVariant, string>()
   for (const [i, state] of inspected.entries()) {
     const variant = VARIANTS[i]
     if (!state.present) missing.push(variant)
     else if (state.rejection) {
       rejected.push(state.rejection)
       missing.push(variant)
+      replaces.set(variant, state.etag)
     }
   }
 
@@ -104,21 +113,23 @@ export async function repairDerivatives(ctx: ServiceContext, assetId: string): P
   }
 
   // Only now, with something actually to rebuild, is the original read at all. A repair is refused outright
-  // for a photo whose original is damaged, and nothing is deleted in that case.
+  // for a photo whose original is damaged.
   await requireIntactOriginal(ctx, asset)
-
-  // Deleting an unusable derivative is the only write this endpoint performs, and it is confined to the two
-  // derivative keys of this asset. A derivative is reconstructible by definition; the original never is, and
-  // its key is never passed to delete() anywhere in this file.
-  if (rejected.length > 0) {
-    await ctx.bucket.delete(rejected.map((r) => objectKey(assetId, r.object)))
-  }
 
   const [source, ...signed] = await Promise.all([
     ctx.signer.signGet(objectKey(assetId, 'original'), OWNER_GET_URL_TTL_SECONDS),
-    // `If-None-Match: *` is signed in, so a target can only ever fill an empty key: a valid derivative
-    // cannot be replaced, and a stale target from an earlier call is harmless.
-    ...missing.map((v) => ctx.signer.signPut(objectKey(assetId, v), 'image/jpeg', REPAIR_URL_TTL_SECONDS)),
+    // Missing key: `If-None-Match: *`, so the PUT can only create. Unusable object: `If-Match` on the ETag we
+    // inspected, so the PUT replaces that exact object or nothing. Either way a derivative that is already
+    // good is untouchable, and a target left over from an earlier call cannot undo a newer repair.
+    ...missing.map((v) => {
+      const etag = replaces.get(v)
+      return ctx.signer.signPut(
+        objectKey(assetId, v),
+        'image/jpeg',
+        REPAIR_URL_TTL_SECONDS,
+        etag ? { replaces: etag } : undefined,
+      )
+    }),
   ])
 
   const targets: DerivativeRepair['targets'] = {}

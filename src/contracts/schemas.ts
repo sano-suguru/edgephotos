@@ -359,8 +359,8 @@ export const StorageCleanupResultSchema = z
 export const DerivativeVariantSchema = z.enum(['thumbnail', 'preview'])
 
 // Why a derivative found at its key was not usable. The same checks finalize applies (D-012), plus the
-// size limit reserve would have enforced. Such an object is deleted, so the photo falls back to
-// `missing_derivative` (repairable) instead of staying silently broken.
+// size limit reserve would have enforced. Such an object is never deleted: `targets` carries a PUT that
+// replaces exactly it (conditional on its ETag), so a repair cannot undo a newer one.
 export const DerivativeRejectionSchema = z
   .object({
     object: DerivativeVariantSchema,
@@ -375,7 +375,7 @@ export const DerivativeRepairSchema = z
     status: z.enum(['ok', 'incomplete']),
     // Absent after this call; `targets` has a PUT URL for each.
     missing: z.array(DerivativeVariantSchema),
-    // Unusable objects this call removed.
+    // Unusable objects found at their key. Each has a replacing target in `targets`; none was deleted.
     rejected: z.array(DerivativeRejectionSchema),
     // Short-lived GET for the unmodified original, only while something is missing. `sha256` lets the
     // client confirm the download before it decodes anything; it is `assets.sha256`, which R2 verified
@@ -388,7 +388,8 @@ export const DerivativeRepairSchema = z
         contentType: z.enum(ORIGINAL_CONTENT_TYPES),
       })
       .optional(),
-    // Presigned PUTs for the missing derivative keys only. Never for `originals/`.
+    // Presigned PUTs for the derivative keys that need one, never for `originals/`. Each is conditional:
+    // create-only for an absent key, or replace-this-exact-ETag for an unusable object.
     targets: z.object({
       thumbnail: UploadTargetSchema.optional(),
       preview: UploadTargetSchema.optional(),

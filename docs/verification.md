@@ -170,8 +170,9 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 - thumbnail だけ・preview だけ・両方の欠損を、それぞれ `missing_derivative` として検出し、作り直したあと audit が空になること
 - 作り直しの前後で、`assets` 行全体・`album_assets`・`uploads` 行・original の size / etag / R2 記録の SHA-256・original の byte 列から計算し直した SHA-256 が、すべて一致すること（favorite と album に入れた写真、trash 内の写真でも同じ）
 - original が無い / size 違い / 同じ size で SHA-256 違いのとき、URL を発行せず `409 REPAIR_SOURCE_UNUSABLE` になること
-- 壊れた derivative を PUT した場合（EXIF あり・JPEG でない・途中で切れている・size 超過）、その object を削除して `missing_derivative` へ戻し、同じ key へ作り直せること
+- 壊れた derivative を PUT した場合（EXIF あり・JPEG でない・途中で切れている・空・size 超過）、その object を削除せずに報告し、検査時点の ETag への `If-Match` で置き換えられること
 - 同時実行: 2 つの repair から同じ key へ PUT すると、後から届いた方が `412` になり、先に保存された bytes が残ること。妥当な derivative が上書きされないこと
+- 古い view を持った repair が新しい repair の結果を取り消せないこと: 同じ「使えない object」を見た 2 つの repair のうち一方が写真を直したあと、もう一方の target を使うと `412` になり、直った derivative が byte 単位で残ること。削除してから作り直す実装に差し替えるとこのテストが落ちることも確認した（`If-Match` に raw の `etag` を渡すと R2 は `Invalid ETag in if-match header` を投げるため、引用符付きの `httpEtag` を使う）
 - 完全削除と重なった場合: 削除後に届いた PUT は derivative key だけを残し（original は残らない）、audit が `unreferenced_objects` として報告すること。以後の repair は `404`
 - client 側（`repairAsset`）: `status: 'ok'` だけを完了とみなし、PUT が成功しても server がまだ欠損と言う間は作り直しを繰り返すこと。回数に上限があること。original の SHA-256 が合わなければ何も PUT しないこと
 
@@ -202,12 +203,13 @@ iPhone Safari:
 
 Android: 上と同じ項目のうち該当するもの（HEIF 設定の端末を含む）。
 
-derivative の作り直し（[D-026](decisions.md)）は、bucket の CORS 設定と実 R2 の preflight までを確認済みです（上）。Browser からの往復は未実施で、remote-test への deploy と Access login（対話操作）が要ります。次を確認します。
+derivative の作り直し（[D-026](decisions.md)）は、bucket の CORS 設定と実 R2 の preflight までを確認済みです（上）。Browser からの往復は未実施です。remote-test への deploy と Access login（対話操作）が要り、presigned URL の署名には Worker secret の R2 credential が要るため、`wrangler` だけでは代用できません（`wrangler r2 object put` に条件付きの option はありません）。次を確認します。
 
 - 壊した写真（remote-test の bucket から thumbnail を 1 つ削除）を、ライブラリ画面の「サムネイルを作り直す」で直せること。作り直し後に audit が正常へ戻ること
 - 実 R2 の presigned GET を Browser の `fetch()` から CORS 越しに読み、body の SHA-256 が `assets.sha256` と一致すること（preflight は確認済み。実際に body を読むのはこの手順）
 - 作り直した derivative の PUT（`Content-Type` + `If-None-Match: *`）が通り、同じ URL への 2 回目が `412` になること
 - 実 R2 の `head().checksums.sha256` を使った original の照合が、作り直しの入口で期待どおり働くこと（`409 REPAIR_SOURCE_UNUSABLE`）
+- **`If-Match` 付き presigned PUT**（この経路で初めて使う条件）: 検査した ETag なら `200`、古い ETag なら `412`、先に保存された bytes が残ること
 - `pnpm diagnose` の `r2: CORS` が remote-test の bucket で PASS すること
 - 確認に使った asset は trash へ移動する（この文書の他の項目と同じ扱い）
 

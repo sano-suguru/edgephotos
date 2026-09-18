@@ -10,10 +10,19 @@ export type SignedRequest = {
   expiresAt: Date
 }
 
+// What the storage must check before it accepts a PUT. Exactly one of these applies to every PUT we sign.
+// `ifMatch` replaces one specific stored object (its ETag as observed); without it, the PUT may only create
+// a new object. Both are signed, so a client can neither drop nor alter the condition.
+export type PutCondition =
+  | { replaces?: undefined; sha256?: string }
+  // Conditional replacement of an object we inspected (docs/decisions.md D-026). R2 rejects the PUT with 412
+  // once that object is no longer the one whose ETag is given here.
+  | { replaces: string; sha256?: string }
+
 // Issues short-lived bearer URLs for a single operation on a single object key.
 // With sha256 (lowercase hex), storage must reject a PUT whose body has a different digest.
 export interface BlobSigner {
-  signPut(key: string, contentType: string, ttlSeconds: number, sha256?: string): Promise<SignedRequest>
+  signPut(key: string, contentType: string, ttlSeconds: number, condition?: PutCondition): Promise<SignedRequest>
   signGet(key: string, ttlSeconds: number): Promise<SignedRequest>
 }
 
@@ -86,15 +95,19 @@ export function createR2Signer(config: R2SignerConfig, now: () => Date = () => n
 
   return {
     // If-None-Match: * makes R2 reject a second PUT, so a still-valid URL cannot overwrite an original.
-    signPut: (key, contentType, ttl, sha256) => sign('PUT', key, ttl, putHeaders(contentType, sha256)),
+    signPut: (key, contentType, ttl, condition) => sign('PUT', key, ttl, putHeaders(contentType, condition)),
     signGet: (key, ttl) => sign('GET', key, ttl, {}),
   }
 }
 
-// Every header here is signed (allHeaders), so a client cannot drop or alter the checksum.
-export function putHeaders(contentType: string, sha256?: string): Record<string, string> {
-  const headers: Record<string, string> = { 'content-type': contentType, 'if-none-match': '*' }
-  if (sha256) headers['x-amz-checksum-sha256'] = hexToBase64(sha256)
+// Every header here is signed (allHeaders), so a client cannot drop or alter the checksum or the condition.
+// R2 supports If-Match / If-None-Match on PutObject (docs/r2/api/s3/api). It supports neither on DeleteObject,
+// which is why a repair replaces an unusable derivative instead of deleting it first (D-026).
+export function putHeaders(contentType: string, condition?: PutCondition): Record<string, string> {
+  const headers: Record<string, string> = { 'content-type': contentType }
+  if (condition?.replaces) headers['if-match'] = condition.replaces
+  else headers['if-none-match'] = '*'
+  if (condition?.sha256) headers['x-amz-checksum-sha256'] = hexToBase64(condition.sha256)
   return headers
 }
 

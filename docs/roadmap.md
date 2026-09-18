@@ -139,10 +139,10 @@ v1 の完成条件には含めません。
 - ✅ `POST /api/v1/assets/{assetId}/derivatives/repair`（state を持たない冪等な 1 呼び出し。original は読むだけ）
 - ✅ Browser の既存 derivative pipeline の再利用（upload と同じ renderer・長辺・metadata 除去）
 - ✅ 作り直しの前後で original の SHA-256・asset ID・album・favorite・trash・日時が変わらないことの回帰テスト
-- ✅ 検査に通らない derivative を残さず `missing_derivative` へ戻す
+- ✅ object を 1 つも削除しない。使えない derivative は検査時点の ETag への `If-Match` で置き換える（古い repair が新しい結果を取り消せない）
 - ✅ ライブラリ画面の「サムネイルを作り直す」と、`pnpm diagnose` の `r2: CORS` が `GET` も検査すること
 - ✅ remote-test: bucket の CORS が `GET` を許し、実 R2 の preflight が app origin にだけ `Access-Control-Allow-Origin` を返すこと（設定変更は不要だった）
-- ⬜ remote-test: Browser から壊れた写真を実際に作り直す往復（deploy と Access login が要る。[verification.md](verification.md) の「未検証」）
+- ⬜ remote-test: Browser から壊れた写真を実際に作り直す往復と、`If-Match` 付き presigned PUT の `200` / `412`（deploy と Access login が要る。[verification.md](verification.md) の「未検証」）
 
 ## Release polish
 

@@ -7,7 +7,7 @@ import { navigate } from '../../state/router'
 import { repairAssets, repairMessage } from './repair'
 import { repairDeps } from './repair-client'
 import { resumePurges } from './resume-purges'
-import { type AuditSummary, cleanupMessage, findings, runAudit, runCleanup } from './storage-check'
+import { type AuditSummary, cleanupMessage, findings, REPAIRABLE_MAX, runAudit, runCleanup } from './storage-check'
 
 const TONE_CLASS = { damage: 'text-destructive', action: 'text-foreground', info: 'text-muted-foreground' } as const
 
@@ -107,7 +107,8 @@ function StorageCheck(props: { onChanged: () => void }) {
           {repairable > 0 && (
             <div class="space-y-2">
               <p class="text-muted-foreground">
-                「サムネイルを作り直す」は、元ファイルを読み込んで、欠けているサムネイルとプレビューだけを作り直します。元ファイル・撮影日時・アルバム・お気に入り・ゴミ箱の状態は変わりません。
+                「サムネイルを作り直す」は、元ファイルを読み込んで、欠けているサムネイルとプレビューだけを作り直します。元ファイル・撮影日時・アルバム・お気に入り・ゴミ箱の状態は変わりません。一度に作り直すのは最大{' '}
+                {REPAIRABLE_MAX} 枚です。残りは、作り直したあとにもう一度点検すると続けて直せます。
               </p>
               <Button variant="secondary" disabled={running.value !== null} onClick={() => void repair()}>
                 {running.value === 'repair'

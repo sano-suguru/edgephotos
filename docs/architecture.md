@@ -266,8 +266,8 @@ original が無事で thumbnail / preview だけが欠けた写真は、original
 ```text
 1. POST /api/v1/assets/{assetId}/derivatives/repair
 2. Worker checks the asset is ready and the original is the one finalize verified
-3. Worker validates any derivative object found at its key; an invalid one is deleted
-4. Worker returns a short-lived GET for the original + presigned PUTs for the missing keys
+3. Worker validates any derivative object found at its key (never deleting one)
+4. Worker returns a short-lived GET for the original + conditional PUTs for the keys that need one
 5. Client downloads the original, checks its SHA-256, renders the missing derivatives
 6. Client PUTs them, then calls the same endpoint again
 7. status: 'ok' when both derivatives are present and pass the checks
@@ -281,10 +281,10 @@ derivative の生成は upload と同じ Browser の pipeline（`renderDerivativ
 
 - original は読むだけ。repair が署名するのは derivative key の PUT と original の GET だけ
 - object key は asset ID から server が決める。client から key を受け取らない
-- `If-None-Match: *` により、妥当な derivative を上書きできない
-- 検査に通らない derivative は削除し、`missing_derivative`（作り直せる状態）へ戻す
+- object を 1 つも削除しない。使えない derivative は削除せず置き換える
+- PUT は必ず条件付き。key が空なら `If-None-Match: *`、使えない object があるなら検査時点の ETag への `If-Match`。妥当な derivative は上書きできず、古い target は 412 になる
 - D1 へ書かない。asset ID・album・favorite・trash・createdAt / takenAt は変わらない
-- 失敗しても「original は無事、derivative は欠けたまま」より悪くならない
+- 失敗しても「original は無事、derivative は直っていない」より悪くならない。新しい repair の結果を古い repair が取り消すこともない
 
 ## 7. Share architecture
 

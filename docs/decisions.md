@@ -373,24 +373,30 @@ storage audit は `missing_derivative`（original は無事だが thumbnail / pr
 - server が持つ state は無い。D1 に行を足さず、migration も要らない。再送・応答の消失・tab を閉じた・同時実行は、すべて「もう一度呼ぶ」に収束する
 - derivative の生成は Browser の既存 pipeline をそのまま使う（`renderDerivatives`。upload と同じ renderer・同じ長辺・同じ metadata 除去）。Worker に画像処理は入れない
 - `assets` 行が `ready` で、original が finalize の確認したものと同一（size と、R2 が記録した SHA-256。[D-018](decisions.md)）のときだけ URL を発行する。original が壊れている写真に必要なのは新しい thumbnail ではなく backup（operations.md §12）なので `409 REPAIR_SOURCE_UNUSABLE` で断る
-- key にある derivative は finalize と同じ検査（[D-012](decisions.md)）に size 上限を足して見る。通らない object は削除する。「壊れた object がある」より「無い」の方が良い状態で、audit が `missing_derivative` として再び拾え、作り直せる。original の key が `delete()` に渡ることは、この経路のどこにも無い
-- PUT は `If-None-Match: *` 付きで署名する（[D-013](decisions.md)）。空の key しか埋められないので、妥当な derivative が上書きされることはなく、古い target が残っていても無害
+- key にある derivative は finalize と同じ検査（[D-012](decisions.md)）に size 上限を足して見る。通らない object は**削除せず、置き換える**
+- PUT の条件を 2 つに分ける。key が空なら `If-None-Match: *`（[D-013](decisions.md)）、使えない object があるなら検査した時点の ETag への `If-Match`。どちらも署名対象なので client は外せない。妥当な derivative はどちらの条件でも触れず、古い target は 412 になるだけで無害
+- **この endpoint は object を 1 つも削除しない**
 - repair の PUT URL は 300 秒（upload の 600 秒より短い）。client は PUT の時点で original を持っているので長い期限は要らず、URL 発行後に始まった完全削除より PUT が長生きする窓を狭くする
 
 守ること:
 
 - original を削除・再 upload・変更しない。repair が署名するのは derivative key の PUT と original の GET だけ
 - asset ID・album・favorite・trash・createdAt / takenAt は変えない。この経路は D1 に一切書かない
-- 失敗したときの着地点は「original は無事、derivative は欠けたまま」。ここから先へ悪化させない
+- 失敗したときの着地点は「original は無事、derivative は直っていない」。ここから先へ悪化させない
+- 新しい repair が直したものを、古い repair が取り消せない
 
 却下した案:
 
 - upload と同じ `reserve -> PUT -> finalize` を derivative 用に作る: `uploads` に似た行と状態遷移が増え、期限切れの後始末も要る。作り直せるものにその重さは要らない
 - 写真を削除して upload し直す（現状の手順）: 派生画像の欠損を直すために original を消す。直そうとした事故で写真を失う
 - Worker で画像を再生成する（Queue / 別 Worker / 外部 service / `sharp`）: Worker が画像を decode しない方針（architecture.md §2）を崩し、Browser に同じ pipeline が既にある（AGENTS.md §6）
+- 使えない derivative を削除してから、空の key へ `If-None-Match: *` で PUT させる（当初の実装）: 削除と PUT の間に隙間ができる。同じ壊れた object を見た 2 つの repair があると、一方が直したあとに、もう一方が「壊れた object を消す」つもりで**直ったばかりの derivative を消せる**。R2 の DeleteObject には条件を付けられない（PutObject には `If-Match` がある）ため、削除の直前に head し直しても隙間は閉じない。置き換えなら隙間そのものが無い。代わりに、client が使えない bytes を PUT したまま戻ってこないと、その object は残る（「残るリスク」）
 - repair 中に完全削除された場合、残った derivative object を server が消す: `unreferenced_objects` を自動削除しない[D-023](decisions.md) の約束に手を入れることになる。残るのは derivative だけで、audit が既に分類できる（「残るリスク」参照）
 - CLI に `pnpm storage repair` を足す: Node に canvas が無く、画像 encoder を依存に加えることになる。API は client 非依存なので、後から別 client が同じ endpoint を使える
 
-影響: `missing_derivative` の対応が「削除して upload し直す」から、ライブラリ画面の「サムネイルを作り直す」になります。R2 CORS の `AllowedMethods` に `GET` が要ります（repair は original を `<img>` ではなく `fetch()` で読むため）。docs/operations.md §6 の rule は元から `GET` を含みますが、`pnpm diagnose` の `r2: CORS` が `GET` も検査するようになります。
+影響: `missing_derivative` の対応が「削除して upload し直す」から、ライブラリ画面の「サムネイルを作り直す」になります。R2 CORS の `AllowedMethods` に `GET` が要ります（repair は original を `<img>` ではなく `fetch()` で読むため）。docs/operations.md §6 の rule は元から `GET` を含みますが、`pnpm diagnose` の `r2: CORS` が `GET` も検査するようになります。presigned PUT に `If-Match` を使うのはこの経路が初めてです（upload は `If-None-Match: *` だけ）。
 
-残るリスク: repair の URL 発行後に完全削除が走り、その後に PUT が届くと、derivative key だけが行に紐づかない object として残ります（original は残りません）。presigned PUT は D1 を参照できないため、この窓は原理的に閉じられません。audit が `unreferenced_objects` として報告し、[D-023](decisions.md) のとおり自動では消しません。
+残るリスク:
+
+- repair の URL 発行後に完全削除が走り、そのあとに PUT が届くと、derivative の key だけがどの行も指さない object として残ります（original は残りません）。presigned PUT は D1 を参照できないため、この窓は原理的に閉じられません。audit が `unreferenced_objects` として報告し、[D-023](decisions.md) のとおり自動では消しません
+- client が検査を通らない bytes を PUT したまま戻ってこないと、その object は key に残ります。audit は object の有無しか見ないため、この写真は `missing_derivative` として挙がりません（表示は崩れたまま）。次にその写真を repair すれば `If-Match` で置き換わりますが、audit からは見つけられません。削除する設計に戻せばこの状態は避けられる一方、上の「直ったばかりの derivative を消せる」を招きます。**直せていない**より**壊す**方が重いので、置き換えを採ります
