@@ -122,6 +122,29 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 - verify: `--quick` が download 0 件で `ok` になり、original の size が変わった写真を storage audit で検出すること
 - paged export: 1 件ずつ・2 件ずつのページを重複なく連結できること、ページの間に写真の削除と追加があっても manifest が知らない asset を指さないこと
 
+### remote-test（2026-09-18）
+
+`edgephotos-remote-test` へ deploy して実行した。合成 JPEG のみを使い、実写真は追加していない。
+
+- migration `0002`・`0003` を remote D1 へ適用。`pnpm diagnose --env remote-test` は FAIL なし（`worker: D1 schema` が `0003_filtered_list_indexes.sql`）
+- D1 の `EXPLAIN QUERY PLAN`（REST、read-only）: favorites は `SCAN a USING INDEX assets_favorites`、trash の cursor 付きは `SEARCH a USING INDEX assets_trash ((sort_at,id)<(?,?))`、止まった削除の一覧は `SCAN assets USING COVERING INDEX assets_purging`。部分 index は D1 でも選ばれる
+- storage audit: `limit` を 1・2・3・500 に変えても、分類も件数も同じ（25 枚・75 object）。実 R2 の `list()` の並びと `startAfter` は、ページ境界の前提どおりに動いた
+- `--deep`: 直前に upload した asset は R2 が記録した SHA-256 と一致し、D-018 より前の 21 件だけが `original_checksum_unrecorded` になった。S3 API で PUT した object の checksum を binding の `head()` から読めることを、この構成でも確認した
+- backup: 初回 27.9 秒（25 枚、storage GET 75 回）、変更なしの 2 回目は 0.64 秒（download 0、API 4 回）、1 枚追加後は 1 件だけ download。`pnpm backup check` は `ok: true`
+- verify: 通常 7.1 秒（26 件 download）、`--quick` 6.1 秒（download 21 件＝checksum の記録が無い古い original のみ、5 件は R2 の記録で確認）
+- storage cleanup: 以前の検証で残っていた期限切れ upload 2 件を dry run で確認し、`--apply` で破棄（`discarded 2, cleared 2, failed 0`）。実行後の audit は「不整合なし」、`pnpm diagnose` の WARN も消えた
+
+### restore drill（2026-09-18、`edgephotos-restore-test`）
+
+空の D1・R2・Access application・R2 API token を新しく作り、remote-test の backup から restore した。
+
+- restore を API 呼び出しの 13 回目と 41 回目で `401` にして 2 回中断させ、`--resume` で完走（26 枚・1 album、最後の実行での upload は 4 枚）
+- restore 先の `pnpm backup verify` は通常・`--quick` とも `ok: true`（問題 0 件）。`pnpm storage audit --deep` も「不整合なし」
+- 中断した restore が残した reservation 1 件は `uploads in progress` として見えた（期限内なので cleanup の対象外）
+- 終了後、Worker・D1・R2 bucket・Access application 2 件・R2 API token を削除した
+
+作業中に分かった運用上の注意（[operations.md](operations.md) §3 に追記）: `wrangler secret put` で先に Worker を作ってから deploy すると、deploy 前に入れた secret は残らなかった。また、標準入力が端末でない環境では secret の値が空のまま「Success」と表示される。
+
 ### local（Browser）
 
 `pnpm test:e2e`（Chromium・WebKit、13 件）が通った。加えて、`vite dev` の使い捨て state に対して、Chromium で一度きりの Playwright script（commit していない）を実行した。

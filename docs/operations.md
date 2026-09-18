@@ -71,11 +71,15 @@ Vars（`wrangler.jsonc` の `vars`、値が公開されても害がないもの�
 
 secret 未設定の binding は `undefined` になるため、`readAppConfig()` は `null` を返し、private API と share API は `503 SERVER_MISCONFIGURED` で fail-closed のままです。`secrets.required` は deploy を止めるための仕組みであり、fail-closed の根拠ではありません。
 
+secret は **deploy のあとに設定します**。`wrangler secret put` は Worker が無ければ作りますが、そのあとで `wrangler deploy` すると、deploy 前に入れた secret は残りませんでした（2026-09-18 に `restore-test` で確認）。また、標準入力が端末でない環境（CI、エディタ内のシェル）では、値の入力を求められないまま空の secret が「Success」として保存されます。値が入ったかどうかは `pnpm diagnose` で確認してください。
+
 R2 credential は対象 bucket だけの Object Read & Write 権限を持つ R2 API token から作成します。Cloudflare account 全体を管理できる token を EdgePhotos へ設定しません。
 
 ## 4. Cloudflare Access
 
 同じ hostname に 2 つの self-hosted application を作ります。path の指定はいずれも wildcard を付けません。
+
+destination（宛先）の種類は **public DNS（パブリック DNS）** を選び、hostname と path で指定します。self-hosted application は Worker そのものを宛先にもできますが、それだと Worker 全体が Access の対象になり、`/share` だけを Bypass にできません。
 
 1. `photos.example.com`: Allow policy（owner の identity のみ）
 2. `photos.example.com/share`: Bypass policy（Everyone）
