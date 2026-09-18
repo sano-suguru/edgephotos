@@ -94,7 +94,9 @@ v1 の完成条件には含めません。
 - cleanup を実行しても `library: interrupted uploads` の件数がすぐに増える
 - R2 使用量が、export manifest の `originalSize` 合計を大きく上回り、storage audit に出ない差がある
 
-**壊れた写真の修復は手作業。** storage audit は original / derivative の欠落や違いを見つけますが、直しません。backup の original から upload し直す手順は [operations.md](operations.md) §12 にあります。derivative だけを作り直す経路はありません。
+**original の破損の修復は手作業。** storage audit は original / derivative の欠落や違いを見つけますが、original は直しません。backup の original から upload し直す手順は [operations.md](operations.md) §12 にあります。欠けた derivative だけは、original に触れずに作り直せます（[D-026](decisions.md)）。
+
+**audit は derivative の中身を見ない。** storage audit は object の有無だけを見ます。そのため「object はあるが JPEG として使えない derivative」は `missing_derivative` に出ず、表示が崩れたままでも「問題なし」と数えられます。この状態を作れるのは、作り直しで使えない bytes を PUT したまま戻ってこなかった client だけです（[D-026](decisions.md) の「残るリスク」）。その写真をもう一度作り直せば `If-Match` で置き換わります。10 万枚の audit で derivative を 1 つずつ読み直す代価に見合わないため、`--deep` にも入れていません。必要になった場合の候補は、通常の audit は有無だけのままにして `--deep` に derivative の header 検査を足すことです。
 
 **どの行も指さない object は消さない。** D1 の time travel の後などに残る `unreferenced_objects` は報告だけします。取り出しと削除は R2 の Dashboard で行います。
 
@@ -146,6 +148,7 @@ v1 の完成条件には含めません。
 
 ## Release polish
 
+- **実 R2 で `If-Match` 付き presigned PUT を 1 度踏む**（作り直しの競合安全性がこれに依存する。公式ドキュメントが PutObject の対応を明記していることと、EdgePhotos の SigV4 署名が正しいことは別の問題なので、自分たちが発行した URL と header で確かめる。有効な ETag で `200`、古い ETag で `412`、先に保存された bytes が残ること。[D-026](decisions.md)、[verification.md](verification.md)）
 - Deploy to Cloudflare
 - setup guide
 - update / uninstall procedure

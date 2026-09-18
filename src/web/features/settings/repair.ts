@@ -16,8 +16,11 @@ export type RepairDeps = {
   put: (target: { url: string; headers: Record<string, string> }, body: Blob) => Promise<void>
 }
 
-// Each round is one full rebuild attempt. More than a couple means something is wrong with the bytes this
-// client produces, and retrying forever would only keep rewriting the same rejected object.
+// Each round is one full rebuild attempt. A round is spent whenever another repair won the key first (the
+// PUT reports stored on `412`, and only the next server call reveals whose bytes are there), so a few rounds
+// covers ordinary contention. Failing here is safe: the photo is left exactly as it was.
+// If this limit is ever reached in practice, find out why the loop did not converge rather than raising it:
+// a larger number would only hide a client that keeps producing bytes the server rejects.
 const MAX_ROUNDS = 3
 
 export class RepairIncompleteError extends Error {}
