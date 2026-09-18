@@ -362,4 +362,6 @@ drill で見るもの:
 - restore 先の timeline と album が開き、共有リンクを新しく作れる
 - 所要時間（[benchmarks.md](benchmarks.md) の見積もりと比べる）
 
-終わったら drill 用の Worker、D1、R2 bucket、Access application、R2 API token を削除します。
+終わったら drill 用の Worker、D1、R2 bucket、R2 API token を削除します。R2 API token は鍵なので必ず消します（作成画面の既定は「すべてのバケット」です。対象を drill 用の bucket に絞れていたかも確認します）。
+
+Access application は残しても構いません。秘密情報もデータも持たず、hostname に紐づくだけなので、次の drill で同じ hostname を使えば AUD ごと再利用できます。Worker が無い間は、その hostname に誰も到達しません。

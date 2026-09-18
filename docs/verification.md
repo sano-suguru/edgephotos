@@ -8,7 +8,7 @@
 
 ## 現在の状況
 
-- 最終確認: 2026-09-17
+- 最終確認: 2026-09-18
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`
 - 未確認: production 環境の作成と deploy、iPhone / Android 実機での取り込み（[未検証](#未検証)）
 
@@ -141,7 +141,7 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 - restore を API 呼び出しの 13 回目と 41 回目で `401` にして 2 回中断させ、`--resume` で完走（26 枚・1 album、最後の実行での upload は 4 枚）
 - restore 先の `pnpm backup verify` は通常・`--quick` とも `ok: true`（問題 0 件）。`pnpm storage audit --deep` も「不整合なし」
 - 中断した restore が残した reservation 1 件は `uploads in progress` として見えた（期限内なので cleanup の対象外）
-- 終了後、Worker・D1・R2 bucket・Access application 2 件・R2 API token を削除した
+- 終了後に Worker・D1・R2 bucket を削除した（R2 bucket は object を消してから削除）。この drill 用の R2 API token（対象は drill の bucket のみ）も削除した。Access application 2 件は次の drill で再利用できるため残した（[operations.md](operations.md) §14）
 
 作業中に分かった運用上の注意（[operations.md](operations.md) §3 に追記）: `wrangler secret put` で先に Worker を作ってから deploy すると、deploy 前に入れた secret は残らなかった。また、標準入力が端末でない環境では secret の値が空のまま「Success」と表示される。
 
@@ -160,12 +160,6 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 - 元ファイルの形式は、今回から中身の先頭 byte で決める（finalize と同じ関数）。Browser が拡張子から推測する `type` の違いに左右されない
 
 ## 未検証
-
-2026-09-17 の長期保管の変更（上記）は remote-test に deploy していません。deploy 後に次を確認します。
-
-- migration `0002`・`0003` の remote 適用と、`EXPLAIN QUERY PLAN` で favorites / trash が部分 index を使うこと（bind した値ではなく literal で書いた条件が D1 でも index の選択に効くか）
-- 実 R2 の `list()` の並び（key の辞書順）と `startAfter` が、storage audit のページ境界の前提どおりであること。`--deep` の `head()` が S3 API で PUT した original の SHA-256 を返すこと（D-018 で確認済みの挙動）
-- `pnpm backup export`（差分）・`check`・`restore --resume`・`verify --quick` を remote で一巡すること
 
 iPhone / Android 実機での取り込みは未確認です。desktop の WebKit では代用できません。[roadmap.md](roadmap.md) の Post-merge verification で、次を確認します。
 
