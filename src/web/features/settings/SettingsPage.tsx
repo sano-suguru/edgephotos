@@ -221,7 +221,9 @@ export function SettingsPage() {
                   `${diag.value.counts.pendingUploads}${diag.value.counts.expiredUploads > 0 ? `（うち期限切れ ${diag.value.counts.expiredUploads}）` : ''}`,
                 ],
                 ['削除処理中', diag.value.counts.purging],
-                ['最終 export', diag.value.lastExportAt ?? '未実施'],
+                // manifest を読んだ時刻であって、写真が backup された時刻ではない。ここを「最終 export」と
+                // 呼ぶと、manifest のダウンロードや `pnpm backup verify` のあとに backup 済みだと読める。
+                ['最終 manifest 取得', diag.value.lastExportAt ?? '未実施'],
                 ['Migration', diag.value.latestMigration ?? '—'],
               ] as const
             ).map(([label, value]) => (
@@ -231,6 +233,12 @@ export function SettingsPage() {
               </div>
             ))}
           </dl>
+          <p class="mt-3 text-sm text-muted-foreground">
+            「最終 manifest 取得」は metadata を最後まで読んだ時刻です。写真のファイルが保存された時刻ではありません（
+            <code>pnpm backup verify</code> など、manifest を読むだけの操作でも更新されます）。元ファイルを含む backup
+            をいつ取ったかは、この画面では分かりません。backup ディレクトリの <code>manifest.json</code> にある{' '}
+            <code>exportedAt</code> と、<code>pnpm backup check</code> の結果で確認してください。
+          </p>
           {diag.value.counts.expiredUploads > 0 && (
             <p class="mt-3 text-sm text-muted-foreground">
               期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。下の「ストレージの点検」から整理できます。写真がタイムラインに無ければ、もう一度選んでアップロードしてもかまいません。
