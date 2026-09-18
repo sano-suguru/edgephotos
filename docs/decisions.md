@@ -347,8 +347,8 @@ D1 と R2 は 1 transaction にできません（architecture.md §5）。以前
 
 - manifest の shape は `ExportManifestSchema` を正本にし、runtime で検証する。整合性の規則（ID の重複、1 つの original に 2 つの asset、album ID の重複、album 内の重複、存在しない asset への membership）は zod を使わない `manifestIntegrityIssues` に分ける。「値が正しいか」と「全体が整合しているか」は別の問いで、巨大な schema にまとめない
 - 各 field を `UploadReserveSchema` と同じかそれ以上に厳しくする。restore は写真ごとに `POST /uploads` へ送り直すので、緩いままだと「schema は通るが 5,000 枚 upload した後で 400 になる」manifest を許してしまう。`originalSize` は 1〜100 MiB、`width` / `height` は正、`filename` は 1〜255 文字、`takenAt` は ISO 8601、album の `title` は 1〜200 文字かつ保存されている綴りのまま
-- `createdAt` / `trashedAt` / `exportedAt` / album の `createdAt` は instant（`new Date().toISOString()` そのまま: UTC・ミリ秒・`Z`）に固定する。`verify` はこれらを文字列として比較するので、同じ時刻の別の綴りを認めると「restore はできたが verify が永久に `createdAt differs` を出す」状態になる。`takenAt` は EXIF 由来の壁時計なので対象外（offset 任意のまま）
-- 未知の key は無視する（reader が `formatVersion` を上げずに v1 のまま field を足せる）。知らない `formatVersion` は部分的に読まずに拒否する
+- `createdAt` / `trashedAt` / `exportedAt` / album の `createdAt` は instant（`new Date().toISOString()` そのまま: UTC・ミリ秒・`Z`）に固定する。`verify` はこれらを文字列として比較するので、同じ時刻の別の綴りを認めると「restore はできたが verify が永久に `createdAt differs` を出す」状態になる。綴りだけでなく実在する日時かも見る（正規表現は `2024-99-99T99:99:99.999Z` を通し、`2024-02-30` は 3 月 1 日に繰り上がる）。`takenAt` は EXIF 由来の壁時計なので対象外（offset 任意のまま）
+- 未知の key は無視する。ただし backup は 10 年後に古い CLI が読む可能性があるので、v1 に足してよいのは「その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field」だけと決める。条件を満たすか判断できない追加は `formatVersion` を上げる側に倒す。知らない `formatVersion` は部分的に読まずに拒否する
 - `restore-state.json` も同じ方法で検証する。`--resume` は「対象ライブラリが空」の guard を飛ばすので、信用できない album ID 対応で稼働中のライブラリを触らせない
 - 検証は `readManifest` の 1 か所に置き、`check` / `restore` / `verify` が同じ結果を共有する。`restore` は manifest と `restore-state.json` を読み終えてから最初の request を送る
 - error は「どこが・なぜ」を 1 行ずつ、最大 10 件と残件数で出す。最初の 1 件で止めると、壊れたファイルを直すのに何度も実行することになる

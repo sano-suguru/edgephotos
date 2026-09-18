@@ -121,7 +121,7 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 - restore: Access token が 3〜14 回目のどの API 呼び出しで切れても、`--resume` で最後まで進み、`verify`（全件 download）が `ok` になること。記録に無い album や backup に無い写真がある library には再開しないこと。終わった restore は再開しないこと。restore 後の timeline の並び（撮影日時の無い写真を含む）が元と同じこと
 - verify: `--quick` が download 0 件で `ok` になり、original の size が変わった写真を storage audit で検出すること
 - paged export: 1 件ずつ・2 件ずつのページを重複なく連結できること、ページの間に写真の削除と追加があっても manifest が知らない asset を指さないこと
-- backup manifest v1（[D-025](decisions.md)）: export が書いた manifest がそのまま通り、未知の key を足しても通ること。壊れた JSON・別の `format`・`formatVersion: 2`・必須 field の欠落・型違い・大文字や 63 桁の SHA-256・size 0 / 負数 / 上限超え・扱えない content type・空や 256 文字の filename・0 pixel・ISO 8601 でない `takenAt`・instant でない `createdAt` / `trashedAt` / `exportedAt`・空や前後に空白のある album title を、field の位置と理由付きで拒否すること（15 件以上あるときは 10 件と残件数）。asset ID の重複、1 つの original に 2 つの asset、album ID の重複、album 内の重複、存在しない asset への membership も拒否すること
+- backup manifest v1（[D-025](decisions.md)）: export が書いた manifest がそのまま通り、未知の key を足しても通ること。壊れた JSON・別の `format`・`formatVersion: 2`・必須 field の欠落・型違い・大文字や 63 桁の SHA-256・size 0 / 負数 / 上限超え・扱えない content type・空や 256 文字の filename・0 pixel・ISO 8601 でない `takenAt`・instant でない `createdAt` / `trashedAt` / `exportedAt`・実在しない日時（`2024-99-99…`、3 月 1 日へ繰り上がる `2024-02-30`）・空や前後に空白のある album title を、field の位置と理由付きで拒否すること（15 件以上あるときは 10 件と残件数）。asset ID の重複、1 つの original に 2 つの asset、album ID の重複、album 内の重複、存在しない asset への membership も拒否すること
 - restore の入口: 壊れた manifest と壊れた `restore-state.json` は、対象ライブラリへ 1 度も request を送らずに拒否されること（request が出たらテストが失敗する client で確認）
 
 ### remote-test（2026-09-18）

@@ -329,7 +329,7 @@ export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/alb
 
 `albums[]`: `id`（UUID v4 の書式）、`title`（1〜200 文字、保存されている綴りのまま = 前後の空白なし）、`createdAt`（instant）、`assetIds`（この manifest の `assets` にある ID。順序に意味はありません）。
 
-instant は `new Date().toISOString()` がそのまま入ります（UTC・ミリ秒・`Z`）。`verify` は文字列として比較するので、同じ時刻の別の綴り（`+00:00`、ミリ秒なし）は v1 では不正です。
+instant は `new Date().toISOString()` がそのまま入ります（UTC・ミリ秒・`Z`）。`verify` は文字列として比較するので、同じ時刻の別の綴り（`+00:00`、ミリ秒なし）は v1 では不正です。綴りに加えて、実在する日時であることも確かめます（`2024-02-30T00:00:00.000Z` は綴りだけなら通りますが、3 月 1 日に繰り上がるため拒否します）。
 
 shape とは別に、次を満たさない manifest は拒否します。
 
@@ -337,7 +337,12 @@ shape とは別に、次を満たさない manifest は拒否します。
 - 1 つの album が同じ写真を 2 回挙げること
 - `assets` に無い写真への membership
 
-versioning: reader は知らない `formatVersion` を部分的に読まずに拒否します。未知の key は無視するので、v1 のまま任意の field を足せます。既存 field の意味・書式・必須性を変える場合は `formatVersion` を上げます。未公開の旧形式への fallback は持ちません。
+versioning:
+
+- reader は知らない `formatVersion` を部分的に読まずに拒否します
+- reader は知らない key を無視します。したがって v1 に足してよいのは、**その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field だけ**です。10 年後に古い CLI がこの backup を読む可能性を前提にします
+- 上の条件を満たさない追加、および既存 field の意味・書式・必須性の変更では `formatVersion` を上げます
+- 未公開の旧形式への fallback は持ちません
 
 `pnpm backup` の `check` / `restore` / `verify` はすべて `readManifest` を通ります。JSON として壊れている、contract に合わない、整合しない manifest は、対象ライブラリへ最初の request を送る前に、どの field がなぜ不正かを並べて拒否します。restore の再開に使う `restore-state.json` も同様に検証します（こちらは backup の contract ではなく実行状態のファイルです）。
 

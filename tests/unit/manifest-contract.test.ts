@@ -164,6 +164,16 @@ describe('v1 export manifest contract', () => {
         /assets\[0\]\.createdAt: Expected a UTC instant/,
       ],
       [
+        'a createdAt whose date does not exist',
+        manifest({ assets: [asset({ createdAt: '2024-99-99T99:99:99.999Z' })] }),
+        /assets\[0\]\.createdAt: Expected a date and time that exists/,
+      ],
+      [
+        'a createdAt that rolls over into the next month',
+        manifest({ assets: [asset({ createdAt: '2024-02-30T00:00:00.000Z' })] }),
+        /assets\[0\]\.createdAt: Expected a date and time that exists/,
+      ],
+      [
         'a trashedAt that is not a UTC instant',
         manifest({ assets: [asset({ trashedAt: 'yesterday' })] }),
         /assets\[0\]\.trashedAt: Expected a UTC instant/,

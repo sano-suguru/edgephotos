@@ -210,15 +210,25 @@ export const ShareVariantSchema = z.enum(['thumbnail', 'preview'])
 
 // The backup manifest (`manifest.json`) is this contract, assembled from the paged export endpoints
 // (./export-manifest.ts). v1 is fixed: readers reject a formatVersion they do not know instead of reading
-// it partially, unknown keys are ignored so a later v1 may add optional fields, and anything that changes
-// the meaning of a field bumps formatVersion. See docs/architecture.md and D-025.
+// it partially, and readers ignore keys they do not know. What may be added to v1 is therefore only an
+// optional field that a reader which ignores it entirely can still restore from without losing data,
+// meaning or a verification result. Everything else bumps formatVersion. See docs/architecture.md, D-025.
 
 // Every timestamp EdgePhotos records is `new Date().toISOString()`: UTC, milliseconds, `Z`. The manifest
 // pins that exact spelling, so a restored library compares equal to its backup as a string
 // (`pnpm backup verify`). `takenAt` is the exception: it comes from EXIF and is a local wall time.
+// The spelling is checked first and alone, then the value must be a moment that exists: the regex would
+// take 2024-99-99T99:99:99.999Z, and a manifest full of dates no clock ever showed is not restorable.
 export const InstantSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, 'Expected a UTC instant such as 2024-05-01T10:20:30.000Z')
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, {
+    error: 'Expected a UTC instant such as 2024-05-01T10:20:30.000Z',
+    abort: true,
+  })
+  .refine((value) => {
+    const ms = Date.parse(value)
+    return Number.isFinite(ms) && new Date(ms).toISOString() === value
+  }, 'Expected a date and time that exists')
   .openapi({ example: '2024-05-01T10:20:30.000Z' })
 
 // Restore re-uploads every photo through `POST /uploads`, so each field here is at least as strict as
