@@ -8,6 +8,7 @@ import type {
   AlbumListItem,
   Asset,
   AssetPage,
+  DerivativeRepair,
   ExportManifest,
   Share,
   ShareCreated,
@@ -63,6 +64,8 @@ export const api = {
   trash: (id: string) => request<Asset>('POST', `/api/v1/assets/${id}/trash`),
   restore: (id: string) => request<Asset>('POST', `/api/v1/assets/${id}/restore`),
   purge: (id: string) => request<void>('DELETE', `/api/v1/assets/${id}`),
+  // Rebuilds a missing thumbnail / preview. Idempotent; the original is only read (docs/decisions.md D-026).
+  repairDerivatives: (id: string) => request<DerivativeRepair>('POST', `/api/v1/assets/${id}/derivatives/repair`),
 
   reserveUpload: (body: UploadReserve) => request<UploadReservation>('POST', '/api/v1/uploads', body),
   finalizeUpload: (id: string) => request<UploadFinalizeResult>('POST', `/api/v1/uploads/${id}/finalize`),

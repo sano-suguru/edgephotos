@@ -7,6 +7,7 @@ import {
   AssetPageSchema,
   AssetPatchSchema,
   AssetSchema,
+  DerivativeRepairSchema,
   ErrorSchema,
   EXPORT_PAGE_MAX,
   ExportAlbumListSchema,
@@ -43,6 +44,7 @@ import * as albums from './services/albums'
 import * as assets from './services/assets'
 import type { ServiceContext } from './services/context'
 import { diagnostics, exportAlbums, exportAssetsPage, exportMembershipsPage } from './services/export'
+import { repairDerivatives } from './services/repair'
 import * as shares from './services/shares'
 import { auditStorage, cleanupUploads } from './services/storage-audit'
 import * as uploads from './services/uploads'
@@ -272,6 +274,25 @@ export function createApp(options: AppOptions) {
       responses: { 200: json(SignedUrlSchema, 'Short-lived URL for the unmodified original'), ...errorResponses },
     }),
     async (c) => c.json(await assets.originalUrl(svc(c), c.req.valid('param').assetId), 200),
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/api/v1/assets/{assetId}/derivatives/repair',
+      tags: tag('assets'),
+      request: { params: AssetParams },
+      responses: {
+        200: json(
+          DerivativeRepairSchema,
+          'Rebuilds a missing thumbnail / preview. Idempotent: PUT what it asks for and call it again. ' +
+            'The original is only ever read, never written or deleted.',
+        ),
+        409: json(ErrorSchema, 'The original is missing or is not the file that was uploaded'),
+        ...errorResponses,
+      },
+    }),
+    async (c) => c.json(await repairDerivatives(svc(c), c.req.valid('param').assetId), 200),
   )
 
   app.openapi(

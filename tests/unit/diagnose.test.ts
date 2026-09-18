@@ -73,6 +73,12 @@ describe('setup diagnostics', () => {
       (await checkCorsPreflight(preflight({ ...ok, 'access-control-allow-origin': '*' }), 'u', origin)).status,
     ).toBe('fail')
     expect((await checkCorsPreflight(preflight({}, 403), 'u', origin)).status).toBe('fail')
+    // A PUT-only rule uploads fine and shows photos fine (an <img> needs no CORS), but a derivative repair
+    // cannot read the original back with fetch() (docs/decisions.md D-026).
+    const putOnly = { ...ok, 'access-control-allow-methods': 'PUT' }
+    const noGet = await checkCorsPreflight(preflight(putOnly), 'https://r2/x', origin)
+    expect(noGet.status).toBe('fail')
+    expect(noGet.detail).toContain('GET')
   })
 
   it('never reports success for a deployment without Access in front or with a broken config', async () => {

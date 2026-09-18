@@ -3,13 +3,23 @@ import type { StorageAuditIssue, StorageAuditPage, StorageCleanupResult } from '
 // Pure helpers (no DOM, no API client) for the storage check on the Library page (docs/decisions.md D-023).
 
 export type IssueKind = StorageAuditIssue['kind']
-export type AuditSummary = { photos: number; counts: Partial<Record<IssueKind, number>>; completeUploads: number }
+export type AuditSummary = {
+  photos: number
+  counts: Partial<Record<IssueKind, number>>
+  completeUploads: number
+  // Photos whose original is intact but whose thumbnail / preview is missing, so they can be rebuilt in place
+  // (docs/decisions.md D-026). Capped: the button repairs what one run can hold, and a further audit finds
+  // the rest.
+  repairable: string[]
+}
+
+export const REPAIRABLE_MAX = 500
 
 export async function runAudit(
   page: (after: string | null) => Promise<StorageAuditPage>,
   onProgress: (photos: number) => void,
 ): Promise<AuditSummary> {
-  const summary: AuditSummary = { photos: 0, counts: {}, completeUploads: 0 }
+  const summary: AuditSummary = { photos: 0, counts: {}, completeUploads: 0, repairable: [] }
   let after: string | null = null
   do {
     const res: StorageAuditPage = await page(after)
@@ -17,6 +27,9 @@ export async function runAudit(
     for (const issue of res.issues) {
       summary.counts[issue.kind] = (summary.counts[issue.kind] ?? 0) + 1
       if (issue.kind === 'expired_upload' && issue.objects?.length === 3) summary.completeUploads++
+      if (issue.kind === 'missing_derivative' && issue.assetId && summary.repairable.length < REPAIRABLE_MAX) {
+        summary.repairable.push(issue.assetId)
+      }
     }
     after = res.nextAfter
     onProgress(summary.photos)
@@ -53,8 +66,8 @@ const TEXT: Record<IssueKind, { tone: Finding['tone']; text: string }> = {
     text: '保存先の元ファイルが、アップロードされたものと違います。backup から復元してください。',
   },
   missing_derivative: {
-    tone: 'damage',
-    text: '元ファイルは無事ですが、サムネイルかプレビューがありません（表示が崩れます）。',
+    tone: 'action',
+    text: '元ファイルは無事ですが、サムネイルかプレビューがありません（表示が崩れます）。元ファイルから作り直せます。',
   },
   unfinished_delete: { tone: 'action', text: '完全削除が途中で止まっています。下の「削除を再開」で完了できます。' },
   expired_upload: {

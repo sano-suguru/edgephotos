@@ -87,8 +87,11 @@ export function checkPublicAccess(devUrlOutput: string, domainOutput: string): C
 }
 
 // The same preflight a browser sends before a presigned original PUT. Unauthenticated and read-only.
+// GET is checked too: the derivative repair reads the original with `fetch()` rather than an `<img>`, so it
+// needs the response to carry `Access-Control-Allow-Origin` (docs/decisions.md D-026). Displaying photos does
+// not, which is why a PUT-only rule can look healthy until a repair is attempted.
 export async function checkCorsPreflight(fetch: Fetch, objectUrl: string, origin: string): Promise<Check> {
-  const name = 'r2: CORS for upload'
+  const name = 'r2: CORS'
   let res: Response
   try {
     res = await fetch(objectUrl, {
@@ -111,11 +114,14 @@ export async function checkCorsPreflight(fetch: Fetch, objectUrl: string, origin
   if (allowOrigin === '*') return check(name, 'fail', 'AllowedOrigins is "*"; restrict it to APP_ORIGIN')
   if (allowOrigin !== origin) return check(name, 'fail', `allowed origin is ${allowOrigin}, expected ${origin}`)
   if (!allowMethods.includes('PUT')) return check(name, 'fail', 'PUT is not an allowed method')
+  if (!allowMethods.includes('GET')) {
+    return check(name, 'fail', 'GET is not an allowed method; repairing a derivative cannot read the original')
+  }
   const missingHeaders = PUT_HEADERS.filter((h) => !allowHeaders.includes(h))
   if (missingHeaders.length > 0) {
     return check(name, 'fail', `AllowedHeaders lacks: ${missingHeaders.join(', ')}`)
   }
-  return check(name, 'pass', `${origin} may PUT with ${PUT_HEADERS.join(', ')}`)
+  return check(name, 'pass', `${origin} may GET, and PUT with ${PUT_HEADERS.join(', ')}`)
 }
 
 const isAccessRedirect = (res: Response) =>

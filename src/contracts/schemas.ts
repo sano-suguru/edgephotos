@@ -348,6 +348,58 @@ export const StorageCleanupResultSchema = z
   })
   .openapi('StorageCleanupResult')
 
+// ---- Derivative repair (docs/decisions.md D-026) ----
+
+// Rebuilds a `missing_derivative` without touching the original. The request carries an asset id and
+// nothing else: every object key is derived by the server (src/worker/storage/keys.ts).
+//
+// One idempotent call is both "what is missing" and "was the repair good": call it, PUT what it asks for,
+// call it again. `status: 'ok'` is the only thing that means finished; a stored PUT does not.
+
+export const DerivativeVariantSchema = z.enum(['thumbnail', 'preview'])
+
+// Why a derivative found at its key was not usable. The same checks finalize applies (D-012), plus the
+// size limit reserve would have enforced. Such an object is never deleted: `targets` carries a PUT that
+// replaces exactly it (conditional on its ETag), so a repair cannot undo a newer one.
+export const DerivativeRejectionSchema = z
+  .object({
+    object: DerivativeVariantSchema,
+    problem: z.enum(['not_jpeg', 'metadata_segment', 'truncated', 'too_large']),
+  })
+  .openapi('DerivativeRejection')
+
+export const DerivativeRepairSchema = z
+  .object({
+    assetId: IdSchema,
+    // 'ok' = both derivatives are present and pass the same checks finalize applies.
+    status: z.enum(['ok', 'incomplete']),
+    // Absent after this call; `targets` has a PUT URL for each.
+    missing: z.array(DerivativeVariantSchema),
+    // Unusable objects found at their key. Each has a replacing target in `targets`; none was deleted.
+    rejected: z.array(DerivativeRejectionSchema),
+    // Short-lived GET for the unmodified original, only while something is missing. `sha256` lets the
+    // client confirm the download before it decodes anything; it is `assets.sha256`, which R2 verified
+    // on write (D-018).
+    source: z
+      .object({
+        url: z.url(),
+        expiresAt: z.string(),
+        sha256: Sha256Schema,
+        contentType: z.enum(ORIGINAL_CONTENT_TYPES),
+      })
+      .optional(),
+    // Presigned PUTs for the derivative keys that need one, never for `originals/`. Each is conditional:
+    // create-only for an absent key, or replace-this-exact-ETag for an unusable object.
+    targets: z.object({
+      thumbnail: UploadTargetSchema.optional(),
+      preview: UploadTargetSchema.optional(),
+    }),
+  })
+  .openapi('DerivativeRepair')
+
+export type DerivativeRepair = z.infer<typeof DerivativeRepairSchema>
+export type DerivativeVariant = z.infer<typeof DerivativeVariantSchema>
+
 export type StorageAuditIssue = z.infer<typeof StorageAuditIssueSchema> & { sortKey?: string }
 export type StorageAuditPage = z.infer<typeof StorageAuditPageSchema>
 export type StorageCleanupResult = z.infer<typeof StorageCleanupResultSchema>

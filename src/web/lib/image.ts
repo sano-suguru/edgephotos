@@ -76,6 +76,45 @@ async function renderJpeg(bitmap: ImageBitmap, maxEdge: number, quality: number)
   return stripped === bytes ? blob : new Blob([stripped as Uint8Array<ArrayBuffer>], { type: 'image/jpeg' })
 }
 
+export type DerivativeVariant = 'thumbnail' | 'preview'
+
+const DERIVATIVE_SPEC: Record<DerivativeVariant, { maxEdge: number; quality: number }> = {
+  thumbnail: { maxEdge: THUMBNAIL_MAX_EDGE, quality: THUMBNAIL_QUALITY },
+  preview: { maxEdge: PREVIEW_MAX_EDGE, quality: PREVIEW_QUALITY },
+}
+
+// One at a time: each decoded bitmap costs width x height x 4 bytes (docs/decisions.md D-020).
+async function renderAll(bitmap: ImageBitmap, variants: readonly DerivativeVariant[]) {
+  const out: Partial<Record<DerivativeVariant, Blob>> = {}
+  for (const v of variants) {
+    out[v] = await renderJpeg(bitmap, DERIVATIVE_SPEC[v].maxEdge, DERIVATIVE_SPEC[v].quality)
+  }
+  return out
+}
+
+async function decode(source: Blob): Promise<ImageBitmap> {
+  try {
+    return await createImageBitmap(source, { imageOrientation: 'from-image' })
+  } catch {
+    throw new UnsupportedFileError('The image could not be decoded')
+  }
+}
+
+// Rebuilds derivatives from an original that is already stored, for repair (docs/decisions.md D-026).
+// Same renderer, same sizes, same metadata stripping as upload: a repaired thumbnail is the thumbnail the
+// upload would have produced, and finalize's APP1 / APP13 rule holds for both paths by construction.
+export async function renderDerivatives(
+  source: Blob,
+  variants: readonly DerivativeVariant[],
+): Promise<Partial<Record<DerivativeVariant, Blob>>> {
+  const bitmap = await decode(source)
+  try {
+    return await renderAll(bitmap, variants)
+  } finally {
+    bitmap.close()
+  }
+}
+
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
   // Cheap refusals before reading: HEIC by name or type, non-images by the browser's type, oversized files.
   if (isHeic(file) || (file.type !== '' && !file.type.startsWith('image/'))) {
@@ -86,17 +125,9 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
   const contentType = originalTypeOf(buffer)
   if (!contentType) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
   const [sha256, takenAt] = await Promise.all([sha256Hex(buffer), readTakenAt(buffer)])
-  let bitmap: ImageBitmap
+  const bitmap = await decode(file)
   try {
-    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
-  } catch {
-    throw new UnsupportedFileError('The image could not be decoded')
-  }
-  try {
-    const [thumbnail, preview] = [
-      await renderJpeg(bitmap, THUMBNAIL_MAX_EDGE, THUMBNAIL_QUALITY),
-      await renderJpeg(bitmap, PREVIEW_MAX_EDGE, PREVIEW_QUALITY),
-    ]
+    const { thumbnail, preview } = await renderAll(bitmap, ['thumbnail', 'preview'])
     return {
       file,
       contentType,
@@ -104,8 +135,8 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
       width: bitmap.width,
       height: bitmap.height,
       takenAt,
-      thumbnail,
-      preview,
+      thumbnail: thumbnail as Blob,
+      preview: preview as Blob,
     }
   } finally {
     bitmap.close()

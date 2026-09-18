@@ -94,7 +94,9 @@ v1 の完成条件には含めません。
 - cleanup を実行しても `library: interrupted uploads` の件数がすぐに増える
 - R2 使用量が、export manifest の `originalSize` 合計を大きく上回り、storage audit に出ない差がある
 
-**壊れた写真の修復は手作業。** storage audit は original / derivative の欠落や違いを見つけますが、直しません。backup の original から upload し直す手順は [operations.md](operations.md) §12 にあります。derivative だけを作り直す経路はありません。
+**original の破損の修復は手作業。** storage audit は original / derivative の欠落や違いを見つけますが、original は直しません。backup の original から upload し直す手順は [operations.md](operations.md) §12 にあります。欠けた derivative だけは、original に触れずに作り直せます（[D-026](decisions.md)）。
+
+**audit は derivative の中身を見ない。** storage audit は object の有無だけを見ます。そのため「object はあるが JPEG として使えない derivative」は `missing_derivative` に出ず、表示が崩れたままでも「問題なし」と数えられます。この状態を作れるのは、作り直しで使えない bytes を PUT したまま戻ってこなかった client だけです（[D-026](decisions.md) の「残るリスク」）。その写真をもう一度作り直せば `If-Match` で置き換わります。10 万枚の audit で derivative を 1 つずつ読み直す代価に見合わないため、`--deep` にも入れていません。必要になった場合の候補は、通常の audit は有無だけのままにして `--deep` に derivative の header 検査を足すことです。
 
 **どの行も指さない object は消さない。** D1 の time travel の後などに残る `unreferenced_objects` は報告だけします。取り出しと削除は R2 の Dashboard で行います。
 
@@ -132,8 +134,21 @@ v1 の完成条件には含めません。
 - ✅ 元ファイルの形式を中身で判定する。「オリジナル」を「保存したファイル」と表記する
 - ✅ 1,000 / 10,000 / 100,000 件の scale 測定
 
+## Derivative repair（2026-09-18）
+
+`missing_derivative` を、original に触れずに直せるようにした段階です。判断は [D-026](decisions.md)、確認内容は [verification.md](verification.md) にあります。
+
+- ✅ `POST /api/v1/assets/{assetId}/derivatives/repair`（state を持たない冪等な 1 呼び出し。original は読むだけ）
+- ✅ Browser の既存 derivative pipeline の再利用（upload と同じ renderer・長辺・metadata 除去）
+- ✅ 作り直しの前後で original の SHA-256・asset ID・album・favorite・trash・日時が変わらないことの回帰テスト
+- ✅ object を 1 つも削除しない。使えない derivative は検査時点の ETag への `If-Match` で置き換える（古い repair が新しい結果を取り消せない）
+- ✅ ライブラリ画面の「サムネイルを作り直す」と、`pnpm diagnose` の `r2: CORS` が `GET` も検査すること
+- ✅ remote-test: bucket の CORS が `GET` を許し、実 R2 の preflight が app origin にだけ `Access-Control-Allow-Origin` を返すこと（設定変更は不要だった）
+- ⬜ remote-test: Browser から壊れた写真を実際に作り直す往復と、`If-Match` 付き presigned PUT の `200` / `412`（deploy と Access login が要る。[verification.md](verification.md) の「未検証」）
+
 ## Release polish
 
+- **実 R2 で `If-Match` 付き presigned PUT を 1 度踏む**（作り直しの競合安全性がこれに依存する。公式ドキュメントが PutObject の対応を明記していることと、EdgePhotos の SigV4 署名が正しいことは別の問題なので、自分たちが発行した URL と header で確かめる。有効な ETag で `200`、古い ETag で `412`、先に保存された bytes が残ること。[D-026](decisions.md)、[verification.md](verification.md)）
 - Deploy to Cloudflare
 - setup guide
 - update / uninstall procedure
@@ -154,5 +169,5 @@ v1 の完成条件には含めません。
 - advanced search
 - Queues / background processing
 - client-specific adapter / BFF
-- derivative の作り直し（original から thumbnail / preview を再生成する経路。`missing_derivative` と、将来の derivative version の変更に使う）
+- 一括の derivative 再生成（derivative version を将来変える場合。欠けた derivative の作り直しは実装済み。[D-026](decisions.md)）
 - 大きな album の page を album の大きさによらず読む（`album_assets` に `sort_at` を持たせる。「既知の制約」参照）

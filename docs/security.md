@@ -84,13 +84,15 @@ Presigned URL は bearer capability として扱います。
 - 操作を PUT または GET に限定する。
 - object key を限定する。
 - 有効期限を短くする。
-- Browser の R2 CORS は `APP_ORIGIN` に限定する。
+- Browser の R2 CORS は `APP_ORIGIN` に限定する（derivative の作り直しは original を `fetch()` で読むため、`GET` も必要。operations.md §6）。
 - Access Cookie / JWT を R2 へ送らない。
 
 | 操作 | TTL | 署名に含めるもの | 保証 |
 | --- | --- | --- | --- |
 | upload PUT | 600 秒 | `Content-Type`、`If-None-Match: *`、original は `x-amz-checksum-sha256` | 期限内に URL を再利用しても、保存済み object を上書きできない。original の body が申告 SHA-256 と違えば R2 が拒否する |
 | owner GET | 600 秒 | — | — |
+| repair PUT（欠落） | 300 秒 | `Content-Type: image/jpeg`、`If-None-Match: *` | derivative key に限る。original の key は署名しない。空の key しか埋められない（[D-026](decisions.md)） |
+| repair PUT（置き換え） | 300 秒 | `Content-Type: image/jpeg`、`If-Match: <検査した ETag>` | 検査した「使えない object」だけを置き換える。別の repair が先に直していれば `412`。妥当な derivative は上書きできない（[D-026](decisions.md)） |
 | share GET | 最大 300 秒 | — | share の残り期限を超えて発行しない |
 
 finalize は、R2 が記録した SHA-256 と申告値の一致を確認するまで asset を `ready` にしません（[D-018](decisions.md)）。したがって `assets.sha256` は、R2 が検証した original の SHA-256 です。
@@ -189,6 +191,11 @@ storage cleanup（[D-023](decisions.md)）が削除するのは、`uploads` 行�
 - finalize の UNIQUE 競合の処理が、自分の作った asset の object を重複として消さない。
 - storage cleanup が、写真・止まった削除・どの行も指さない object・進行中の upload の object を消さない。cleanup が片付けた upload から、後の finalize で asset が作られない。
 - storage audit が何も書き込まない。
+- derivative の作り直しが original を削除・変更しない。作り直しの前後で original の SHA-256、asset ID、album membership、favorite、trash、`createdAt` / `takenAt` が変わらない（[D-026](decisions.md)）。
+- 作り直しの対象 object key を client が指定できない（request は asset ID だけ）。
+- 作り直した derivative も、EXIF / XMP / IPTC segment を含むものは受け付けない（upload と同じ検査）。
+- original が壊れている写真へ作り直しの URL を発行しない。
+- 作り直しが object を削除しない。古い repair の target が、新しい repair の直した derivative を上書き・削除できない（`If-Match` で `412`）。
 
 上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Chromium と WebKit で確認しています。WebKit の encoder が付ける APP1 / APP13（撮影 metadata は含まない）は、Client が PUT 前に取り除きます。自動テストの対象は、その除去処理と Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）です。server 側の保証は変わりません（[D-020](decisions.md)）。
 

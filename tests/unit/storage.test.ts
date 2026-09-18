@@ -84,7 +84,7 @@ describe('R2 presigner', () => {
   it('binds a declared SHA-256 to the PUT as a signed S3 checksum header', async () => {
     const signer = createR2Signer(config!)
     const empty = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
-    const put = await signer.signPut('originals/x', 'image/png', 600, empty)
+    const put = await signer.signPut('originals/x', 'image/png', 600, { sha256: empty })
     const url = new URL(put.url)
     expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('content-type;host;if-none-match;x-amz-checksum-sha256')
     // Stays a request header: R2 must see it on the PUT itself, not only in the query.

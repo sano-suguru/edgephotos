@@ -516,6 +516,8 @@ export async function auditLibrary(client: ApiClient, opts: { deep?: boolean } =
 // Issues that mean a photo in the library is damaged. The rest (unfinished deletes, interrupted uploads,
 // leftovers, unreferenced objects, pre-D-018 originals) do not change what the library contains; verify reports
 // them as notes, and `pnpm storage audit` explains each.
+// `missing_derivative` stays here although it is now repairable in place (D-026): the photo still shows as
+// broken until the owner rebuilds it, so a library holding one is not a clean result.
 export const DAMAGE_KINDS = new Set<StorageAuditIssue['kind']>([
   'missing_original',
   'original_size_mismatch',

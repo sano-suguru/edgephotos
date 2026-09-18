@@ -3,7 +3,7 @@ import type { UploadReservation } from '../../../contracts/schemas'
 import { ApiRequestError, api } from '../../lib/api/client'
 import { userMessage } from '../../lib/errors'
 import { FileTooLargeError, isHeic, preparePhoto, UnsupportedFileError } from '../../lib/image'
-import { putOutcome } from '../../lib/storage-put'
+import { putSigned, StorageUploadError } from '../../lib/storage-transfer'
 import { createTaskLimiter } from '../../lib/task-limit'
 import { type TransferDeps, transferPhoto } from './transfer'
 import { isActiveUpload, mergeUploadList, type UploadState } from './upload-list'
@@ -27,31 +27,6 @@ const files = new Map<string, File>()
 
 function update(id: string, patch: Partial<UploadItem>) {
   uploads.value = uploads.value.map((u) => (u.id === id ? { ...u, ...patch } : u))
-}
-
-const PUT_ATTEMPTS = 4
-
-class StorageUploadError extends Error {}
-
-async function put(target: UploadReservation['targets']['original'], body: Blob) {
-  for (let attempt = 1; ; attempt++) {
-    let status: number | 'network'
-    try {
-      // Direct to storage with only the signed headers. Never send cookies or Access credentials.
-      const res = await fetch(target.url, { method: 'PUT', headers: target.headers, body, credentials: 'omit' })
-      status = res.status
-    } catch {
-      status = 'network'
-    }
-    const outcome = putOutcome(status)
-    if (outcome === 'stored') return
-    if (outcome === 'fail' || attempt === PUT_ATTEMPTS) {
-      throw new StorageUploadError(
-        status === 'network' ? 'Storage upload failed (network)' : `Storage upload failed (${status})`,
-      )
-    }
-    await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)))
-  }
 }
 
 // Reservations of failed items whose retry may finish them without sending the bytes again (transfer.ts).
@@ -81,7 +56,7 @@ async function uploadOne(item: UploadItem, file: File) {
             takenAt: photo.takenAt,
           },
         }),
-      put,
+      put: putSigned,
       finalize: api.finalizeUpload,
       remember: (r) => (r ? reservations.set(item.id, r) : reservations.delete(item.id)),
       now: () => Date.now(),

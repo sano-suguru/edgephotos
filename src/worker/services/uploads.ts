@@ -62,7 +62,9 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
 
   const keys = assetObjectKeys(assetId)
   const [original, thumbnail, preview] = await Promise.all([
-    ctx.signer.signPut(keys.original, input.original.contentType, UPLOAD_URL_TTL_SECONDS, input.original.sha256),
+    ctx.signer.signPut(keys.original, input.original.contentType, UPLOAD_URL_TTL_SECONDS, {
+      sha256: input.original.sha256,
+    }),
     ctx.signer.signPut(keys.thumbnail, 'image/jpeg', UPLOAD_URL_TTL_SECONDS),
     ctx.signer.signPut(keys.preview, 'image/jpeg', UPLOAD_URL_TTL_SECONDS),
   ])

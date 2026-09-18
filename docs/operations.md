@@ -107,7 +107,9 @@ Custom domain は v1 の必須条件ではありません。custom domain を追
 Browser は presigned URL に対して次を送ります。
 
 - `PUT`（upload）: `Content-Type` と `If-None-Match` header 付き（[D-013](decisions.md)）。original はさらに `x-amz-checksum-sha256` 付き（[D-018](decisions.md)）
-- `GET`（`<img>` による表示、original の取得）
+- `GET`（`<img>` による表示、original の取得、derivative の作り直しが `fetch()` で読む original）
+
+`AllowedMethods` に `GET` が無くても、写真の表示（`<img>`）と upload は動きます。失敗するのは derivative の作り直しだけで、`fetch()` が応答を読むには `Access-Control-Allow-Origin` が要るためです（[D-026](decisions.md)）。`pnpm diagnose` の `r2: CORS` が `GET` と `PUT` の両方を検査します。
 
 wrangler の `--file` は Dashboard 表示とは別形式です。`rules` 配列でくるみ、フィールドは camelCase にします。PascalCase の配列を渡すと `must contain a 'rules' array` で失敗します。
 
@@ -157,7 +159,7 @@ production は `--env` を付けません。確認する内容と、失敗時に
 | `worker: secrets` | `wrangler secret put` の漏れ（名前だけ確認。値の形式は下の probe で分かる） |
 | `d1: migrations` | `wrangler d1 migrations apply --remote` の実行漏れ |
 | `r2: r2.dev URL` / `custom domains` | bucket の公開設定（どちらも無効が正） |
-| `r2: CORS for upload` | Browser と同じ preflight（`PUT` + 3 header）を `EDGEPHOTOS_URL` の origin で送る。AllowedOrigins / AllowedHeaders |
+| `r2: CORS` | Browser と同じ preflight（`PUT` + 3 header）を `EDGEPHOTOS_URL` の origin で送る。AllowedOrigins / AllowedHeaders と、`GET`（derivative の作り直しに必要。§6） |
 | `access: private path` | 匿名 request が Access login へ redirect されない（Access application の hostname） |
 | `access: share bypass + worker config` | `/share` の Bypass application。`503` なら secret の欠落か形式違い（`ACCESS_TEAM_DOMAIN` は host のみ、`R2_ACCOUNT_ID` は 32 桁 hex） |
 | `owner API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `OWNER_EMAIL` |
@@ -176,7 +178,7 @@ Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠�
 
 設定不足時に写真機能を匿名公開する fallback はありません。設定が欠けていれば `503 SERVER_MISCONFIGURED` です。
 
-remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS（`worker: APP_ORIGIN` と `library: *` を足す前の check 構成）。追加後の構成でも FAIL なし（`worker: APP_ORIGIN` は PASS、`library: interrupted uploads` は既存の期限切れ 2 件で WARN）。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload` が FAIL になることも確認した。
+remote-test に対する実行結果（2026-09-17）: owner token ありで 15 項目すべて PASS（`worker: APP_ORIGIN` と `library: *` を足す前の check 構成）。追加後の構成でも FAIL なし（`worker: APP_ORIGIN` は PASS、`library: interrupted uploads` は既存の期限切れ 2 件で WARN）。`EDGEPHOTOS_URL` を別の origin にすると `r2: CORS for upload`（現在の `r2: CORS`）が FAIL になることも確認した。
 
 ## 8. Update（release と migration）
 
@@ -320,7 +322,7 @@ EDGEPHOTOS_URL=... EDGEPHOTOS_ACCESS_TOKEN=... pnpm storage cleanup --apply
 | 分類 | 意味 | 対応 |
 | --- | --- | --- |
 | `missing_original` / `original_size_mismatch` / `original_checksum_mismatch` | 写真の original が無い、または upload されたものと違う（データの破損） | backup の original で戻す。現在の手順は、その写真を完全削除し、backup の original を upload し直す（album と favorite は付け直す）。`audit` は exit 1 |
-| `missing_derivative` | original は無事で、thumbnail / preview が無い | 上と同じ手順で作り直す |
+| `missing_derivative` | original は無事で、thumbnail / preview が無い | ライブラリ画面の「サムネイルを作り直す」。original から作り直すだけで、original・album・favorite・trash・日時は変わらない（[D-026](decisions.md)）。`audit` は exit 1 |
 | `original_checksum_unrecorded`（`--deep`） | D-018 より前の original で、R2 に SHA-256 の記録が無い | `pnpm backup verify` が download して照合する |
 | `unfinished_delete` | 完全削除が途中で止まった | ライブラリ画面の「削除を再開」 |
 | `expired_upload` | finalize されずに期限を過ぎた upload（写真ではない） | 1 日たったら `cleanup --apply`。3 object が揃っていれば写真として登録され、それ以外は object と行を削除する |

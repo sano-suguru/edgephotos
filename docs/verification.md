@@ -10,7 +10,7 @@
 
 - 最終確認: 2026-09-18
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`
-- 未確認: production 環境の作成と deploy、iPhone / Android 実機での取り込み（[未検証](#未検証)）
+- 未確認: production 環境の作成と deploy、iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
 各項目に日付がある場合は、その日付が優先します。
 
@@ -161,6 +161,33 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 - 取り込み結果が Browser で変わりうる点: derivative の画素（縮小の実装と JPEG encoder の違い。content identity には使わないので許容）、WebP の orientation と途中で切れた JPEG（roadmap の既知の制約のまま）。撮影日時は JS の `exifr` で読むので engine に依存しない
 - 元ファイルの形式は、今回から中身の先頭 byte で決める（finalize と同じ関数）。Browser が拡張子から推測する `type` の違いに左右されない
 
+## derivative の作り直し（2026-09-18）
+
+### local（workerd の自動テスト）
+
+`tests/integration/repair.test.ts` と `tests/unit/repair.test.ts`。R2 の object を直接消して壊し、作り直して audit が正常に戻るまでを確認した（[D-026](decisions.md)）。
+
+- thumbnail だけ・preview だけ・両方の欠損を、それぞれ `missing_derivative` として検出し、作り直したあと audit が空になること
+- 作り直しの前後で、`assets` 行全体・`album_assets`・`uploads` 行・original の size / etag / R2 記録の SHA-256・original の byte 列から計算し直した SHA-256 が、すべて一致すること（favorite と album に入れた写真、trash 内の写真でも同じ）
+- original が無い / size 違い / 同じ size で SHA-256 違いのとき、URL を発行せず `409 REPAIR_SOURCE_UNUSABLE` になること
+- 壊れた derivative を PUT した場合（EXIF あり・JPEG でない・途中で切れている・空・size 超過）、その object を削除せずに報告し、検査時点の ETag への `If-Match` で置き換えられること
+- 同時実行: 2 つの repair から同じ key へ PUT すると、後から届いた方が `412` になり、先に保存された bytes が残ること。妥当な derivative が上書きされないこと
+- 古い view を持った repair が新しい repair の結果を取り消せないこと: 同じ「使えない object」を見た 2 つの repair のうち一方が写真を直したあと、もう一方の target を使うと `412` になり、直った derivative が byte 単位で残ること。削除してから作り直す実装に差し替えるとこのテストが落ちることも確認した（`If-Match` に raw の `etag` を渡すと R2 は `Invalid ETag in if-match header` を投げるため、引用符付きの `httpEtag` を使う）
+- 完全削除と重なった場合: 削除後に届いた PUT は derivative key だけを残し（original は残らない）、audit が `unreferenced_objects` として報告すること。以後の repair は `404`
+- client 側（`repairAsset`）: `status: 'ok'` だけを完了とみなし、PUT が成功しても server がまだ欠損と言う間は作り直しを繰り返すこと。回数に上限があること。original の SHA-256 が合わなければ何も PUT しないこと
+
+`pnpm diagnose` の `r2: CORS` が、`AllowedMethods` に `GET` の無い rule を FAIL にすることも unit test で確認した。
+
+### remote-test（2026-09-18、CORS の設定と preflight のみ）
+
+作り直しは original を `<img>` ではなく `fetch()` で読むため、応答に `Access-Control-Allow-Origin` が要ります（[D-026](decisions.md)）。`edgephotos-remote-test` の bucket に対して、認証なしの読み取りだけで確認した。
+
+- `wrangler r2 bucket cors list edgephotos-remote-test`: `allowed_origins` は app origin 1 つ、`allowed_methods` は `GET, PUT`、`allowed_headers` は `content-type, if-none-match, x-amz-checksum-sha256`。operations.md §6 の rule のままで、作り直しのための設定変更は不要だった
+- 実 R2 への preflight（`OPTIONS`、app origin）: `GET` / `PUT` とも `204` で、`Access-Control-Allow-Origin` に app origin、`Access-Control-Allow-Methods` に `GET, PUT` が返る。`fetch()` が original の body を読めることの前提を実環境で確認した
+- 別 origin（`https://evil.example`）からの同じ preflight は `403` で、CORS header を返さない（security.md §6 の「`APP_ORIGIN` に限定する」）
+
+Browser から実際に壊れた写真を作り直す往復は未実施（下の「未検証」）。
+
 ## 未検証
 
 iPhone / Android 実機での取り込みは未確認です。desktop の WebKit では代用できません。[roadmap.md](roadmap.md) の Post-merge verification で、次を確認します。
@@ -175,5 +202,15 @@ iPhone Safari:
 - 選択時の HEIC → JPEG 変換と、位置情報の扱いを確認する
 
 Android: 上と同じ項目のうち該当するもの（HEIF 設定の端末を含む）。
+
+derivative の作り直し（[D-026](decisions.md)）は、bucket の CORS 設定と実 R2 の preflight までを確認済みです（上）。Browser からの往復は未実施です。remote-test への deploy と Access login（対話操作）が要り、presigned URL の署名には Worker secret の R2 credential が要るため、`wrangler` だけでは代用できません（`wrangler r2 object put` に条件付きの option はありません）。次を確認します。
+
+- 壊した写真（remote-test の bucket から thumbnail を 1 つ削除）を、ライブラリ画面の「サムネイルを作り直す」で直せること。作り直し後に audit が正常へ戻ること
+- 実 R2 の presigned GET を Browser の `fetch()` から CORS 越しに読み、body の SHA-256 が `assets.sha256` と一致すること（preflight は確認済み。実際に body を読むのはこの手順）
+- 作り直した derivative の PUT（`Content-Type` + `If-None-Match: *`）が通り、同じ URL への 2 回目が `412` になること
+- 実 R2 の `head().checksums.sha256` を使った original の照合が、作り直しの入口で期待どおり働くこと（`409 REPAIR_SOURCE_UNUSABLE`）
+- **`If-Match` 付き presigned PUT**（この経路で初めて使う条件）: 検査した ETag なら `200`、古い ETag なら `412`、先に保存された bytes が残ること
+- `pnpm diagnose` の `r2: CORS` が remote-test の bucket で PASS すること
+- 確認に使った asset は trash へ移動する（この文書の他の項目と同じ扱い）
 
 表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。
