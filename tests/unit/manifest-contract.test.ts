@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { type ApiClient, type BlobStore, readManifest, restoreLibrary } from '../../scripts/lib/backup'
-import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, manifestIntegrityIssues } from '../../src/contracts/export-manifest'
+import {
+  collectExportManifest,
+  EXPORT_FORMAT,
+  EXPORT_FORMAT_VERSION,
+  manifestIntegrityIssues,
+} from '../../src/contracts/export-manifest'
 import type { ExportAsset, ExportManifest } from '../../src/contracts/schemas'
 
 // The v1 backup manifest contract, checked where it is enforced: everything `check`, `restore` and
@@ -270,5 +275,40 @@ describe('a backup directory is judged before the target library is touched', ()
     expect(await resume(files({ ...restoreState, formatVersion: 2 }))).toMatch(/formatVersion/)
     // A usable state is accepted, and only then is the library asked anything.
     expect(await resume(files(restoreState))).toBe('the library was contacted')
+  })
+})
+
+// A paged export reads the library one page at a time while it may change. Pages cannot be made to
+// interleave in the local runtime, so the torn read is fed to the collector directly: what matters is that
+// no caller — the Web download included — can end up holding a manifest the backup tools would reject.
+describe('assembling a manifest from pages read while the library changes', () => {
+  const pages = (assetPages: ExportAsset[][], albums: { id: string; title: string; createdAt: string }[] = []) => {
+    const rest = [...assetPages]
+    return async <T>(path: string): Promise<T> => {
+      if (path.startsWith('/api/v1/export/assets')) {
+        const items = rest.shift() ?? []
+        return { items, nextAfter: rest.length > 0 ? items[items.length - 1].id : null } as T
+      }
+      if (path.startsWith('/api/v1/export/albums')) return { items: albums } as T
+      return { items: [], nextAfter: null } as T
+    }
+  }
+
+  it('assembles pages that are consistent with each other', async () => {
+    const m = await collectExportManifest(
+      pages([[asset()], [asset({ id: ID_B, sha256: 'b'.repeat(64) })]]),
+      new Date('2024-05-03T12:00:00.000Z'),
+    )
+    expect(m.assets.map((a) => a.id)).toEqual([ID_A, ID_B])
+  })
+
+  // A photo permanently deleted and uploaded again mid-export appears once per page under two ids. The
+  // library deduplicates originals by content and restore matches a backup to a library by SHA-256 alone,
+  // so such a manifest would silently collapse two entries into one. Fail loudly instead: nothing is lost,
+  // the library is unchanged, and running the export again produces a correct manifest.
+  it('refuses to hand back a snapshot in which one original appears as two photos', async () => {
+    await expect(
+      collectExportManifest(pages([[asset()], [asset({ id: ID_B })]]), new Date('2024-05-03T12:00:00.000Z')),
+    ).rejects.toThrow(/changed while it was being exported[\s\S]*two assets share the original/)
   })
 })

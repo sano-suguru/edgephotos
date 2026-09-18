@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, or, type SQL, sql } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull, type SQL, sql } from 'drizzle-orm'
 import type { Asset, AssetSummary } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, albumAssets, assets, uploads } from '../db/schema'
@@ -145,7 +145,7 @@ export async function restoreAsset(ctx: ServiceContext, id: string) {
 // 1. D1: mark purging (hidden everywhere) and drop album membership, only if the asset is still in trash
 //    (a restore from another tab may land between the read and the update).
 // 2. R2: delete original + derivatives (deleting a missing key is a no-op).
-// 3. D1: remove the asset row and upload records.
+// 3. D1: remove the asset row and the upload that created it.
 export async function purgeAsset(ctx: ServiceContext, id: string): Promise<void> {
   const row = await getAssetRow(ctx.db, id)
   if (!row) throw new ApiError(404, 'ASSET_NOT_FOUND', 'Asset not found.')
@@ -174,7 +174,11 @@ export async function purgeAsset(ctx: ServiceContext, id: string): Promise<void>
   await ctx.bucket.delete([keys.original, keys.thumbnail, keys.preview])
   await ctx.db.batch([
     ctx.db.delete(albumAssets).where(eq(albumAssets.asset_id, id)),
-    ctx.db.delete(uploads).where(or(eq(uploads.asset_id, id), eq(uploads.duplicate_of, id))),
+    // Uploads that were settled as duplicates of this photo keep their rows: each one is the only record
+    // that its own reserved keys belong to no asset, and storage cleanup needs it to remove objects whose
+    // best-effort removal did not happen. Only the pointer goes, so nothing refers to a photo that is gone.
+    ctx.db.update(uploads).set({ duplicate_of: null }).where(eq(uploads.duplicate_of, id)),
+    ctx.db.delete(uploads).where(eq(uploads.asset_id, id)),
     ctx.db.delete(assets).where(and(eq(assets.id, id), eq(assets.status, 'purging'))),
   ])
 }

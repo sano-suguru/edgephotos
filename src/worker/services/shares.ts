@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm'
 import type { Share, SharedAlbum } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { albums, type ShareRow, shares } from '../db/schema'
@@ -27,19 +27,17 @@ export function shareUrl(appOrigin: string, shareId: string, secret: string): st
   return `${appOrigin}/share/${shareId}#${secret}`
 }
 
-async function insertShare(ctx: ServiceContext, albumId: string, expiresAt: Date) {
-  const id = randomBase64Url(16)
+async function newShare(ctx: ServiceContext, albumId: string, expiresAt: string) {
   const secret = randomBase64Url(32)
   const row: ShareRow = {
-    id,
+    id: randomBase64Url(16),
     album_id: albumId,
     secret_hash: await sha256Hex(secret),
     created_at: ctx.now().toISOString(),
-    expires_at: expiresAt.toISOString(),
+    expires_at: expiresAt,
     revoked_at: null,
   }
-  const stmt = ctx.db.insert(shares).values(row)
-  return { row, secret, stmt }
+  return { row, secret }
 }
 
 export async function listShares(ctx: ServiceContext, albumId: string): Promise<Share[]> {
@@ -56,8 +54,8 @@ export async function listShares(ctx: ServiceContext, albumId: string): Promise<
 export async function createShare(ctx: ServiceContext, appOrigin: string, albumId: string, expiresInDays: number) {
   await requireAlbumId(ctx.db, albumId)
   const expiresAt = new Date(ctx.now().getTime() + expiresInDays * 86_400_000)
-  const { row, secret, stmt } = await insertShare(ctx, albumId, expiresAt)
-  await stmt.run()
+  const { row, secret } = await newShare(ctx, albumId, expiresAt.toISOString())
+  await ctx.db.insert(shares).values(row)
   return { share: toShare(row, ctx.now()), secret, url: shareUrl(appOrigin, row.id, secret) }
 }
 
@@ -89,16 +87,44 @@ function revokeStatement(db: Db, shareId: string, ts: string) {
 }
 
 // Revokes the old link and issues a new one for the same album with the same expiry.
+//
+// Whether the old share may still be replaced is decided by the INSERT itself, not by the read above it: the
+// new row exists only if, at write time, the old one is still unrevoked and unexpired. A revoke that lands
+// between the read and the write therefore wins, and a regenerate decided before a revoke (a second tab, a
+// resent request) cannot put a live link back on an album the owner has already closed. The INSERT comes
+// first in the batch so it sees the old row's state before this call's own revoke changes it, and the revoke
+// is in turn conditioned on that INSERT having happened: a call that ends in 409 leaves the old share exactly
+// as it found it, rather than revoking a share it refused to replace.
 export async function regenerateShare(ctx: ServiceContext, appOrigin: string, shareId: string) {
   const old = await requireShareRow(ctx.db, shareId)
   await requireAlbumId(ctx.db, old.album_id)
   const now = ctx.now()
-  const expiresAt = new Date(old.expires_at)
-  if (expiresAt.getTime() <= now.getTime()) {
-    throw new ApiError(409, 'SHARE_UNAVAILABLE', 'Expired shares cannot be regenerated. Create a new share.')
+  const ts = now.toISOString()
+  const { row, secret } = await newShare(ctx, old.album_id, old.expires_at)
+  await ctx.db.batch([
+    ctx.db.insert(shares).select(
+      ctx.db
+        .select({
+          id: sql<string>`${row.id}`.as('id'),
+          album_id: sql<string>`${row.album_id}`.as('album_id'),
+          secret_hash: sql<string>`${row.secret_hash}`.as('secret_hash'),
+          created_at: sql<string>`${row.created_at}`.as('created_at'),
+          expires_at: sql<string>`${row.expires_at}`.as('expires_at'),
+          revoked_at: sql<null>`NULL`.as('revoked_at'),
+        })
+        .from(shares)
+        .where(and(eq(shares.id, old.id), isNull(shares.revoked_at), gt(shares.expires_at, ts))),
+    ),
+    ctx.db
+      .update(shares)
+      .set({ revoked_at: ts })
+      .where(
+        and(eq(shares.id, old.id), isNull(shares.revoked_at), sql`EXISTS (SELECT 1 FROM shares WHERE id = ${row.id})`),
+      ),
+  ])
+  if (!(await getShareRow(ctx.db, row.id))) {
+    throw new ApiError(409, 'SHARE_UNAVAILABLE', 'This share is revoked or expired. Create a new share instead.')
   }
-  const { row, secret, stmt } = await insertShare(ctx, old.album_id, expiresAt)
-  await ctx.db.batch([revokeStatement(ctx.db, old.id, now.toISOString()), stmt])
   return { share: toShare(row, now), secret, url: shareUrl(appOrigin, row.id, secret) }
 }
 

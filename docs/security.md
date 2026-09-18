@@ -73,6 +73,8 @@ share API は object key を client から受け取りません。`assetId + var
 
 revoke 後は新しい画像 URL を発行しません。
 
+revoke 済みの share は再発行（`/regenerate`）もできません。再発行は「古い share がまだ有効である」ことを条件にした INSERT で行うため、revoke を読み取った後に届いた再発行要求も `409 SHARE_UNAVAILABLE` になります。別 tab や再送によって、閉じたはずの album に有効な link が戻ることはありません。期限切れの share も同じく再発行できません。
+
 ただし、すでに発行済みの presigned URL、取得済みファイル、browser cache、screenshot を回収できるとは説明しません。
 
 共有失効は「以後の新規アクセスを止める」機能であり DRM ではありません。

@@ -158,7 +158,7 @@ GET|PATCH|DELETE /api/v1/albums/{albumId}
 GET    /api/v1/albums/{albumId}/assets
 PUT|DELETE /api/v1/albums/{albumId}/assets/{assetId}   idempotent
 GET|POST /api/v1/albums/{albumId}/shares
-POST   /api/v1/shares/{shareId}/revoke | /regenerate
+POST   /api/v1/shares/{shareId}/revoke | /regenerate   regenerate は有効な share のみ
 GET    /api/v1/export/assets | /albums | /album-assets   manifest pages (after, limit)
 GET    /api/v1/diagnostics                      non-sensitive counts, unfinished purge ids
 GET    /api/v1/storage/audit?after&limit&deep   D1 / R2 comparison (read-only)
@@ -320,6 +320,7 @@ share session / share Cookie は v1 では作りません。
 - 完全削除は trash 内の asset に対してのみ実行できます。`purging` に遷移して全画面から隠したあと、R2 object を削除し、最後に D1 row を削除します。途中で失敗した場合も、同じ `DELETE` を再実行すれば再開できます。
 - 止まった削除の asset ID は `GET /api/v1/diagnostics` の `purgingAssetIds`（古い順に最大 100 件）で分かります。ライブラリ画面の「削除を再開」がそれぞれに `DELETE` を送ります。同じ写真を upload し直した場合も、reserve / finalize が削除を完了させます（[D-014](decisions.md)）。
 - 完全削除は、asset が `ready` かつ trash 内である場合だけ `purging` にします。別の tab からの復元が間に入った場合は `409 ASSET_NOT_TRASHED` で、何も削除しません。
+- 削除するのはこの asset を作った upload 行だけです。この asset の重複として決着した upload 行は `duplicate_of` を `NULL` にして残します。その行は「自分が予約した key はどの asset のものでもない」という唯一の記録で、best-effort だった object 削除が届いていなければ storage cleanup がこの行から後始末します（[D-027](decisions.md)）。
 
 ## 7.2 Export / Restore
 
@@ -371,6 +372,8 @@ versioning:
 - reader は知らない key を無視します。したがって v1 に足してよいのは、**その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field だけ**です。10 年後に古い CLI がこの backup を読む可能性を前提にします
 - 上の条件を満たさない追加、および既存 field の意味・書式・必須性の変更では `formatVersion` を上げます
 - 未公開の旧形式への fallback は持ちません
+
+paged export は、ライブラリが変化しうる間に 1 ページずつ読みます。asset ページに無い写真への membership は組み立て時に落とすので、manifest が知らない写真を指すことはありません。落として直せないのは、1 つの original が 2 つの asset として現れる場合（ページとページの間に完全削除と再 upload が起きた）です。写真の同一性は SHA-256 だけで決まるため、この manifest を restore すると 2 件が黙って 1 件に潰れます。`collectExportManifest` はこれを返さずに拒否します。ライブラリは無傷で、何も書かれていないので、export をやり直せば正しい manifest が得られます（[D-027](decisions.md)）。したがって Web のダウンロードも CLI も、`check` / `restore` / `verify` が拒否する manifest を手にすることはありません。
 
 `pnpm backup` の `check` / `restore` / `verify` はすべて `readManifest` を通ります。JSON として壊れている、contract に合わない、整合しない manifest は、対象ライブラリへ最初の request を送る前に、どの field がなぜ不正かを並べて拒否します。restore の再開に使う `restore-state.json` も同様に検証します（こちらは backup の contract ではなく実行状態のファイルです）。
 

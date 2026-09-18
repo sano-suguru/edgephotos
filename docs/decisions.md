@@ -400,3 +400,32 @@ storage audit は `missing_derivative`（original は無事だが thumbnail / pr
 
 - repair の URL 発行後に完全削除が走り、そのあとに PUT が届くと、derivative の key だけがどの行も指さない object として残ります（original は残りません）。presigned PUT は D1 を参照できないため、この窓は原理的に閉じられません。audit が `unreferenced_objects` として報告し、[D-023](decisions.md) のとおり自動では消しません
 - client が検査を通らない bytes を PUT したまま戻ってこないと、その object は key に残ります。audit は object の有無しか見ないため、この写真は `missing_derivative` として挙がりません（表示は崩れたまま）。次にその写真を repair すれば `If-Match` で置き換わりますが、audit からは見つけられません。削除する設計に戻せばこの状態は避けられる一方、上の「直ったばかりの derivative を消せる」を招きます。**直せていない**より**壊す**方が重いので、置き換えを採ります
+
+## D-027: 古い操作は、新しい正しい状態を取り消せないようにする
+
+**状態:** 採用（2026-09-18。既存機能の adversarial integrity review の結果）
+
+request は直列には届きません。別 tab、再送、応答が消えた後の再試行は、**読んだ時点では正しかった判断**を、状態が変わった後に書き込みます。upload / finalize / 完全削除はすでにこれを条件付き書き込みで扱っています（[D-014](decisions.md)、[D-023](decisions.md)、[D-026](decisions.md)）。同じ規則を、まだ「読んでから書く」ままだった 3 箇所へ広げます。
+
+- **share の再発行は、古い share がまだ有効なときだけ成立する。** `INSERT INTO shares SELECT ... FROM shares WHERE id = ? AND revoked_at IS NULL AND expires_at > ?` を、この呼び出し自身の revoke より**前**に同じ batch で実行し、行ができていなければ `409 SHARE_UNAVAILABLE` を返します。判断しているのは書き込みそのものなので、revoke を読んだ後に届いた再発行も、revoke と同時に走った再発行も、閉じた album に有効な link を戻せません。期限切れも同じ条件で断ります（以前は期限だけを JS で見ており、revoke 済みの share を再発行できました）
+- **完全削除は、その asset の重複として決着した upload 行を消さない。** `duplicate_of` を `NULL` にして行を残します。重複の object 削除は best-effort なので（[D-014](decisions.md)）、届いていない場合の後始末は storage cleanup がこの行を見て行います。行ごと消すと、自己回復する `duplicate_leftover` が、誰も消さない `unreferenced_objects` に変わります
+- **paged export は、組み立てた snapshot が manifest contract を満たさなければ返さない。** 落として直せるもの（manifest に無い写真への membership）は従来どおり落とし、直せないもの（1 つの original が 2 つの asset として現れる）は `ExportSnapshotError` で拒否します。写真の同一性は SHA-256 だけなので（[D-025](decisions.md)）、この manifest を restore すると 2 件が黙って 1 件になります
+
+守ること:
+
+- 「race が起きない」ではなく「race が起きても、古い actor が正しい状態を壊せない」を条件にする。条件は書き込み側に置き、読んだ値の JS 判定を最終的な保証にしない
+- 拒否したときの着地点は、呼び出しの**前**の正しい状態のまま。share が 2 つできる、manifest が 1 件欠けるといった「黙って進む」選択肢は採らない
+
+却下した案:
+
+- 再発行の前に revoked を JS で確認するだけにする: 読みと書きの間が開いたままで、UI が revoke 済みの share に再発行を出さないのと同じ強さしかない
+- torn な export を、後に現れた asset を採って重複解消する: asset ID は UUID v4 なので「後のページ = 新しい写真」ではない。生きている asset の方を黙って落としうる
+- export の一貫した snapshot を作る（版管理・スナップショット表・長い transaction）: ライブラリの変化中に完全な snapshot を要求しない方針（AGENTS.md §6）に反し、得られるのは「やり直せば済む」ものの自動化だけ
+
+影響: `POST /api/v1/shares/{shareId}/regenerate` は revoke 済み share に対して `409 SHARE_UNAVAILABLE` を返します（Web UI は元から有効な share にしか再発行を出していないため、画面の操作は変わりません）。完全削除の後、重複 upload 行は cleanup の grace（24 時間）を過ぎるまで `uploads` に残ります。export 中にライブラリが変化して整合しない snapshot になった場合、ダウンロード / `pnpm backup export` はやり直しを促して止まります。
+
+残るリスク:
+
+- revoke / 完全削除の**直前**に発行済みの presigned URL は、残り TTL の間だけ有効です（share は最大 300 秒。[security.md](security.md) §5・§6）。これは設計上の既知 risk で、この決定は変えません
+- 同じ share に対する再発行が 2 つ同時に成立すると、有効な share が 2 つできます（どちらも古い share を revoke するため、古い link は確実に死にます）。owner の share 一覧に両方出るので隠れた link にはなりません
+- export のやり直しは owner の操作です。自動では再試行しません

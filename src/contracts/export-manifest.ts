@@ -7,9 +7,29 @@ import type { ExportAlbumList, ExportAssetPage, ExportManifest, ExportMembership
 export const EXPORT_FORMAT = 'edgephotos-export'
 export const EXPORT_FORMAT_VERSION = 1
 
+// A library that changed under a paged export in a way the manifest cannot express. The pages themselves
+// were all valid; assembled, they describe a library that never existed. Nothing is wrong with the library
+// and nothing was written: running the export again produces a correct manifest.
+export class ExportSnapshotError extends Error {
+  readonly issues: string[]
+  constructor(issues: string[]) {
+    super(
+      `the library changed while it was being exported, so this snapshot is not consistent:\n${issues
+        .slice(0, 10)
+        .map((line) => `  ${line}`)
+        .join('\n')}${issues.length > 10 ? `\n  ... and ${issues.length - 10} more` : ''}\nRun the export again.`,
+    )
+    this.name = 'ExportSnapshotError'
+    this.issues = issues
+  }
+}
+
 // Assembles the paged export API into one manifest (format v1). Used by the Web app and the backup CLI.
 // Pages are read one after another while the library may change: memberships of photos that are not in the
 // asset pages (added or deleted meanwhile) are dropped, so the manifest never refers to an unknown asset.
+// What dropping cannot fix — one original appearing as two photos because it was deleted and uploaded again
+// between two pages — is refused here rather than returned, so no caller can hold, write out or act on a
+// manifest that `check`, `restore` and `verify` would reject.
 export async function collectExportManifest(
   getJson: <T>(path: string) => Promise<T>,
   now: Date = new Date(),
@@ -38,13 +58,16 @@ export async function collectExportManifest(
     after = page.nextAfter
   } while (after)
 
-  return {
+  const manifest: ExportManifest = {
     format: EXPORT_FORMAT,
     formatVersion: EXPORT_FORMAT_VERSION,
     exportedAt: now.toISOString(),
     assets,
     albums: albums.map((al) => ({ ...al, assetIds: members.get(al.id) ?? [] })),
   }
+  const issues = manifestIntegrityIssues(manifest)
+  if (issues.length > 0) throw new ExportSnapshotError(issues)
+  return manifest
 }
 
 // The rules a manifest must satisfy that no per-field schema can express. Separate from the schema on
