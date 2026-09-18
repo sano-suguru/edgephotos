@@ -142,6 +142,33 @@ describe('albums', () => {
     expect((await call(app, 'GET', `/api/v1/albums/${album.id}`)).status).toBe(404)
   })
 
+  it('lists albums with counts and, on request, the newest photo as cover', async () => {
+    const app = await makeApp()
+    const older = await uploadPhoto(app, undefined, { takenAt: '1960-01-01T00:00:00Z' })
+    const newer = await uploadPhoto(app, undefined, { takenAt: '1961-01-01T00:00:00Z' })
+    const newest = await uploadPhoto(app, undefined, { takenAt: '1962-01-01T00:00:00Z' })
+    const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'Covers' }, expect: 201 })
+    const empty = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'Nothing' }, expect: 201 })
+    for (const p of [older, newer, newest])
+      await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${p.result.asset.id}`)
+    // A trashed photo is neither counted nor used as the cover.
+    await callJson(app, 'POST', `/api/v1/assets/${newest.result.asset.id}/trash`, { expect: 200 })
+
+    const plain = await callJson(app, 'GET', '/api/v1/albums', { expect: 200 })
+    const item = plain.items.find((a: { id: string }) => a.id === album.id)
+    expect(item.assetCount).toBe(2)
+    expect(item).not.toHaveProperty('coverThumbnailUrl')
+
+    const withCovers = await callJson(app, 'GET', '/api/v1/albums?covers=true', { expect: 200 })
+    const covered = withCovers.items.find((a: { id: string }) => a.id === album.id)
+    expect(covered.assetCount).toBe(2)
+    expect(assetIdFromTarget(covered.coverThumbnailUrl)).toBe(`derivatives/v1/${newer.result.asset.id}/thumbnail.jpg`)
+    const none = withCovers.items.find((a: { id: string }) => a.id === empty.id)
+    expect(none).toMatchObject({ assetCount: 0, coverThumbnailUrl: null })
+    // Same count as the single-album read.
+    expect((await callJson(app, 'GET', `/api/v1/albums/${album.id}`)).assetCount).toBe(2)
+  })
+
   it('rejects empty titles', async () => {
     const res = await call(await makeApp(), 'POST', '/api/v1/albums', { body: { title: '   ' } })
     expect(res.status).toBe(400)
@@ -269,6 +296,41 @@ describe('trash, restore and permanent delete', () => {
     expect((await call(app, 'GET', `/api/v1/assets/${id}`)).status).toBe(404)
     // A replayed finalize for the purged asset reports it is gone instead of resurrecting it.
     expect((await call(app, 'POST', `/api/v1/uploads/${reservation.upload.id}/finalize`)).status).toBe(404)
+  })
+
+  it('does not delete a photo that was restored from trash while the delete was starting', async () => {
+    let restored = false
+    // Another tab restores the photo between the purge's read and its D1 update.
+    const racingDb = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        if (prop === 'batch' && !restored) {
+          return async (statements: D1PreparedStatement[]) => {
+            restored = true
+            await target.prepare('UPDATE assets SET trashed_at = NULL WHERE id = ?').bind(victim).run()
+            return target.batch(statements)
+          }
+        }
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const plain = await makeApp()
+    const victim = (await uploadPhoto(plain)).result.asset.id
+    const album = await callJson(plain, 'POST', '/api/v1/albums', { body: { title: 'keep' }, expect: 201 })
+    await call(plain, 'PUT', `/api/v1/albums/${album.id}/assets/${victim}`)
+    await callJson(plain, 'POST', `/api/v1/assets/${victim}/trash`, { expect: 200 })
+
+    const app = await makeApp({ env: { DB: racingDb } })
+    const res = await call(app, 'DELETE', `/api/v1/assets/${victim}`)
+    expect(restored).toBe(true)
+    expect(res.status).toBe(409)
+    expect(await env.BUCKET.head(`originals/${victim}`)).not.toBeNull()
+    const row = await env.DB.prepare('SELECT status, trashed_at FROM assets WHERE id = ?')
+      .bind(victim)
+      .first<{ status: string; trashed_at: string | null }>()
+    expect(row).toEqual({ status: 'ready', trashed_at: null })
+    const members = await callJson(plain, 'GET', `/api/v1/albums/${album.id}/assets`, { expect: 200 })
+    expect(members.items.map((i: { id: string }) => i.id)).toEqual([victim])
   })
 
   it('resumes an interrupted purge', async () => {

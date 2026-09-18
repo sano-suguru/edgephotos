@@ -137,12 +137,12 @@ Browser はこの 2 header を送るため、R2 CORS の AllowedHeaders に `con
 
 ## D-015: restore は公開 HTTP API 経由の再 upload とする
 
-**状態:** 採用
+**状態:** 採用（`createdAt` の保持と再開は [D-024](#d-024-export-をページに分けbackup--restore-を差分再開できるようにする) で更新）
 
 特権的な import endpoint は作りません。backup CLI は export manifest と original / derivative を取得し、restore では空の環境へ通常の `reserve -> PUT -> finalize` で再 upload したうえで、favorite・trash・album 構成を API で再現します。
 
 - asset ID は変わる。同一性は original の SHA-256 で判定する
-- `createdAt` は restore 時刻になる。`takenAt` は保持する
+- ~~`createdAt` は restore 時刻になる~~ D-024 で保持するように変更。`takenAt` は保持する
 - share は復元しない（operations.md の方針どおり）
 - 対象 library が空でなければ restore を拒否する
 
@@ -290,3 +290,51 @@ workerd の test（`pnpm test`）は server の契約を検証しますが、Bro
 却下した案: 一覧で preview の URL を返したまま、署名を速くする（署名鍵の cache など）。問題は回数そのもので、使わない URL を発行しないほうが単純です。
 
 影響: 一覧 response の `previewUrl` を使う Client は、個別の asset を取得する必要があります。現時点の Client は Web と backup CLI だけで、どちらも対応済みです。
+
+## D-023: D1 と R2 の突合は owner が実行し、自動で消すのは中断した upload の残りだけにする
+
+**状態:** 採用（2026-09-17。roadmap の「未完了 upload の cleanup は未実装」を置き換える）
+
+D1 と R2 は 1 transaction にできません（architecture.md §5）。以前は、期限切れの `uploads` 行を数えるだけで、R2 側から見た不整合（行の無い object、object の無い asset）を調べる手段がありませんでした。5 年使ったライブラリで original が 1 枚欠けても、backup を取るまで気付けません。
+
+- `GET /api/v1/storage/audit`（読み取りのみ）: R2 の key と D1 の id はどちらも asset ID 順に並ぶので、1 ページ = 1 つの ID 範囲として、`originals/` と `derivatives/v1/` の list、`assets`、`uploads` を突き合わせる。どの source も `limit` 件で止め、ページの終わりは最も手前で止まった ID にする。これで「object の無い asset」と「行の無い object」の両方が見つかる。`deep=true` では、そのページの original を `head()` し、R2 が upload 時に記録した SHA-256 と `assets.sha256` を比べる
+- 分類: `missing_original`・`original_size_mismatch`・`original_checksum_mismatch`・`missing_derivative`（写真の破損）、`unfinished_delete`、`expired_upload`、`duplicate_leftover`、`unreferenced_objects`、`unexpected_key`、`original_checksum_unrecorded`（D-018 より前の original）、`audit_incomplete`（1 つの ID の下に layout 外の key が多すぎて、決めた list 回数で確認しきれなかった。「問題なし」と区別するため）
+- `POST /api/v1/storage/cleanup`: 期限（600 秒）から **さらに 1 日** 過ぎた `pending` の upload だけを扱う。3 object が揃い finalize の検査を通るものは、通常の finalize で写真にする（owner が選んで転送まで終えた写真だから）。object が欠けている・検査に通らないものは、行を先に終端状態（`status = 'duplicate'`、`duplicate_of = NULL`）にし、その upload の key の object を消してから行を消す。`duplicate` の行も 1 日たったら、残った object と行を消す
+- 手動で実行する。ライブラリ画面の「ストレージの点検」と `pnpm storage audit|cleanup`（`--apply` を付けるまで dry run）
+
+守ること:
+
+- 消す key は `uploads.asset_id` から作るものだけ。その ID の `assets` 行（`ready` でも `purging` でも）があれば消さない
+- finalize は、upload 行がまだ `pending` のときだけ、同じ D1 batch の中で asset を作る（`INSERT ... SELECT ... WHERE status = 'pending'`）。cleanup は行を先に終端状態にするので、検査を終えた finalize が後から asset を作って、消した object を指すことはない
+- `unreferenced_objects`（どの行も指さない object）は消さない。D1 を time travel で戻すと、写真の object が行を失った状態で残る（security.md §10）。original を誤って消す可能性のある自動修復は入れない
+- `missing_original` などの破損も自動では直さない。backup から戻す（operations.md §12）
+
+却下した案:
+
+- Cron で定期実行する: 件数を観測できるようになり、手動の実行で足りる。中断した upload は写真の整合性を壊さず、急いで消す理由がない。定期実行が要るのは、owner が実行しないまま R2 の料金や件数が問題になった場合（AGENTS.md §6）
+- `uploads.status` に `abandoned` を足す: `uploads` の CHECK を変えるには table の作り直しが要り、baseline の無名 UNIQUE の扱いが難しい（development.md §6）。`duplicate` + `duplicate_of = NULL` で「asset を作らずに終わった upload」を表す（`src/worker/db/schema.ts` に注記）
+- R2 lifecycle rule で `originals/` を期限切れにする: 写真の original まで消える
+
+影響: 中断した upload を後から finalize すると、cleanup の前なら従来どおり完了し、cleanup の後なら `410`（片付け途中）または `404`（行が消えた）になります。Web の再試行は、どちらでも新しい reservation からやり直します。
+
+## D-024: Export をページに分け、backup / restore を差分・再開できるようにする
+
+**状態:** 採用（2026-09-17。D-015 を更新）
+
+10 万枚の合成ライブラリで測ると（benchmarks.md）、`GET /api/v1/export` は 1 response で 55 MiB の JSON を Worker の memory 内で組み立て、local でも 1 秒かかりました。Worker の memory 上限は 128 MB で、行 object と JSON 文字列を同時に持つと上限を超える見込みです。backup・verify・restore はすべてこの response に依存していました。また、backup は毎回全 original を download し、restore は途中で止まると空の環境からやり直すしかありませんでした。10 万枚の restore は remote で 10 時間を超える見積もりで、その間に Access token が期限切れになるだけで最初からになります。
+
+- export は `GET /api/v1/export/assets`（ID 順、1,000 件ずつ）、`/export/albums`、`/export/album-assets`（`(album_id, asset_id)` 順）に分ける。Web と CLI は同じ関数（`src/contracts/export-manifest.ts`）で format 1 の manifest を組み立てる。ページの間に削除・追加された写真の membership は落とし、manifest が知らない asset を指さないようにする。`settings.last_export_at` は assets の最後のページで記録する。単一 response の `GET /api/v1/export` は削除した（client は Web と backup CLI だけで、どちらも対応済み）
+- `pnpm backup export` は差分にする。backup のファイルは original の SHA-256 で名前が決まるので、original の size が合い、derivative が揃っていれば取り直さない。書き込みは一時ファイルからの rename。original が壊れている・無い写真は名前を挙げて続行し、最後に失敗で終わる（1 枚の破損で backup が永久に取れなくなるのを避ける）
+- `pnpm backup check <dir>` を足す。manifest のすべての original を読み直して SHA-256 を照合する（オフライン）
+- reserve に任意の `metadata.createdAt` を足す。restore は backup の値を送り、`createdAt` と、撮影日時の無い写真の timeline の並びを保つ（以前は restore 時刻になり、撮影日時の無い写真がすべて先頭に、逆順で並んだ）。未来の値は `400`
+- restore は進行状況を backup ディレクトリの `restore-state.json` に書く（作った album の ID 対応と段階）。`--resume` は、対象ライブラリの写真がすべて backup にあり、album がすべて記録済みのときだけ続きから実行する。写真は SHA-256 で、album の membership は対象の export で済んだものを飛ばす
+- `pnpm backup verify` は `createdAt` も比べ、storage audit を実行し、`--quick` では original を download せず、R2 が upload 時に検証・記録した SHA-256 を使う（deep audit）。記録の無い original（D-018 より前）は `--quick` でも download する
+
+却下した案:
+
+- export を stream で返す: Worker は D1 の結果を一度に受け取るので、D1 側もページに分ける必要がある。client が組み立てる方が単純
+- restore の進行を対象ライブラリに書く: 特権的な import 経路（D-015 で避けた）か、album の title に印を付けることになる
+- backup / restore の並列化: 変わらず見送る（benchmarks.md）。再開できるようになったので、止まっても失うのは待ち時間だけ
+
+影響: 以前の CLI は `GET /api/v1/export` を使うため、この Worker には使えません。以前の restore で作ったライブラリは `createdAt` が restore 時刻なので、新しい `verify` では `createdAt differs` になります。
+

@@ -125,7 +125,7 @@ X-Robots-Tag: noindex, nofollow, noarchive
 
 CSP は `self` を基準にし、third-party analytics、外部 font、不要な script を share page へ追加しません。
 
-private write API は GET で状態変更しません。例外は `GET /api/v1/export` で、最終 export 日時（`settings.last_export_at`）だけを記録します。写真・album・share には触れません。Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま信用しません。
+private write API は GET で状態変更しません。例外は `GET /api/v1/export/assets` の最後のページで、最終 export 日時（`settings.last_export_at`）だけを記録します。写真・album・share には触れません。Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま信用しません。
 
 - `Origin` がある書き込み request は、`APP_ORIGIN` と完全一致しなければ `403 ORIGIN_NOT_ALLOWED` とします。
 - `Origin` がなく `Sec-Fetch-Site` が `same-origin` / `none` 以外の場合も拒否します。
@@ -164,7 +164,11 @@ private write API は GET で状態変更しません。例外は `GET /api/v1/e
 
 物理削除は再実行可能な処理にし、途中失敗から再開できるようにします。
 
-D1 に参照がない R2 object を即座に「ゴミ」と判定しません。D1 restore によって索引だけ過去状態になっている可能性があるためです。
+D1 に参照がない R2 object を即座に「ゴミ」と判定しません。D1 restore によって索引だけ過去状態になっている可能性があるためです。storage audit はこれを `unreferenced_objects` として報告するだけで、削除しません。
+
+storage cleanup（[D-023](decisions.md)）が削除するのは、`uploads` 行が指す key のうち、asset にならずに終わった upload のものだけです。key は server が `uploads.asset_id` から作り、client や R2 の list から受け取った文字列を削除に使いません。同じ ID の `assets` 行がある場合は削除しません。cleanup は owner の API で、Access と Origin の検査は他の書き込みと同じです。
+
+完全削除は、asset が trash 内にあることを D1 の条件付き更新で確かめてから始めます。
 
 ## 11. 必須回帰テスト
 
@@ -181,6 +185,10 @@ D1 に参照がない R2 object を即座に「ゴミ」と判定しません。
 - 申告 SHA-256 と一致しない original を保存しない・`ready` にしない。
 - D1 障害時に upload を成功扱いしない。
 - 完全削除が途中で止まった asset を、同じ写真の再 upload で「重複」と扱わない（reserve で登録済みと報告しない、finalize で新しい object を消さない）。
+- 完全削除と同時に trash から復元された写真を削除しない。
+- finalize の UNIQUE 競合の処理が、自分の作った asset の object を重複として消さない。
+- storage cleanup が、写真・止まった削除・どの行も指さない object・進行中の upload の object を消さない。cleanup が片付けた upload から、後の finalize で asset が作られない。
+- storage audit が何も書き込まない。
 
 上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Chromium と WebKit で確認しています。WebKit の encoder が付ける APP1 / APP13（撮影 metadata は含まない）は、Client が PUT 前に取り除きます。自動テストの対象は、その除去処理と Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）です。server 側の保証は変わりません（[D-020](decisions.md)）。
 

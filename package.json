@@ -14,13 +14,15 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "bench": "vitest run --config vitest.bench.config.ts --reporter=verbose --silent=false",
-    "check": "pnpm typecheck && pnpm lint && pnpm db:check && pnpm test && pnpm build",
+    "check": "pnpm typecheck && pnpm lint && pnpm db:check && pnpm cli:check && pnpm test && pnpm build",
     "db:generate": "drizzle-kit generate --name",
     "db:check": "node scripts/db-check.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "cf-typegen": "wrangler types src/worker/worker-configuration.d.ts --include-runtime=false",
     "backup": "node scripts/backup.ts",
-    "diagnose": "node scripts/diagnose.ts"
+    "diagnose": "node scripts/diagnose.ts",
+    "storage": "node scripts/storage.ts",
+    "cli:check": "node scripts/cli-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

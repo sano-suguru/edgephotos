@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { createLocalJWKSet } from 'jose'
 import { describe, it } from 'vitest'
-import { type BlobStore, backupLibrary, restoreLibrary, verifyLibrary } from '../../scripts/lib/backup'
+import { type BlobStore, backupLibrary, readManifest, restoreLibrary, verifyLibrary } from '../../scripts/lib/backup'
 import { createApp } from '../../src/worker/app'
 import { createR2Signer } from '../../src/worker/storage/signer'
 import { accessKeys, apiClient, assertion, call, callJson, makeApp, sha256, syntheticJpeg, testEnv } from '../helpers'
@@ -10,9 +10,12 @@ import { accessKeys, apiClient, assertion, call, callJson, makeApp, sha256, synt
 // Local workerd + Miniflare D1 (SQLite, same engine as D1) and R2: no network latency, so request
 // counts matter as much as the times. API timings use the real SigV4 signer with fake credentials.
 
-const SIZES = [1_000, 10_000]
+// BENCH_SIZES=1000,10000,100000 pnpm bench. Backup / restore run only up to BENCH_BACKUP_MAX assets (they are
+// sequential over the API and take minutes per 10k).
+const SIZES = (env.BENCH_SIZES ?? '1000,10000').split(',').map(Number)
+const BACKUP_MAX = Number(env.BENCH_BACKUP_MAX ?? 10_000)
 const RUNS = 7
-const BIG_ALBUM = 5_000
+const BIG_ALBUM = Number(env.BENCH_BIG_ALBUM ?? 5_000)
 const SMALL_ALBUMS = 20
 const SMALL_ALBUM_SIZE = 200
 
@@ -160,6 +163,9 @@ function memoryStore(): BlobStore & { bytes: () => number } {
     async get(path) {
       return files.get(path) ?? null
     },
+    async size(path) {
+      return files.get(path)?.byteLength ?? null
+    },
     bytes: () => [...files.values()].reduce((n, b) => n + b.byteLength, 0),
   }
 }
@@ -259,9 +265,24 @@ describe('scale', () => {
       if (cursor) await measure(size, 'timeline last page (60)', `/api/v1/assets?limit=60&cursor=${cursor}`)
       await measure(size, 'favorites p1 (1%)', '/api/v1/assets?limit=60&favorite=true')
       await measure(size, 'trash p1 (5%)', '/api/v1/assets?limit=60&trashed=true')
+      // A filtered list stops only after 61 matches or the end of the index: the page after the last few
+      // matches reads the rest of the library.
+      for (const filter of ['favorite=true', 'trashed=true']) {
+        let last: string | null = null
+        let next: string | null = null
+        do {
+          const page: { nextCursor: string | null } = await (
+            await req(`/api/v1/assets?limit=200&${filter}${next ? `&cursor=${next}` : ''}`)
+          ).json()
+          last = next
+          next = page.nextCursor
+        } while (next)
+        await measure(size, `${filter} last page`, `/api/v1/assets?limit=200&${filter}${last ? `&cursor=${last}` : ''}`)
+      }
 
       // Albums
       await measure(size, 'albums list (21)', '/api/v1/albums')
+      await measure(size, 'albums list with covers (21)', '/api/v1/albums?covers=true')
       await measure(size, `album p1 (${Math.min(BIG_ALBUM, size / 2)} members)`, `/api/v1/albums/${bigAlbum.id}/assets`)
       await measure(size, 'album get', `/api/v1/albums/${bigAlbum.id}`)
       const member = ids[ids.length - 1]
@@ -289,14 +310,39 @@ describe('scale', () => {
       await explain(`${size} shared album`, [...recording.log])
 
       // Export / diagnostics
-      await measure(size, 'export manifest', '/api/v1/export')
+      await measure(size, 'export assets page (1000)', '/api/v1/export/assets')
+      await measure(size, 'export album-assets page (1000)', '/api/v1/export/album-assets')
       await measure(size, 'diagnostics', '/api/v1/diagnostics')
 
+      // Storage audit: one page, and the whole library as the CLI walks it.
+      await measure(size, 'storage audit p1 (500)', '/api/v1/storage/audit?limit=500')
+      await measure(size, 'storage audit p1 (500, deep)', '/api/v1/storage/audit?limit=500&deep=true')
+      let auditAfter: string | null = null
+      let auditPages = 0
+      let auditIssues = 0
+      const auditStart = performance.now()
+      do {
+        const page: { nextAfter: string | null; issues: unknown[] } = await (
+          await req(`/api/v1/storage/audit?limit=500${auditAfter ? `&after=${auditAfter}` : ''}`)
+        ).json()
+        auditPages++
+        auditIssues += page.issues.length
+        auditAfter = page.nextAfter
+      } while (auditAfter)
+      report(
+        size,
+        `storage audit walk (${auditPages} pages x 500)`,
+        `${(performance.now() - auditStart).toFixed(0)} ms`,
+        `issues=${auditIssues}`,
+      )
+
       // Backup / verify / restore over the public API (sequential, as the CLI does).
+      if (size > BACKUP_MAX) continue
       const source = countingClient(local)
       const store = memoryStore()
       let t = performance.now()
-      const manifest = await backupLibrary(source.client, store)
+      await backupLibrary(source.client, store)
+      const manifest = await readManifest(store)
       const backupMs = performance.now() - t
       report(
         manifest.assets.length,
@@ -304,6 +350,31 @@ describe('scale', () => {
         `${(backupMs / 1000).toFixed(1)} s`,
         `api=${source.counts.api} blob=${source.counts.blob}`,
         `${(store.bytes() / 1024 / 1024).toFixed(1)} MiB`,
+      )
+
+      // Second run into the same directory: nothing new to download.
+      source.counts.api = 0
+      source.counts.blob = 0
+      t = performance.now()
+      const again = await backupLibrary(source.client, store)
+      report(
+        manifest.assets.length,
+        'backup export (incremental, no changes)',
+        `${((performance.now() - t) / 1000).toFixed(1)} s`,
+        `api=${source.counts.api} blob=${source.counts.blob}`,
+        `downloaded=${again.downloaded}`,
+      )
+
+      source.counts.api = 0
+      source.counts.blob = 0
+      t = performance.now()
+      const quick = await verifyLibrary(source.client, manifest, { quick: true })
+      report(
+        manifest.assets.length,
+        'backup verify --quick',
+        `${((performance.now() - t) / 1000).toFixed(1)} s`,
+        `api=${source.counts.api} blob=${source.counts.blob}`,
+        `ok=${quick.ok}`,
       )
 
       source.counts.api = 0

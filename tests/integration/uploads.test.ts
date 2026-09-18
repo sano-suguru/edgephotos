@@ -299,6 +299,36 @@ describe('upload finalize', () => {
     expect(other.sha256).not.toBe(p.sha256)
   })
 
+  it('never deletes its own objects when the unique fallback finds the asset it just created', async () => {
+    const p = await photo()
+    let injected = false
+    // The batch commits, then the driver reports a sha256 UNIQUE violation (e.g. a replay whose constraint
+    // check order differs). The winner is this upload's own asset, which must not be treated as a duplicate.
+    const db = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        if (prop === 'batch' && !injected) {
+          return async (statements: D1PreparedStatement[]) => {
+            injected = true
+            await target.batch(statements)
+            throw new Error('D1_ERROR: UNIQUE constraint failed: assets.sha256')
+          }
+        }
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const app = await makeApp({ env: { DB: db } })
+    const r = await reserve(app, p)
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
+    const result = await callJson(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
+    expect(injected).toBe(true)
+    expect(result.result).toBe('created')
+    expect(await uploadStatus(r.upload.id)).toBe('finalized')
+    for (const v of ['original', 'thumbnail', 'preview'] as const) {
+      expect(await env.BUCKET.head(assetIdFromTarget(r.targets[v].url))).not.toBeNull()
+    }
+  })
+
   it('does not report success when D1 fails, keeps R2 objects, and recovers on retry', async () => {
     const p = await photo()
     let failBatch = true

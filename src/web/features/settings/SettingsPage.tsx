@@ -5,6 +5,99 @@ import { api } from '../../lib/api/client'
 import { userMessage } from '../../lib/errors'
 import { navigate } from '../../state/router'
 import { resumePurges } from './resume-purges'
+import { type AuditSummary, cleanupMessage, findings, runAudit, runCleanup } from './storage-check'
+
+const TONE_CLASS = { damage: 'text-destructive', action: 'text-foreground', info: 'text-muted-foreground' } as const
+
+function StorageCheck(props: { onChanged: () => void }) {
+  const running = useSignal<'audit' | 'cleanup' | null>(null)
+  const progress = useSignal(0)
+  const summary = useSignal<AuditSummary | null>(null)
+  const message = useSignal<string | null>(null)
+  const error = useSignal<string | null>(null)
+
+  async function audit() {
+    running.value = 'audit'
+    error.value = null
+    progress.value = 0
+    try {
+      summary.value = await runAudit(api.storageAudit, (n) => (progress.value = n))
+    } catch (err) {
+      error.value = `点検を完了できませんでした。${userMessage(err)} 何も変更していません。`
+    } finally {
+      running.value = null
+    }
+  }
+
+  async function cleanup() {
+    running.value = 'cleanup'
+    error.value = null
+    message.value = null
+    try {
+      message.value = cleanupMessage(await runCleanup(api.storageCleanup))
+    } catch (err) {
+      error.value = `整理を完了できませんでした。${userMessage(err)} 途中までの処理は安全で、もう一度実行できます。`
+    } finally {
+      running.value = null
+      props.onChanged()
+    }
+    await audit()
+  }
+
+  const list = summary.value ? findings(summary.value) : []
+  const cleanable = (summary.value?.counts.expired_upload ?? 0) + (summary.value?.counts.duplicate_leftover ?? 0)
+  return (
+    <div class="mt-10 space-y-3 text-sm">
+      <h2 class="font-semibold">ストレージの点検</h2>
+      <p class="text-muted-foreground">
+        写真の記録（D1）と保存されたファイル（R2）を突き合わせます。点検は読み取りだけで、何も変更しません。
+      </p>
+      <Button variant="secondary" disabled={running.value !== null} onClick={() => void audit()}>
+        {running.value === 'audit' ? `点検中…（${progress.value} 枚）` : '点検する'}
+      </Button>
+      {error.value && (
+        <p role="alert" class="text-destructive">
+          {error.value}
+        </p>
+      )}
+      {message.value && <p role="status">{message.value}</p>}
+      {summary.value && (
+        <div role="status" class="space-y-2">
+          <p>
+            {summary.value.photos} 枚を確認しました。
+            {list.length === 0 ? '問題は見つかりませんでした。' : ''}
+          </p>
+          <ul class="space-y-2">
+            {list.map((f) => (
+              <li key={f.kind} class={TONE_CLASS[f.tone]}>
+                <span class="font-medium tabular-nums">{f.count} 件</span> — {f.text}
+                {f.kind === 'expired_upload' && summary.value && summary.value.completeUploads > 0
+                  ? `うち ${summary.value.completeUploads} 件は転送が完了しており、整理するとライブラリに追加されます。`
+                  : ''}
+              </li>
+            ))}
+          </ul>
+          {list.some((f) => f.tone === 'damage') && (
+            <p class="text-destructive">
+              詳しい一覧は <code>pnpm storage audit --deep</code> で確認できます（docs/operations.md §12）。
+            </p>
+          )}
+          {cleanable > 0 && (
+            <div class="space-y-2">
+              <p class="text-muted-foreground">
+                「整理する」は、中断から 1
+                日以上たったアップロードを片付けます。転送が完了していた写真はライブラリに追加し、完了できないものとその残りファイルだけを削除します。ライブラリの写真と、どの写真にも結び付かないファイルには触れません。
+              </p>
+              <Button variant="secondary" disabled={running.value !== null} onClick={() => void cleanup()}>
+                {running.value === 'cleanup' ? '整理中…' : '中断したアップロードを整理する'}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 type Diagnostics = Awaited<ReturnType<typeof api.diagnostics>>
 
@@ -105,7 +198,7 @@ export function SettingsPage() {
           </dl>
           {diag.value.counts.expiredUploads > 0 && (
             <p class="mt-3 text-sm text-muted-foreground">
-              期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。写真がタイムラインに無ければ、もう一度選んでアップロードしてください。
+              期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。下の「ストレージの点検」から整理できます。写真がタイムラインに無ければ、もう一度選んでアップロードしてもかまいません。
             </p>
           )}
         </div>
@@ -125,11 +218,14 @@ export function SettingsPage() {
           </Button>
         </div>
       )}
+      <StorageCheck onChanged={() => void load()} />
       <div class="mt-10 space-y-3 text-sm">
         <h2 class="font-semibold">Export</h2>
         <p class="text-muted-foreground">
-          metadata・アルバム構成・オリジナルの SHA-256 を含む manifest を保存します。オリジナル本体を含む完全な backup
-          と restore は <code>pnpm backup</code> CLI を使用してください（docs/operations.md）。
+          metadata・アルバム構成・元ファイルの SHA-256 を含む manifest
+          を保存します。写真のファイルは含みません。元ファイルを含む backup は <code>pnpm backup export</code> で取り、
+          <code>pnpm backup check</code> で確認してください。2 回目からは新しい写真だけを取得します（docs/operations.md
+          §9）。
         </p>
         <Button variant="secondary" onClick={downloadManifest}>
           manifest をダウンロード

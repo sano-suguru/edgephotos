@@ -1,5 +1,5 @@
 import type { z } from '@hono/zod-openapi'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import type { UploadReserveSchema } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
@@ -12,6 +12,8 @@ import { getAssetRow, purgeAsset, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
 
 type ReserveInput = z.infer<typeof UploadReserveSchema>
+
+const CREATED_AT_SKEW_MS = 5 * 60 * 1000
 
 function duplicateError(existing: AssetRow) {
   return new ApiError(409, 'DUPLICATE_ASSET', 'An asset with the same original already exists.', {
@@ -30,6 +32,15 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
   const assetId = crypto.randomUUID()
   const expiresAt = new Date(now.getTime() + UPLOAD_URL_TTL_SECONDS * 1000)
   const meta = input.metadata
+  let assetCreatedAt: string | null = null
+  if (meta.createdAt) {
+    const t = Date.parse(meta.createdAt)
+    // A future value would pin the photo above everything uploaded until then.
+    if (t > now.getTime() + CREATED_AT_SKEW_MS) {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'metadata.createdAt is in the future.')
+    }
+    assetCreatedAt = new Date(t).toISOString()
+  }
 
   await ctx.db.insert(uploads).values({
     id: uploadId,
@@ -46,6 +57,7 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
     taken_at: meta.takenAt ?? null,
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
+    asset_created_at: assetCreatedAt,
   })
 
   const keys = assetObjectKeys(assetId)
@@ -180,26 +192,35 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
 
   const now = ctx.now()
   const ts = now.toISOString()
+  const createdAt = upload.asset_created_at ?? upload.created_at
   try {
+    // The asset is created from the upload row only while that row is still pending, in the same transaction
+    // that settles it. Storage cleanup settles expired uploads first and then removes their objects, so an
+    // asset can never be created for objects that cleanup is about to delete.
     await ctx.db.batch([
       ctx.db
         .insert(assets)
-        .values({
-          id: upload.asset_id,
-          status: 'ready',
-          sha256: upload.sha256,
-          original_size: upload.original_size,
-          original_content_type: upload.original_content_type,
-          original_filename: upload.original_filename,
-          width: upload.width,
-          height: upload.height,
-          taken_at: upload.taken_at,
-          sort_at: sortAtFor(upload.taken_at, now),
-          is_favorite: 0,
-          trashed_at: null,
-          created_at: ts,
-          updated_at: ts,
-        })
+        .select(
+          ctx.db
+            .select({
+              id: uploads.asset_id,
+              status: sql<'ready'>`'ready'`.as('status'),
+              sha256: uploads.sha256,
+              original_size: uploads.original_size,
+              original_content_type: uploads.original_content_type,
+              original_filename: uploads.original_filename,
+              width: uploads.width,
+              height: uploads.height,
+              taken_at: uploads.taken_at,
+              sort_at: sql<number>`${sortAtFor(upload.taken_at, new Date(createdAt))}`.as('sort_at'),
+              is_favorite: sql<number>`0`.as('is_favorite'),
+              trashed_at: sql<null>`NULL`.as('trashed_at'),
+              created_at: sql<string>`${createdAt}`.as('created_at'),
+              updated_at: sql<string>`${ts}`.as('updated_at'),
+            })
+            .from(uploads)
+            .where(and(eq(uploads.id, upload.id), eq(uploads.status, 'pending'))),
+        )
         .onConflictDoNothing({ target: assets.id }),
       ctx.db
         .update(uploads)
@@ -211,6 +232,12 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
     // A concurrent upload of the same bytes won the race.
     const winner = await getAssetBySha256(ctx.db, upload.sha256)
     if (winner?.status !== 'ready') throw err
+    // The asset holding these bytes is this upload's own (a replay committed it): not a duplicate.
+    if (winner.id === upload.asset_id) {
+      const fresh = await getUploadRow(ctx.db, upload.id)
+      if (!fresh) throw new ApiError(404, 'UPLOAD_NOT_FOUND', 'Upload not found.')
+      return settledOutcome(ctx, fresh)
+    }
     return markDuplicate(ctx, upload, winner)
   }
 
@@ -229,18 +256,24 @@ async function settledOutcome(ctx: ServiceContext, upload: UploadRow): Promise<F
 }
 
 async function markDuplicate(ctx: ServiceContext, upload: UploadRow, existing: AssetRow): Promise<FinalizeOutcome> {
+  // The objects removed below are keyed by upload.asset_id; they must never belong to an asset.
+  if (existing.id === upload.asset_id) throw new Error('duplicate of its own asset')
   await ctx.db
     .update(uploads)
     .set({ status: 'duplicate', duplicate_of: existing.id, finalized_at: ctx.now().toISOString() })
     .where(and(eq(uploads.id, upload.id), eq(uploads.status, 'pending')))
-  // Only after D1 recorded the duplicate: the reserved keys belong to this upload alone and no asset
-  // references them, so removing them is safe. Best effort; leftovers are harmless.
-  const keys = assetObjectKeys(upload.asset_id)
-  try {
-    await ctx.bucket.delete([keys.original, keys.thumbnail, keys.preview])
-  } catch {
-    // ignore
-  }
   const fresh = await getUploadRow(ctx.db, upload.id)
+  // Only after D1 recorded the duplicate: the reserved keys belong to this upload alone and no asset
+  // references them, so removing them is safe. Best effort; leftovers are removed by storage cleanup.
+  if (fresh?.status === 'duplicate') await deleteUnreferencedObjects(ctx, upload.asset_id).catch(() => {})
   return settledOutcome(ctx, fresh ?? upload)
+}
+
+// Deletes the objects reserved for `assetId` unless an asset row (ready or purging) owns that id.
+// Callers must first make sure no upload can still turn this id into an asset.
+export async function deleteUnreferencedObjects(ctx: ServiceContext, assetId: string): Promise<boolean> {
+  if (await getAssetRow(ctx.db, assetId)) return false
+  const keys = assetObjectKeys(assetId)
+  await ctx.bucket.delete([keys.original, keys.thumbnail, keys.preview])
+  return true
 }

@@ -1,11 +1,19 @@
+import { collectExportManifest } from '../../../contracts/export-manifest'
+import { ApiRequestError } from './error'
+
+export { ApiRequestError }
+
 import type {
   Album,
+  AlbumListItem,
   Asset,
   AssetPage,
   ExportManifest,
   Share,
   ShareCreated,
   SignedUrl,
+  StorageAuditPage,
+  StorageCleanupResult,
   UploadFinalizeResult,
   UploadReservation,
   UploadReserve,
@@ -13,17 +21,6 @@ import type {
 
 // Thin fetch client for the application API. The API is client-independent; nothing here is Web-only
 // on the server side.
-
-export class ApiRequestError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    readonly details?: Record<string, unknown>,
-  ) {
-    super(message)
-  }
-}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -70,7 +67,8 @@ export const api = {
   reserveUpload: (body: UploadReserve) => request<UploadReservation>('POST', '/api/v1/uploads', body),
   finalizeUpload: (id: string) => request<UploadFinalizeResult>('POST', `/api/v1/uploads/${id}/finalize`),
 
-  listAlbums: () => request<{ items: Album[] }>('GET', '/api/v1/albums'),
+  listAlbums: (q: { covers?: boolean } = {}) =>
+    request<{ items: AlbumListItem[] }>('GET', `/api/v1/albums${q.covers ? '?covers=true' : ''}`),
   getAlbum: (id: string) => request<Album>('GET', `/api/v1/albums/${id}`),
   createAlbum: (title: string) => request<Album>('POST', '/api/v1/albums', { title }),
   renameAlbum: (id: string, title: string) => request<Album>('PATCH', `/api/v1/albums/${id}`, { title }),
@@ -87,7 +85,13 @@ export const api = {
   revokeShare: (id: string) => request<Share>('POST', `/api/v1/shares/${id}/revoke`),
   regenerateShare: (id: string) => request<ShareCreated>('POST', `/api/v1/shares/${id}/regenerate`),
 
-  exportManifest: () => request<ExportManifest>('GET', '/api/v1/export'),
+  storageAudit: (after: string | null) =>
+    request<StorageAuditPage>(
+      'GET',
+      `/api/v1/storage/audit?limit=500${after ? `&after=${encodeURIComponent(after)}` : ''}`,
+    ),
+  storageCleanup: () => request<StorageCleanupResult>('POST', '/api/v1/storage/cleanup', { limit: 25 }),
+  exportManifest: (): Promise<ExportManifest> => collectExportManifest((path) => request('GET', path)),
   diagnostics: () =>
     request<{
       counts: Record<string, number>

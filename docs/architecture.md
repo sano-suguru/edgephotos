@@ -152,19 +152,21 @@ PATCH  /api/v1/assets/{assetId}                 { isFavorite }
 GET    /api/v1/assets/{assetId}/original        short-lived URL (owner only)
 POST   /api/v1/assets/{assetId}/trash | /restore
 DELETE /api/v1/assets/{assetId}                 permanent delete (trashed only, resumable)
-GET    /api/v1/albums                  POST /api/v1/albums
+GET    /api/v1/albums?covers      POST /api/v1/albums
 GET|PATCH|DELETE /api/v1/albums/{albumId}
 GET    /api/v1/albums/{albumId}/assets
 PUT|DELETE /api/v1/albums/{albumId}/assets/{assetId}   idempotent
 GET|POST /api/v1/albums/{albumId}/shares
 POST   /api/v1/shares/{shareId}/revoke | /regenerate
-GET    /api/v1/export                           metadata manifest
+GET    /api/v1/export/assets | /albums | /album-assets   manifest pages (after, limit)
 GET    /api/v1/diagnostics                      non-sensitive counts, unfinished purge ids
+GET    /api/v1/storage/audit?after&limit&deep   D1 / R2 comparison (read-only)
+POST   /api/v1/storage/cleanup                  resolve interrupted uploads (D-023)
 GET    /share/api/v1/shares/{shareId}           Authorization: Bearer <secret>
 GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
 ```
 
-画像 URL は短命な presigned GET を JSON で返します。Worker が画像 byte を中継することはありません。一覧（`GET /api/v1/assets`、album の assets）は thumbnail の URL だけを返し、preview の URL は個別の asset（`GET /api/v1/assets/{assetId}` など）で返します（[D-022](decisions.md)）。
+画像 URL は短命な presigned GET を JSON で返します。Worker が画像 byte を中継することはありません。一覧（`GET /api/v1/assets`、album の assets）は thumbnail の URL だけを返し、preview の URL は個別の asset（`GET /api/v1/assets/{assetId}` など）で返します（[D-022](decisions.md)）。album 一覧は `covers=true` のときだけ、各 album の最新の写真の thumbnail URL を返します（album ごとの request を 1 回にまとめる）。
 
 ## 5. Upload protocol
 
@@ -188,7 +190,7 @@ finalize での確認内容（[D-012](decisions.md)）:
 - original の magic bytes が申告 content type と一致
 - thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG（違反は `422 UPLOAD_OBJECT_INVALID`）
 
-D1 への asset 作成と upload 状態更新は 1 つの D1 batch（transaction）で行います。asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
+D1 への asset 作成と upload 状態更新は 1 つの D1 batch（transaction）で行います。asset は upload 行がまだ `pending` の場合だけ作ります（`INSERT ... SELECT ... WHERE status = 'pending'`。[D-023](decisions.md)）。asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
 
 presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw digest の base64）として署名します。R2 は body の digest が一致しない PUT を拒否し、object を作りません。Client はこの header を省略も変更もできません（[D-018](decisions.md)）。
 
@@ -196,7 +198,13 @@ Client は一時的な PUT の失敗（network error、408、429、5xx）を bac
 
 digest 不一致の PUT は R2 が `400` で拒否します。original が存在しないため finalize は `409 UPLOAD_OBJECT_MISSING` を返し、upload は `pending` のままです。URL の期限内なら、正しい bytes を同じ URL へ PUT し直して finalize を再試行できます。
 
-finalize は upload の期限を見ません。期限内に PUT が済んでいれば、background に回した tab が期限後に復帰しても finalize できます。PUT が済んでいない upload は、presigned URL が失効しているため完了できず、`pending` のまま残ります（[roadmap.md](roadmap.md) の既知の制約）。
+finalize は upload の期限を見ません。期限内に PUT が済んでいれば、background に回した tab が期限後に復帰しても finalize できます。PUT が済んでいない upload は、presigned URL が失効しているため完了できず、`pending` のまま残ります。
+
+中断した upload は、owner が実行する storage cleanup が片付けます（[D-023](decisions.md)）。期限から 1 日過ぎた `pending` のうち、3 object が揃って検査を通るものは finalize して写真にし、それ以外は終端状態にしてから、その upload の key の object だけを消します。cleanup の後に届いた finalize は `404` です。
+
+reserve の `metadata.createdAt`（任意、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。
+
+Web の再試行は、前の試行の reservation の finalize から始めます。`409 UPLOAD_OBJECT_MISSING` なら URL の期限内に限って欠けた object だけを PUT し、期限切れ・`404`・`410`・`422` なら新しい reservation からやり直します（`src/web/features/uploads/transfer.ts`）。
 
 不変条件:
 
@@ -205,6 +213,7 @@ finalize は upload の期限を見ません。期限内に PUT が済んでい�
 - R2 確認前に `ready` にしない
 - finalize 再送で同じ asset へ収束する
 - D1 障害時に R2 object を即削除しない
+- asset 行が使っている ID の key は、cleanup でも重複処理でも削除しない（削除するのは完全削除だけ）
 - D1 と R2 を 1 transaction として扱わない
 
 ## 6. Derivative contract
@@ -282,10 +291,15 @@ share session / share Cookie は v1 では作りません。
 - `restore` で元に戻せます。album 所属も復帰します。
 - 完全削除は trash 内の asset に対してのみ実行できます。`purging` に遷移して全画面から隠したあと、R2 object を削除し、最後に D1 row を削除します。途中で失敗した場合も、同じ `DELETE` を再実行すれば再開できます。
 - 止まった削除の asset ID は `GET /api/v1/diagnostics` の `purgingAssetIds`（古い順に最大 100 件）で分かります。ライブラリ画面の「削除を再開」がそれぞれに `DELETE` を送ります。同じ写真を upload し直した場合も、reserve / finalize が削除を完了させます（[D-014](decisions.md)）。
+- 完全削除は、asset が `ready` かつ trash 内である場合だけ `purging` にします。別の tab からの復元が間に入った場合は `409 ASSET_NOT_TRASHED` で、何も削除しません。
 
 ## 7.2 Export / Restore
 
-`GET /api/v1/export` は asset metadata・album 構成・object manifest・期待 SHA-256 を返します。original 本体を含む backup と空環境への restore・整合性検証は `pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)）。
+export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/album-assets`）です。Client は `src/contracts/export-manifest.ts` で asset metadata・album 構成・object manifest・期待 SHA-256 を持つ format 1 の manifest に組み立てます。1 response にまとめないのは、10 万枚で Worker の memory 上限に近づくためです（[D-024](decisions.md)）。original 本体を含む backup（差分）、backup ディレクトリの検査、空環境への restore（再開可能）、整合性検証は `pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)、[D-024](decisions.md)）。
+
+## 7.3 D1 / R2 の突合
+
+`GET /api/v1/storage/audit` は、asset ID の範囲ごとに R2 の list と D1 の `assets` / `uploads` を突き合わせる読み取り専用の API です。original・derivative の欠落、size の違い、（`deep`）R2 が記録した SHA-256 との違い、止まった削除、中断した upload、重複の残り、どの行も指さない object、layout 外の key を返します。何も修復しません。書き込みは `POST /api/v1/storage/cleanup` だけで、対象は中断した upload とその object に限ります（[D-023](decisions.md)）。
 
 ## 8. Access routing
 

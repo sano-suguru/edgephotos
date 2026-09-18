@@ -1,6 +1,14 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { type BlobStore, backupLibrary, readManifest, restoreLibrary, verifyLibrary } from '../../scripts/lib/backup'
+import {
+  type BlobStore,
+  backupLibrary,
+  checkBackup,
+  fetchManifest,
+  readManifest,
+  restoreLibrary,
+  verifyLibrary,
+} from '../../scripts/lib/backup'
 import { apiClient, call, callJson, makeApp, photo, putObject, reserve, syntheticPng, uploadPhoto } from '../helpers'
 
 function memoryStore(): BlobStore & { files: Map<string, Uint8Array> } {
@@ -12,6 +20,9 @@ function memoryStore(): BlobStore & { files: Map<string, Uint8Array> } {
     },
     async get(path) {
       return files.get(path) ?? null
+    },
+    async size(path) {
+      return files.get(path)?.byteLength ?? null
     },
   }
 }
@@ -42,22 +53,38 @@ describe('export and restore to an empty environment', () => {
 
     // Export (metadata + originals + derivatives) from the source environment.
     const store = memoryStore()
-    const manifest = await backupLibrary(apiClient(source), store)
+    const backup = await backupLibrary(apiClient(source), store)
+    expect(backup).toEqual({ assets: 3, downloaded: 3, skipped: 0, albums: 2, failed: [] })
+    const manifest = await readManifest(store)
     expect(manifest.assets).toHaveLength(3)
     const manifestText = new TextDecoder().decode(store.files.get('manifest.json'))
     for (const forbidden of ['secret', 'X-Amz', '/__local/', 'Bearer', 'eyJ']) {
       expect(manifestText).not.toContain(forbidden)
     }
-    expect(await readManifest(store)).toEqual(manifest)
     expect(store.files.get(`originals/${bAsset.sha256}`)).toEqual(pngFixture.original)
 
     // Restore into a separate, empty D1 + R2.
     const target = await makeApp({ which: 'restore' })
     const report = await restoreLibrary(apiClient(target), store)
-    expect(report).toEqual({ assets: 3, albums: 2 })
+    expect(report).toEqual({ assets: 3, uploaded: 3, albums: 2, resumed: false })
 
     const verification = await verifyLibrary(apiClient(target), manifest)
-    expect(verification).toEqual({ ok: true, checkedOriginals: 3, problems: [] })
+    expect(verification).toEqual({ ok: true, checkedOriginals: 3, checksumVerified: 0, problems: [], notes: [] })
+    expect(await verifyLibrary(apiClient(target), manifest, { quick: true })).toEqual({
+      ok: true,
+      checkedOriginals: 0,
+      checksumVerified: 3,
+      problems: [],
+      notes: [],
+    })
+    // Upload times survive, so the timeline order of photos without a capture time does too.
+    const restoredOrder = (await callJson(target, 'GET', '/api/v1/assets?limit=200&trashed=false')).items.map(
+      (i: { sha256: string }) => i.sha256,
+    )
+    const sourceOrder = (await callJson(source, 'GET', '/api/v1/assets?limit=200&trashed=false')).items
+      .map((i: { sha256: string }) => i.sha256)
+      .filter((sha: string) => restoredOrder.includes(sha))
+    expect(restoredOrder).toEqual(sourceOrder)
 
     // Independent checks against the restored storage.
     const restoredAssets = await env.RESTORE_DB.prepare('SELECT id, sha256 FROM assets').all<{
@@ -121,7 +148,8 @@ describe('export and restore to an empty environment', () => {
     const source = await makeApp({ which: 'primary' })
     const store = memoryStore()
     const backup = flaky(source)
-    const manifest = await backupLibrary(backup.client, store)
+    await backupLibrary(backup.client, store)
+    const manifest = await readManifest(store)
     expect(backup.injected.unavailable + backup.injected.lost).toBeGreaterThan(0)
 
     const target = flaky(await makeApp({ which: 'restore' }))
@@ -165,7 +193,8 @@ describe('export and restore to an empty environment', () => {
   it('verification detects missing assets, changed membership and corrupted originals', async () => {
     const source = await makeApp({ which: 'primary' })
     const store = memoryStore()
-    const manifest = await backupLibrary(apiClient(source), store)
+    await backupLibrary(apiClient(source), store)
+    const manifest = await readManifest(store)
     const tampered = structuredClone(manifest)
     tampered.assets.push({ ...manifest.assets[0], sha256: 'f'.repeat(64), id: crypto.randomUUID() })
     if (tampered.albums[0]) tampered.albums[0].assetIds = []
@@ -180,10 +209,248 @@ describe('export and restore to an empty environment', () => {
     const corrupted = await verifyLibrary(apiClient(source), manifest)
     expect(corrupted.ok).toBe(false)
     expect(corrupted.problems).toContain(`original SHA-256 mismatch for asset ${victim.id}`)
+    // Quick mode catches it without a download: the size differs from what finalize verified.
+    const quick = await verifyLibrary(apiClient(source), manifest, { quick: true })
+    expect(quick.problems).toContain(`storage: original_size_mismatch ${victim.id}`)
+
+    // A backup does not stop at the damaged photo: the others are copied and the damaged one is named.
+    const fresh = memoryStore()
+    const partial = await backupLibrary(apiClient(source), fresh)
+    expect(partial.failed).toEqual([{ assetId: victim.id, sha256: victim.sha256, reason: 'checksum_mismatch' }])
+    expect(partial.downloaded).toBe(manifest.assets.length - 1)
+    expect((await checkBackup(fresh)).problems).toEqual([
+      `missing file originals/${victim.sha256}`,
+      `missing file derivatives/${victim.sha256}/thumbnail.jpg`,
+      `missing file derivatives/${victim.sha256}/preview.jpg`,
+    ])
+
+    // Put the original back for the tests that follow.
+    await env.BUCKET.delete(`originals/${victim.id}`)
+    await env.BUCKET.put(`originals/${victim.id}`, store.files.get(`originals/${victim.sha256}`) as Uint8Array)
+  })
+
+  it('exports the library in pages that add up to the whole manifest', async () => {
+    const app = await makeApp({ which: 'primary' })
+    for (let i = 0; i < 5; i++) await uploadPhoto(app)
+    const full = await fetchManifest(apiClient(app))
+    const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'paged' }, expect: 201 })
+    const members = full.assets.filter((a) => !a.trashedAt).slice(0, 4)
+    for (const a of members) await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${a.id}`)
+
+    const ids: string[] = []
+    let after: string | null = null
+    let pages = 0
+    do {
+      const page: { items: { id: string }[]; nextAfter: string | null } = await callJson(
+        app,
+        'GET',
+        `/api/v1/export/assets?limit=2${after ? `&after=${after}` : ''}`,
+        { expect: 200 },
+      )
+      ids.push(...page.items.map((i) => i.id))
+      after = page.nextAfter
+      pages++
+    } while (after)
+    expect(pages).toBeGreaterThan(2)
+    expect(ids).toEqual([...ids].sort())
+    expect(new Set(ids).size).toBe(ids.length)
+    const manifest = await fetchManifest(apiClient(app))
+    expect(ids.sort()).toEqual(manifest.assets.map((a) => a.id).sort())
+
+    const pairs: string[] = []
+    after = null
+    do {
+      const qs: string = after ? `&after=${encodeURIComponent(after)}` : ''
+      const page: { items: { albumId: string; assetId: string }[]; nextAfter: string | null } = await callJson(
+        app,
+        'GET',
+        `/api/v1/export/album-assets?limit=1${qs}`,
+        { expect: 200 },
+      )
+      pairs.push(...page.items.map((m) => `${m.albumId}/${m.assetId}`))
+      after = page.nextAfter
+    } while (after)
+    const inAlbum = manifest.albums.find((a) => a.id === album.id)
+    expect(inAlbum?.assetIds.sort()).toEqual(members.map((a) => a.id).sort())
+    expect(pairs.filter((p) => p.startsWith(album.id))).toHaveLength(4)
+    expect((await callJson(app, 'GET', '/api/v1/diagnostics')).lastExportAt).not.toBeNull()
+  })
+
+  it('never refers to an asset that is not in the manifest when the library changes mid-export', async () => {
+    const app = await makeApp({ which: 'primary' })
+    const victim = (await uploadPhoto(app)).result.asset.id
+    const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'moving' }, expect: 201 })
+    await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${victim}`)
+    const inner = apiClient(app)
+    let added: string | null = null
+    const client = {
+      ...inner,
+      api: async (path: string, init?: RequestInit) => {
+        // Between the asset pages and the membership pages, one photo is deleted and one is added.
+        if (path.startsWith('/api/v1/export/albums') && !added) {
+          await env.DB.prepare(`UPDATE assets SET status = 'purging' WHERE id = ?`).bind(victim).run()
+          added = (await uploadPhoto(app)).result.asset.id
+          await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${added}`)
+          await env.DB.prepare(`UPDATE assets SET status = 'ready' WHERE id = ?`).bind(victim).run()
+          await env.DB.prepare('DELETE FROM album_assets WHERE asset_id = ?').bind(victim).run()
+        }
+        return inner.api(path, init)
+      },
+    }
+    const manifest = await fetchManifest(client)
+    const known = new Set(manifest.assets.map((a) => a.id))
+    expect(known.has(added as unknown as string)).toBe(false)
+    for (const al of manifest.albums) for (const id of al.assetIds) expect(known.has(id)).toBe(true)
+  })
+
+  it('backs up incrementally and checks a backup directory offline', async () => {
+    const app = await makeApp({ which: 'primary' })
+    const store = memoryStore()
+    const counting = (inner: ReturnType<typeof apiClient>) => {
+      const counts = { api: 0, blob: 0 }
+      return {
+        counts,
+        client: {
+          ...inner,
+          api: (p: string, i?: RequestInit) => {
+            counts.api++
+            return inner.api(p, i)
+          },
+          blob: (u: string, i?: RequestInit) => {
+            counts.blob++
+            return inner.blob(u, i)
+          },
+        },
+      }
+    }
+    const first = await backupLibrary(apiClient(app), store)
+    expect(first.failed).toEqual([])
+    expect(first.downloaded).toBe(first.assets)
+    expect(await checkBackup(store)).toMatchObject({ ok: true, problems: [] })
+
+    const again = counting(apiClient(app))
+    expect(await backupLibrary(again.client, store)).toMatchObject({ downloaded: 0, skipped: first.assets })
+    expect(again.counts.blob).toBe(0)
+
+    const added = await uploadPhoto(app)
+    const third = counting(apiClient(app))
+    expect(await backupLibrary(third.client, store)).toMatchObject({ downloaded: 1 })
+    expect(third.counts.blob).toBe(3)
+    expect((await readManifest(store)).assets.map((a) => a.sha256)).toContain(added.fixture.sha256)
+
+    // A truncated file (an interrupted copy, a failing disk) is downloaded again.
+    const victim = `originals/${added.fixture.sha256}`
+    store.files.set(victim, added.fixture.original.slice(0, 10))
+    expect(await checkBackup(store)).toMatchObject({ ok: false, problems: [`corrupted file ${victim}`] })
+    expect(await backupLibrary(apiClient(app), store)).toMatchObject({ downloaded: 1 })
+    expect(store.files.get(victim)).toEqual(added.fixture.original)
+
+    // Same size, flipped bit: only the offline check notices.
+    const flipped = added.fixture.original.slice()
+    flipped[flipped.length - 3] ^= 1
+    store.files.set(victim, flipped)
+    expect((await checkBackup(store)).problems).toEqual([`corrupted file ${victim}`])
+    store.files.delete(`derivatives/${added.fixture.sha256}/preview.jpg`)
+    expect((await checkBackup(store)).problems).toContain(
+      `missing file derivatives/${added.fixture.sha256}/preview.jpg`,
+    )
+  })
+
+  describe('interrupted restore', () => {
+    async function empty(db: D1Database, bucket: R2Bucket) {
+      await db.batch(
+        ['album_assets', 'albums', 'shares', 'uploads', 'assets', 'settings'].map((t) =>
+          db.prepare(`DELETE FROM ${t}`),
+        ),
+      )
+      for (;;) {
+        const listed = await bucket.list()
+        if (listed.objects.length === 0) break
+        await bucket.delete(listed.objects.map((o) => o.key))
+      }
+    }
+    const emptyRestoreTarget = () => empty(env.RESTORE_DB, env.RESTORE_BUCKET)
+
+    async function sourceBackup() {
+      await empty(env.DB, env.BUCKET)
+      const source = await makeApp({ which: 'primary' })
+      const a = await uploadPhoto(source)
+      const b = await uploadPhoto(source)
+      await callJson(source, 'PATCH', `/api/v1/assets/${a.result.asset.id}`, {
+        body: { isFavorite: true },
+        expect: 200,
+      })
+      const album = await callJson(source, 'POST', '/api/v1/albums', { body: { title: 'Trip' }, expect: 201 })
+      await call(source, 'PUT', `/api/v1/albums/${album.id}/assets/${a.result.asset.id}`)
+      await call(source, 'PUT', `/api/v1/albums/${album.id}/assets/${b.result.asset.id}`)
+      await callJson(source, 'POST', `/api/v1/assets/${b.result.asset.id}/trash`, { expect: 200 })
+      const store = memoryStore()
+      await backupLibrary(apiClient(source), store)
+      return { store, manifest: await readManifest(store) }
+    }
+
+    // The Access token expires after `okCalls` API calls: every later call is rejected.
+    const expiring = (inner: ReturnType<typeof apiClient>, okCalls: number) => {
+      let calls = 0
+      return {
+        ...inner,
+        retryDelayMs: () => 0,
+        api: async (path: string, init?: RequestInit) =>
+          ++calls > okCalls
+            ? new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), { status: 401 })
+            : inner.api(path, init),
+      }
+    }
+
+    it('continues where it stopped, at any point, and ends identical to the backup', async () => {
+      const { store, manifest } = await sourceBackup()
+      for (let okCalls = 3; okCalls <= 14; okCalls++) {
+        await emptyRestoreTarget()
+        const target = apiClient(await makeApp({ which: 'restore' }))
+        const first = await restoreLibrary(expiring(target, okCalls), store).then(
+          () => null,
+          (err: unknown) => err,
+        )
+        if (first === null) {
+          // okCalls was enough to finish.
+          expect(await verifyLibrary(target, manifest)).toMatchObject({ ok: true })
+          continue
+        }
+        expect(String(first)).toMatch(/401/)
+        // Starting over without --resume is refused once anything was written.
+        const diag = await callJson(await makeApp({ which: 'restore' }), 'GET', '/api/v1/diagnostics')
+        if (Object.values(diag.counts as Record<string, number>).some((n) => n > 0)) {
+          await expect(restoreLibrary(target, store)).rejects.toThrow(/not empty/)
+        }
+        const resumed = await restoreLibrary(target, store, { resume: true })
+        expect(resumed.uploaded).toBeLessThanOrEqual(2)
+        expect(await verifyLibrary(target, manifest), `okCalls ${okCalls}`).toMatchObject({ ok: true, problems: [] })
+      }
+    })
+
+    it('refuses to resume into a library with photos or albums it did not create', async () => {
+      const { store } = await sourceBackup()
+      await emptyRestoreTarget()
+      const app = await makeApp({ which: 'restore' })
+      const target = apiClient(app)
+      await expect(restoreLibrary(expiring(target, 12), store)).rejects.toThrow(/401/)
+
+      const stray = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'Lost response' }, expect: 201 })
+      await expect(restoreLibrary(target, store, { resume: true })).rejects.toThrow(/"Lost response"/)
+      await call(app, 'DELETE', `/api/v1/albums/${stray.id}`)
+
+      const foreign = await uploadPhoto(app)
+      await expect(restoreLibrary(target, store, { resume: true })).rejects.toThrow(/not in this backup/)
+      await callJson(app, 'POST', `/api/v1/assets/${foreign.result.asset.id}/trash`, { expect: 200 })
+      await call(app, 'DELETE', `/api/v1/assets/${foreign.result.asset.id}`)
+      await expect(restoreLibrary(target, store, { resume: true })).resolves.toMatchObject({ resumed: true })
+      // A finished restore is not resumed again.
+      await expect(restoreLibrary(target, store, { resume: true })).rejects.toThrow(/nothing to resume/)
+    })
   })
 
   it('export requires Access', async () => {
     const app = await makeApp()
-    expect((await call(app, 'GET', '/api/v1/export', { token: null })).status).toBe(401)
+    expect((await call(app, 'GET', '/api/v1/export/assets', { token: null })).status).toBe(401)
   })
 })

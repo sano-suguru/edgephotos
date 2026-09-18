@@ -8,7 +8,7 @@
 
 ## 現在の状況
 
-- 最終確認: 2026-09-17
+- 最終確認: 2026-09-18
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`
 - 未確認: production 環境の作成と deploy、iPhone / Android 実機での取り込み（[未検証](#未検証)）
 
@@ -106,6 +106,58 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 ## visual の整理（2026-09-17）
 
 機能・情報設計・API は変えず、色・枠・影・ボタンの強弱だけを見直した（token は無彩色にし、塗りのボタンは header のアップロード（desktop）と各画面の主操作に限る。pill 形は header 行の操作だけで、form と dialog のボタンは角丸の長方形。header と phone のタブは不透明。accent は現在地・focus・進捗に限る）。local（`vite dev`、使い捨ての `EDGEPHOTOS_STATE_DIR`）に合成 JPEG 18 枚と album 2 件を入れ、Playwright で desktop Chromium（1440×900）と WebKit iPhone 13 相当の timeline・album・共有 dialog・確認 dialog・ライブラリ・viewer を変更前後で撮って比べた。共有ページは `vite dev` だと CSP（`style-src 'self'`）が inline style を拒否して CSS が当たらないため、`vite build` + `vite preview` で share API を mock して確認した。入れ子の確認 dialog では外側の dialog を暗くする。彩度の低い合成画像 24 枚でも timeline を撮った。phone では黒塗りのアップロードが写真より先に目に入ったため、phone だけ塗りのないアイコンにした。`pnpm check` と `pnpm test:e2e`（13 件）が通った。
+
+## 長期保管の整合性（2026-09-17）
+
+対象は、storage audit / cleanup、paged export、差分 backup と `check`、restore の `--resume`、verify の `--quick`、完全削除と復元の競合、finalize の UNIQUE 競合、upload の再試行、元ファイルの形式判定。remote-test には deploy していない。
+
+### local（workerd の自動テスト）
+
+- 競合 2 件は、修正前のコードで再現するテストを先に書いて失敗を確認した。完全削除の開始と trash からの復元が交差すると、復元した写真が `purging` になって R2 から消えていた。finalize の D1 batch が commit した後に UNIQUE 違反が報告されると、自分の asset の 3 object を重複として消していた（SQLite 自体は、同じ upload の再送では id の競合を先に検出するため、現在の D1 でこの経路に入る状況は確認していない。防御として直した）
+- storage audit: 1 つの ID の下に layout 外の key を 8,001 個置くと、その ID は `audit_incomplete` になり（`missing_derivative` と誤報しない）、次の写真の点検は続くこと。印を付ける処理を外すとテストが失敗することも確かめた
+- storage audit: 10 分類のすべてを 1 つのライブラリに作り、`limit` を 1・2・3・5・200 にしても同じ結果になること、object の無い asset と行だけの upload がページ境界をまたいでも漏れないこと、audit の前後で D1 と R2 が変わらないことを確認した。ページの終わりを決める処理（asset 側・upload 側）を 1 つずつ外すとテストが失敗することも確かめた
+- storage cleanup: 転送済みの中断 upload は写真になり（元の upload 時刻と撮影日時を保持）、欠けている・行だけの upload と重複の残りだけが消え、写真・trash・止まった削除・object の欠けた写真・どの行も指さない object・1 日以内の upload・進行中の upload は残ること。2 回目は何もしないこと。R2 の障害では何も消さず `failed` に数えること。cleanup が upload を片付けた後に、検査を終えていた finalize が asset を作らない（`410`）こと
+- backup: 2 回目は storage への request が 0、写真を 1 枚足すと 3 request。途中で切れたファイルは取り直し、同じ size で 1 bit 違うファイルは `check` だけが検出すること。original が壊れた写真があっても残りを backup し、その写真を名前で挙げること
+- restore: Access token が 3〜14 回目のどの API 呼び出しで切れても、`--resume` で最後まで進み、`verify`（全件 download）が `ok` になること。記録に無い album や backup に無い写真がある library には再開しないこと。終わった restore は再開しないこと。restore 後の timeline の並び（撮影日時の無い写真を含む）が元と同じこと
+- verify: `--quick` が download 0 件で `ok` になり、original の size が変わった写真を storage audit で検出すること
+- paged export: 1 件ずつ・2 件ずつのページを重複なく連結できること、ページの間に写真の削除と追加があっても manifest が知らない asset を指さないこと
+
+### remote-test（2026-09-18）
+
+`edgephotos-remote-test` へ deploy して実行した。合成 JPEG のみを使い、実写真は追加していない。
+
+- migration `0002`・`0003` を remote D1 へ適用。`pnpm diagnose --env remote-test` は FAIL なし（`worker: D1 schema` が `0003_filtered_list_indexes.sql`）
+- D1 の `EXPLAIN QUERY PLAN`（REST、read-only）: favorites は `SCAN a USING INDEX assets_favorites`、trash の cursor 付きは `SEARCH a USING INDEX assets_trash ((sort_at,id)<(?,?))`、止まった削除の一覧は `SCAN assets USING COVERING INDEX assets_purging`。部分 index は D1 でも選ばれる
+- storage audit: `limit` を 1・2・3・500 に変えても、分類も件数も同じ（25 枚・75 object）。実 R2 の `list()` の並びと `startAfter` は、ページ境界の前提どおりに動いた
+- `--deep`: 直前に upload した asset は R2 が記録した SHA-256 と一致し、D-018 より前の 21 件だけが `original_checksum_unrecorded` になった。S3 API で PUT した object の checksum を binding の `head()` から読めることを、この構成でも確認した
+- backup: 初回 27.9 秒（25 枚、storage GET 75 回）、変更なしの 2 回目は 0.64 秒（download 0、API 4 回）、1 枚追加後は 1 件だけ download。`pnpm backup check` は `ok: true`
+- verify: 通常 7.1 秒（26 件 download）、`--quick` 6.1 秒（download 21 件＝checksum の記録が無い古い original のみ、5 件は R2 の記録で確認）
+- storage cleanup: 以前の検証で残っていた期限切れ upload 2 件を dry run で確認し、`--apply` で破棄（`discarded 2, cleared 2, failed 0`）。実行後の audit は「不整合なし」、`pnpm diagnose` の WARN も消えた
+
+### restore drill（2026-09-18、`edgephotos-restore-test`）
+
+空の D1・R2・Access application・R2 API token を新しく作り、remote-test の backup から restore した。
+
+- restore を API 呼び出しの 13 回目と 41 回目で `401` にして 2 回中断させ、`--resume` で完走（26 枚・1 album、最後の実行での upload は 4 枚）
+- restore 先の `pnpm backup verify` は通常・`--quick` とも `ok: true`（問題 0 件）。`pnpm storage audit --deep` も「不整合なし」
+- 中断した restore が残した reservation 1 件は `uploads in progress` として見えた（期限内なので cleanup の対象外）
+- 終了後に Worker・D1・R2 bucket を削除した（R2 bucket は object を消してから削除）。この drill 用の R2 API token（対象は drill の bucket のみ）も削除した。Access application 2 件は次の drill で再利用できるため残した（[operations.md](operations.md) §14）
+
+作業中に分かった運用上の注意（[operations.md](operations.md) §3 に追記）: `wrangler secret put` で先に Worker を作ってから deploy すると、deploy 前に入れた secret は残らなかった。また、標準入力が端末でない環境では secret の値が空のまま「Success」と表示される。
+
+### local（Browser）
+
+`pnpm test:e2e`（Chromium・WebKit、13 件）が通った。加えて、`vite dev` の使い捨て state に対して、Chromium で一度きりの Playwright script（commit していない）を実行した。
+
+- album 一覧は cover の画像を読み込み、album ごとの request（`/api/v1/albums/{id}/assets`）を 1 回も送らない。空の album は icon のまま
+- finalize が 3 回 `503` になった写真は「転送は終わりましたが、登録を確認できませんでした…再試行すると、転送をやり直さずに登録します」と表示され、再試行で PUT を 1 回も送らずに完了した
+- 中身が PNG で名前が `.jpg` のファイルは、PNG として upload され完了した（以前は finalize が `content_type_mismatch` で毎回拒否した）
+- 3 日前の中断 upload（行だけ）を D1 に入れると、ライブラリ画面の「点検する」が「途中で止まったアップロード」1 件を表示し、「中断したアップロードを整理する」で破棄され、再点検で問題なしになった
+
+### 形式と Browser 差の確認（コードの確認のみ）
+
+- 取り込み結果が Browser で変わりうる点: derivative の画素（縮小の実装と JPEG encoder の違い。content identity には使わないので許容）、WebP の orientation と途中で切れた JPEG（roadmap の既知の制約のまま）。撮影日時は JS の `exifr` で読むので engine に依存しない
+- 元ファイルの形式は、今回から中身の先頭 byte で決める（finalize と同じ関数）。Browser が拡張子から推測する `type` の違いに左右されない
 
 ## 未検証
 

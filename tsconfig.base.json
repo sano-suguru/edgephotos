@@ -5,6 +5,8 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
+    // scripts/ run under Node type stripping, which needs the extension on relative imports.
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": false,

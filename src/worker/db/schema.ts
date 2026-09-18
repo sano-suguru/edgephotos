@@ -30,6 +30,14 @@ export const assets = sqliteTable(
     // One asset per original byte sequence. Re-uploads converge on the existing asset.
     uniqueIndex('assets_sha256').on(t.sha256),
     index('assets_timeline').on(desc(t.sort_at), desc(t.id)),
+    // Filtered lists stop after a page of matches or at the end of the index. Without these, a page of
+    // favorites or trash near the end reads the rest of the library (docs/benchmarks.md). Queries must spell
+    // these conditions as literals for SQLite to use the partial indexes.
+    index('assets_favorites')
+      .on(desc(t.sort_at), desc(t.id))
+      .where(sql`status = 'ready' AND trashed_at IS NULL AND is_favorite = 1`),
+    index('assets_trash').on(desc(t.sort_at), desc(t.id)).where(sql`status = 'ready' AND trashed_at IS NOT NULL`),
+    index('assets_purging').on(t.updated_at, t.id).where(sql`status = 'purging'`),
     check('assets_status_check', sql`${t.status} IN ('ready', 'purging')`),
     check('assets_is_favorite_check', sql`${t.is_favorite} IN (0, 1)`),
   ],
@@ -53,10 +61,13 @@ export const uploads = sqliteTable(
     width: integer(),
     height: integer(),
     taken_at: text(),
+    // status 'duplicate' with duplicate_of NULL: an interrupted upload that storage cleanup gave up on.
     duplicate_of: text(),
     created_at: text().notNull(),
     expires_at: text().notNull(),
     finalized_at: text(),
+    // assets.created_at to use instead of this row's created_at (restore keeps the original upload time).
+    asset_created_at: text(),
   },
   (t) => [
     index('uploads_status').on(t.status, t.created_at),

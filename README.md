@@ -12,7 +12,7 @@ EdgePhotos は、利用者自身の Cloudflare アカウントへデプロイす
 
 実 Cloudflare 環境（`remote-test`）で Access、private R2 への直接 upload、共有と失効、backup / restore を確認済みです。production 環境での deploy と、iPhone / Android 実機での取り込みはまだ確認していません。確認した内容と日付は [検証記録](docs/verification.md) にあります。
 
-EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export` を取ってください（[運用](docs/operations.md) §9）。
+EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[運用](docs/operations.md) §9）。保存内容と記録の食い違いは、ライブラリ画面の「ストレージの点検」または `pnpm storage audit` で確認できます（§12）。
 
 ## ローカルで試す
 
@@ -25,7 +25,7 @@ pnpm dev              # http://localhost:5173 （Access を模擬した owner �
 ```
 
 ```bash
-pnpm check            # typecheck + lint + db:check + test + build
+pnpm check            # typecheck + lint + db:check + cli:check + test + build
 ```
 
 デプロイ手順と必要な設定は [運用・デプロイ・復元](docs/operations.md) を参照してください。
@@ -57,7 +57,7 @@ pnpm check            # typecheck + lint + db:check + test + build
 
 ### 「original」の意味
 
-EdgePhotos は original を byte 単位で変更せずに保存します。Web 版の original は、Browser から受け取った byte 列です。iPhone での具体的な扱いは [D-019](docs/decisions.md) を参照してください。
+EdgePhotos は original を byte 単位で変更せずに保存します。Web 版の original は、Browser から受け取った byte 列です。iPhone の Safari では、写真を選んだ時点で HEIC が JPEG に変換されることがあり、その場合に保存されるのは変換後の JPEG です。画面では「保存したファイル」と表記しています。詳しくは [D-019](docs/decisions.md) を参照してください。
 
 ## アーキテクチャ概要
 

@@ -6,10 +6,11 @@ import { captureParts, formatDate, monthKey } from '../../src/web/lib/dates'
 import { exifDateToIso } from '../../src/web/lib/exif-date'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
+import { originalTypeOf } from '../../src/web/lib/original-type'
 import { putOutcome } from '../../src/web/lib/storage-put'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
-import { scanJpegForMetadata } from '../../src/worker/storage/inspect'
-import { syntheticJpeg } from '../helpers'
+import { scanJpegForMetadata, sniffImageType } from '../../src/worker/storage/inspect'
+import { syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
 
 describe('capture date for grouping', () => {
   it('uses the camera wall-clock digits whether or not takenAt has an offset', () => {
@@ -201,6 +202,23 @@ describe('upload concurrency', () => {
     const run = createTaskLimiter(1)
     await expect(run(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom')
     expect(await run(async () => 'next')).toBe('next')
+  })
+})
+
+describe('original format detection', () => {
+  it('follows the bytes, not the name, exactly like finalize', () => {
+    const buf = (bytes: Uint8Array) => bytes.slice().buffer as ArrayBuffer
+    expect(originalTypeOf(buf(syntheticJpeg()))).toBe('image/jpeg')
+    expect(originalTypeOf(buf(syntheticPng()))).toBe('image/png')
+    expect(originalTypeOf(buf(syntheticWebp()))).toBe('image/webp')
+    for (const bytes of [syntheticJpeg(), syntheticPng(), syntheticWebp()]) {
+      expect(originalTypeOf(buf(bytes))).toBe(sniffImageType(bytes))
+    }
+    // HEIC (ftyp box), GIF, empty and short files are not accepted.
+    const heic = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63, 0, 0, 0, 0])
+    for (const bytes of [heic, new TextEncoder().encode('GIF89a......'), new Uint8Array(0), new Uint8Array([0xff])]) {
+      expect(originalTypeOf(buf(bytes))).toBeNull()
+    }
   })
 })
 

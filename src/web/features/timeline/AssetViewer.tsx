@@ -204,7 +204,7 @@ export function AssetViewer(props: {
   const chrome = cn('transition-opacity motion-reduce:transition-none', chromeHidden.value && 'invisible opacity-0')
 
   const moreItems = [
-    { label: 'オリジナルを開く', onSelect: downloadOriginal },
+    { label: '保存したファイルを開く', onSelect: downloadOriginal },
     ...(props.mode === 'album' && props.albumId
       ? [
           {
@@ -446,6 +446,11 @@ export function AssetViewer(props: {
             <dt class="text-white/50">追加日時</dt>
             <dd>{formatDateTime(captureParts({ takenAt: null, createdAt: asset.createdAt }))}</dd>
           </dl>
+          {/* D-019: the stored file is what the browser handed over, not necessarily the camera's file. */}
+          <p class="mt-3 text-xs text-white/50">
+            サイズと形式は、アップロード時にブラウザから受け取ったファイルのものです。このファイルは変更せずに保存しています。iPhone
+            では、写真を選んだ時点で HEIC が JPEG に変換されていることがあります。
+          </p>
         </aside>
       )}
 
@@ -455,7 +460,7 @@ export function AssetViewer(props: {
           confirmingPurge.value = open
         }}
         title="完全に削除しますか？"
-        description="オリジナルも削除され、元に戻せません。"
+        description="保存したファイルも削除され、元に戻せません。"
         confirmLabel="完全に削除"
         busy={busy.value}
         onConfirm={() =>
