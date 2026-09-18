@@ -45,7 +45,7 @@ migration 適用、fail-closed、upload → timeline → album → share → rev
 ### backup / restore
 
 - backup: remote-test に対する `pnpm backup export` と `verify` が通り、original の SHA-256 照合が一致（`ok: true`）。
-- restore（2026-09-16 の drill）: 空の `edgephotos-restore-test`（D1 / R2 / Access / CORS / secret を別に用意）へ `pnpm backup restore` を実行し、`ok: true` を確認済み。restore 先から export し直して manifest を突き合わせ、asset 数・original の SHA-256・album 構成と membership・主要 metadata（size / content type / filename / width / height / takenAt / isFavorite）が一致することを確認。変わるのは `id` と `createdAt` だけで、[D-015](decisions.md) のとおり。空でない library への restore が拒否されることも確認済み。
+- restore（2026-09-16 の drill）: 空の `edgephotos-restore-test`（D1 / R2 / Access / CORS / secret を別に用意）へ `pnpm backup restore` を実行し、`ok: true` を確認済み。restore 先から export し直して manifest を突き合わせ、asset 数・original の SHA-256・album 構成と membership・主要 metadata（size / content type / filename / width / height / takenAt / isFavorite）が一致することを確認。変わるのは `id` と `createdAt` だけで、[D-015](decisions.md) のとおり（`createdAt` はこの drill の後、[D-024](decisions.md) で保たれるようになった）。空でない library への restore が拒否されることも確認済み。
 - 20 件規模の restore: restore-test を空にしてから 20 asset・1 album を restore し、restore 先の export と突き合わせて asset 数・SHA-256 集合・album membership・metadata 7 項目が一致、original 20 件の再 hash もズレなしを確認。
 - `edgephotos-restore-test` は drill 用の一時環境で、検証後に Worker・D1・R2 bucket・Access application・R2 API token をすべて削除した。
 
@@ -121,6 +121,8 @@ Hallmark audit 後の修正（同日）: 共有リンクの再発行・無効化
 - restore: Access token が 3〜14 回目のどの API 呼び出しで切れても、`--resume` で最後まで進み、`verify`（全件 download）が `ok` になること。記録に無い album や backup に無い写真がある library には再開しないこと。終わった restore は再開しないこと。restore 後の timeline の並び（撮影日時の無い写真を含む）が元と同じこと
 - verify: `--quick` が download 0 件で `ok` になり、original の size が変わった写真を storage audit で検出すること
 - paged export: 1 件ずつ・2 件ずつのページを重複なく連結できること、ページの間に写真の削除と追加があっても manifest が知らない asset を指さないこと
+- backup manifest v1（[D-025](decisions.md)）: export が書いた manifest がそのまま通り、未知の key を足しても通ること。壊れた JSON・別の `format`・`formatVersion: 2`・必須 field の欠落・型違い・大文字や 63 桁の SHA-256・size 0 / 負数 / 上限超え・扱えない content type・空や 256 文字の filename・0 pixel・ISO 8601 でない `takenAt`・instant でない `createdAt` / `trashedAt` / `exportedAt`・空や前後に空白のある album title を、field の位置と理由付きで拒否すること（15 件以上あるときは 10 件と残件数）。asset ID の重複、1 つの original に 2 つの asset、album ID の重複、album 内の重複、存在しない asset への membership も拒否すること
+- restore の入口: 壊れた manifest と壊れた `restore-state.json` は、対象ライブラリへ 1 度も request を送らずに拒否されること（request が出たらテストが失敗する client で確認）
 
 ### remote-test（2026-09-18）
 

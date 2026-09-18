@@ -221,6 +221,8 @@ EdgePhotos が唯一のバックアップであるとは説明しません。
 - `pnpm backup export <dir>`: manifest に加え、original と derivative を presigned URL 経由で取得し、各 original の SHA-256 を検証して保存します
 - `pnpm backup check <dir>`: backup ディレクトリだけを読み、manifest のすべての original の SHA-256 と derivative の有無を確かめます（network 不要）
 
+`manifest.json` は format v1 の contract です（[architecture.md](architecture.md) §7.2、[D-025](decisions.md)）。`check` / `restore` / `verify` は読み込み時に検証し、JSON として壊れている・contract に合わない・整合しない manifest は、ライブラリへ最初の request を送る前に、不正な field とその理由を並べて拒否します。
+
 ```bash
 EDGEPHOTOS_URL=https://photos.example.com \
 EDGEPHOTOS_ACCESS_TOKEN="$(cloudflared access token -app=https://photos.example.com)" \
