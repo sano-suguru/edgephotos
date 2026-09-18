@@ -18,6 +18,7 @@ describe('storage check helpers', () => {
           { kind: 'expired_upload', assetId: id(2), objects: [] },
           { kind: 'unreferenced_objects', assetId: id(3), objects: ['original'] },
           { kind: 'missing_original', assetId: id(4) },
+          { kind: 'missing_derivative', assetId: id(5), objects: ['thumbnail'] },
         ],
         nextAfter: null,
       },
@@ -35,11 +36,18 @@ describe('storage check helpers', () => {
     expect(progress).toEqual([2, 5])
     expect(summary).toEqual({
       photos: 5,
-      counts: { expired_upload: 2, unreferenced_objects: 1, missing_original: 1 },
+      counts: { expired_upload: 2, unreferenced_objects: 1, missing_original: 1, missing_derivative: 1 },
       completeUploads: 1,
+      // Photos the owner can rebuild in place, collected so the repair button knows what to work on (D-026).
+      repairable: [id(5)],
     })
     // Damage first, then what the owner can resolve, then information.
-    expect(findings(summary).map((f) => f.kind)).toEqual(['missing_original', 'expired_upload', 'unreferenced_objects'])
+    expect(findings(summary).map((f) => f.kind)).toEqual([
+      'missing_original',
+      'expired_upload',
+      'missing_derivative',
+      'unreferenced_objects',
+    ])
   })
 
   it('repeats cleanup while it makes progress and stops when it does not', async () => {

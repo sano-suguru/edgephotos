@@ -4,13 +4,15 @@ import { Trash } from '../../components/ui/icons'
 import { api } from '../../lib/api/client'
 import { userMessage } from '../../lib/errors'
 import { navigate } from '../../state/router'
+import { repairAssets, repairMessage } from './repair'
+import { repairDeps } from './repair-client'
 import { resumePurges } from './resume-purges'
 import { type AuditSummary, cleanupMessage, findings, runAudit, runCleanup } from './storage-check'
 
 const TONE_CLASS = { damage: 'text-destructive', action: 'text-foreground', info: 'text-muted-foreground' } as const
 
 function StorageCheck(props: { onChanged: () => void }) {
-  const running = useSignal<'audit' | 'cleanup' | null>(null)
+  const running = useSignal<'audit' | 'cleanup' | 'repair' | null>(null)
   const progress = useSignal(0)
   const summary = useSignal<AuditSummary | null>(null)
   const message = useSignal<string | null>(null)
@@ -44,8 +46,28 @@ function StorageCheck(props: { onChanged: () => void }) {
     await audit()
   }
 
+  // Rebuilds the thumbnails / previews the audit just listed, from the originals that are still there.
+  // The originals are read and never written, so a failure leaves the photo exactly as it was.
+  async function repair() {
+    const ids = summary.value?.repairable ?? []
+    running.value = 'repair'
+    error.value = null
+    message.value = null
+    progress.value = 0
+    try {
+      message.value = repairMessage(await repairAssets(repairDeps, ids, (n) => (progress.value = n)))
+    } catch (err) {
+      error.value = `作り直しを完了できませんでした。${userMessage(err)} 元ファイルには触れていません。`
+    } finally {
+      running.value = null
+      props.onChanged()
+    }
+    await audit()
+  }
+
   const list = summary.value ? findings(summary.value) : []
   const cleanable = (summary.value?.counts.expired_upload ?? 0) + (summary.value?.counts.duplicate_leftover ?? 0)
+  const repairable = summary.value?.repairable.length ?? 0
   return (
     <div class="mt-10 space-y-3 text-sm">
       <h2 class="font-semibold">ストレージの点検</h2>
@@ -81,6 +103,18 @@ function StorageCheck(props: { onChanged: () => void }) {
             <p class="text-destructive">
               詳しい一覧は <code>pnpm storage audit --deep</code> で確認できます（docs/operations.md §12）。
             </p>
+          )}
+          {repairable > 0 && (
+            <div class="space-y-2">
+              <p class="text-muted-foreground">
+                「サムネイルを作り直す」は、元ファイルを読み込んで、欠けているサムネイルとプレビューだけを作り直します。元ファイル・撮影日時・アルバム・お気に入り・ゴミ箱の状態は変わりません。
+              </p>
+              <Button variant="secondary" disabled={running.value !== null} onClick={() => void repair()}>
+                {running.value === 'repair'
+                  ? `作り直し中…（${progress.value} / ${repairable} 枚）`
+                  : `${repairable} 枚のサムネイルを作り直す`}
+              </Button>
+            </div>
           )}
           {cleanable > 0 && (
             <div class="space-y-2">

@@ -150,6 +150,7 @@ GET    /api/v1/assets?cursor&limit&favorite&trashed
 GET    /api/v1/assets/{assetId}
 PATCH  /api/v1/assets/{assetId}                 { isFavorite }
 GET    /api/v1/assets/{assetId}/original        short-lived URL (owner only)
+POST   /api/v1/assets/{assetId}/derivatives/repair      rebuild missing thumbnail/preview (D-026)
 POST   /api/v1/assets/{assetId}/trash | /restore
 DELETE /api/v1/assets/{assetId}                 permanent delete (trashed only, resumable)
 GET    /api/v1/albums?covers      POST /api/v1/albums
@@ -258,6 +259,33 @@ Web 版が保存する original は「Browser から受け取った byte 列」�
 
 JPEG quality は実機測定で調整できる tuning parameter とします。
 
+### derivative の作り直し（repair）
+
+original が無事で thumbnail / preview だけが欠けた写真は、original に触れずに作り直せます（[D-026](decisions.md)）。
+
+```text
+1. POST /api/v1/assets/{assetId}/derivatives/repair
+2. Worker checks the asset is ready and the original is the one finalize verified
+3. Worker validates any derivative object found at its key; an invalid one is deleted
+4. Worker returns a short-lived GET for the original + presigned PUTs for the missing keys
+5. Client downloads the original, checks its SHA-256, renders the missing derivatives
+6. Client PUTs them, then calls the same endpoint again
+7. status: 'ok' when both derivatives are present and pass the checks
+```
+
+この endpoint は state を持たず、冪等です。呼び出しが「何が足りないか」と「作り直したものが妥当か」を兼ねるため、再送・応答の消失・tab を閉じた・同時実行は、すべてもう一度呼べば収束します。`status: 'ok'` だけが完了で、PUT の成功は完了を意味しません。
+
+derivative の生成は upload と同じ Browser の pipeline（`renderDerivatives`）です。長辺・quality・metadata の除去は upload と同一で、Worker は画像を decode しません。検査も finalize と同じ（[D-012](decisions.md)）で、これに size 上限を足します。
+
+不変条件:
+
+- original は読むだけ。repair が署名するのは derivative key の PUT と original の GET だけ
+- object key は asset ID から server が決める。client から key を受け取らない
+- `If-None-Match: *` により、妥当な derivative を上書きできない
+- 検査に通らない derivative は削除し、`missing_derivative`（作り直せる状態）へ戻す
+- D1 へ書かない。asset ID・album・favorite・trash・createdAt / takenAt は変わらない
+- 失敗しても「original は無事、derivative は欠けたまま」より悪くならない
+
 ## 7. Share architecture
 
 共有リンクは次の形式を採用します。
@@ -348,7 +376,7 @@ versioning:
 
 ## 7.3 D1 / R2 の突合
 
-`GET /api/v1/storage/audit` は、asset ID の範囲ごとに R2 の list と D1 の `assets` / `uploads` を突き合わせる読み取り専用の API です。original・derivative の欠落、size の違い、（`deep`）R2 が記録した SHA-256 との違い、止まった削除、中断した upload、重複の残り、どの行も指さない object、layout 外の key を返します。何も修復しません。書き込みは `POST /api/v1/storage/cleanup` だけで、対象は中断した upload とその object に限ります（[D-023](decisions.md)）。
+`GET /api/v1/storage/audit` は、asset ID の範囲ごとに R2 の list と D1 の `assets` / `uploads` を突き合わせる読み取り専用の API です。original・derivative の欠落、size の違い、（`deep`）R2 が記録した SHA-256 との違い、止まった削除、中断した upload、重複の残り、どの行も指さない object、layout 外の key を返します。何も修復しません。書き込みは 2 つに限ります。`POST /api/v1/storage/cleanup` は中断した upload とその object だけを扱い（[D-023](decisions.md)）、`POST /api/v1/assets/{assetId}/derivatives/repair` は欠けた derivative だけを作り直します（[D-026](decisions.md)、§6）。どちらも original を削除・変更しません。`missing_original` などの破損は自動では直さず、backup から戻します（operations.md §12）。
 
 ## 8. Access routing
 

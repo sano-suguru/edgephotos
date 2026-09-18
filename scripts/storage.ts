@@ -14,7 +14,7 @@ const EXPLAIN: Record<StorageAuditIssue['kind'], string> = {
   original_size_mismatch: 'DAMAGED: the original in R2 is not the uploaded file. Restore it from a backup.',
   original_checksum_mismatch: 'DAMAGED: the original in R2 is not the uploaded file. Restore it from a backup.',
   missing_derivative:
-    'The photo is safe, but its thumbnail or preview is missing (shown as broken). Re-upload the photo after deleting it, or restore it from a backup.',
+    'The photo is safe, but its thumbnail or preview is missing (shown as broken). Rebuild it from the original on the Library page ("サムネイルを作り直す"); the original is only read. Deleting and re-uploading the photo is no longer necessary.',
   original_checksum_unrecorded:
     'Stored before R2 recorded checksums. Not an error; `pnpm backup verify` compares these by download.',
   unfinished_delete: 'A permanent delete stopped halfway. Finish it from the Library page ("削除を再開").',

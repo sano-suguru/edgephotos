@@ -132,6 +132,18 @@ v1 の完成条件には含めません。
 - ✅ 元ファイルの形式を中身で判定する。「オリジナル」を「保存したファイル」と表記する
 - ✅ 1,000 / 10,000 / 100,000 件の scale 測定
 
+## Derivative repair（2026-09-18）
+
+`missing_derivative` を、original に触れずに直せるようにした段階です。判断は [D-026](decisions.md)、確認内容は [verification.md](verification.md) にあります。
+
+- ✅ `POST /api/v1/assets/{assetId}/derivatives/repair`（state を持たない冪等な 1 呼び出し。original は読むだけ）
+- ✅ Browser の既存 derivative pipeline の再利用（upload と同じ renderer・長辺・metadata 除去）
+- ✅ 作り直しの前後で original の SHA-256・asset ID・album・favorite・trash・日時が変わらないことの回帰テスト
+- ✅ 検査に通らない derivative を残さず `missing_derivative` へ戻す
+- ✅ ライブラリ画面の「サムネイルを作り直す」と、`pnpm diagnose` の `r2: CORS` が `GET` も検査すること
+- ✅ remote-test: bucket の CORS が `GET` を許し、実 R2 の preflight が app origin にだけ `Access-Control-Allow-Origin` を返すこと（設定変更は不要だった）
+- ⬜ remote-test: Browser から壊れた写真を実際に作り直す往復（deploy と Access login が要る。[verification.md](verification.md) の「未検証」）
+
 ## Release polish
 
 - Deploy to Cloudflare
@@ -154,5 +166,5 @@ v1 の完成条件には含めません。
 - advanced search
 - Queues / background processing
 - client-specific adapter / BFF
-- derivative の作り直し（original から thumbnail / preview を再生成する経路。`missing_derivative` と、将来の derivative version の変更に使う）
+- 一括の derivative 再生成（derivative version を将来変える場合。欠けた derivative の作り直しは実装済み。[D-026](decisions.md)）
 - 大きな album の page を album の大きさによらず読む（`album_assets` に `sort_at` を持たせる。「既知の制約」参照）
