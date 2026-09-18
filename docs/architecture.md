@@ -297,6 +297,55 @@ share session / share Cookie は v1 では作りません。
 
 export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/album-assets`）です。Client は `src/contracts/export-manifest.ts` で asset metadata・album 構成・object manifest・期待 SHA-256 を持つ format 1 の manifest に組み立てます。1 response にまとめないのは、10 万枚で Worker の memory 上限に近づくためです（[D-024](decisions.md)）。original 本体を含む backup（差分）、backup ディレクトリの検査、空環境への restore（再開可能）、整合性検証は `pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)、[D-024](decisions.md)）。
 
+### backup manifest v1
+
+`manifest.json`（backup ディレクトリ）と、ライブラリ画面からダウンロードする JSON は同じ contract です。shape は `ExportManifestSchema`（`src/contracts/schemas.ts`）、整合性の規則は `manifestIntegrityIssues`（`src/contracts/export-manifest.ts`）を正本とします（[D-025](decisions.md)）。
+
+```jsonc
+{
+  "format": "edgephotos-export",
+  "formatVersion": 1,
+  "exportedAt": "2026-09-18T04:05:06.789Z",
+  "assets": [ /* ... */ ],
+  "albums": [ /* ... */ ]
+}
+```
+
+`assets[]`（`trashed` を含む `ready` の写真のみ。`pending` / `purging` は出ません）:
+
+| field | 型 | null | 意味 |
+| --- | --- | --- | --- |
+| `id` | UUID v4 の書式 | | export 元での asset ID。restore 先では別の ID になります |
+| `sha256` | 小文字 hex 64 桁 | | original の SHA-256。写真の同一性はこれだけで決まります |
+| `originalSize` | 整数 1〜100 MiB | | original の byte 数 |
+| `contentType` | `image/jpeg` \| `image/png` \| `image/webp` | | original の形式 |
+| `filename` | 1〜255 文字 | ✓ | upload 時のファイル名。object key には使いません |
+| `width` / `height` | 正の整数 | ✓ | pixel |
+| `takenAt` | ISO 8601 date-time（offset 任意） | ✓ | EXIF の撮影日時。**instant ではなく壁時計**で、offset の無い値をそのまま保ちます |
+| `isFavorite` | boolean | | |
+| `trashedAt` | instant | ✓ | 非 null なら trash 内。restore 先でも trash に入ります |
+| `createdAt` | instant | | ライブラリに入った時刻。restore が送り直すので保たれます |
+| `objects` | `{ original, thumbnail, preview }` | | export 時点の R2 key。R2 の生 dump から手で戻すための記述で、CLI は読みません |
+
+`albums[]`: `id`（UUID v4 の書式）、`title`（1〜200 文字、保存されている綴りのまま = 前後の空白なし）、`createdAt`（instant）、`assetIds`（この manifest の `assets` にある ID。順序に意味はありません）。
+
+instant は `new Date().toISOString()` がそのまま入ります（UTC・ミリ秒・`Z`）。`verify` は文字列として比較するので、同じ時刻の別の綴り（`+00:00`、ミリ秒なし）は v1 では不正です。綴りに加えて、実在する日時であることも確かめます（`2024-02-30T00:00:00.000Z` は綴りだけなら通りますが、3 月 1 日に繰り上がるため拒否します）。
+
+shape とは別に、次を満たさない manifest は拒否します。
+
+- `id` の重複、`sha256` の重複（1 つの original に 2 つの asset）、album `id` の重複
+- 1 つの album が同じ写真を 2 回挙げること
+- `assets` に無い写真への membership
+
+versioning:
+
+- reader は知らない `formatVersion` を部分的に読まずに拒否します
+- reader は知らない key を無視します。したがって v1 に足してよいのは、**その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field だけ**です。10 年後に古い CLI がこの backup を読む可能性を前提にします
+- 上の条件を満たさない追加、および既存 field の意味・書式・必須性の変更では `formatVersion` を上げます
+- 未公開の旧形式への fallback は持ちません
+
+`pnpm backup` の `check` / `restore` / `verify` はすべて `readManifest` を通ります。JSON として壊れている、contract に合わない、整合しない manifest は、対象ライブラリへ最初の request を送る前に、どの field がなぜ不正かを並べて拒否します。restore の再開に使う `restore-state.json` も同様に検証します（こちらは backup の contract ではなく実行状態のファイルです）。
+
 ## 7.3 D1 / R2 の突合
 
 `GET /api/v1/storage/audit` は、asset ID の範囲ごとに R2 の list と D1 の `assets` / `uploads` を突き合わせる読み取り専用の API です。original・derivative の欠落、size の違い、（`deep`）R2 が記録した SHA-256 との違い、止まった削除、中断した upload、重複の残り、どの行も指さない object、layout 外の key を返します。何も修復しません。書き込みは `POST /api/v1/storage/cleanup` だけで、対象は中断した upload とその object に限ります（[D-023](decisions.md)）。

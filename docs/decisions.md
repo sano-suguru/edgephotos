@@ -338,3 +338,26 @@ D1 と R2 は 1 transaction にできません（architecture.md §5）。以前
 
 影響: 以前の CLI は `GET /api/v1/export` を使うため、この Worker には使えません。以前の restore で作ったライブラリは `createdAt` が restore 時刻なので、新しい `verify` では `createdAt differs` になります。
 
+
+## D-025: backup manifest を v1 として確定し、読み込み時に検証する
+
+**状態:** 採用（2026-09-18。D-024 の manifest 形式を確定する）
+
+`readManifest` は `JSON.parse` の結果を TypeScript の型として扱い、`format` と `formatVersion` しか見ていませんでした。`check` / `restore` / `verify` はすべてこの値から始まるため、壊れた manifest が remote の、しかも書き込みを伴う操作に入れました。ライブラリの正式公開前が、数年維持する contract を決める最後の安いタイミングです。
+
+- manifest の shape は `ExportManifestSchema` を正本にし、runtime で検証する。整合性の規則（ID の重複、1 つの original に 2 つの asset、album ID の重複、album 内の重複、存在しない asset への membership）は zod を使わない `manifestIntegrityIssues` に分ける。「値が正しいか」と「全体が整合しているか」は別の問いで、巨大な schema にまとめない
+- 各 field を `UploadReserveSchema` と同じかそれ以上に厳しくする。restore は写真ごとに `POST /uploads` へ送り直すので、緩いままだと「schema は通るが 5,000 枚 upload した後で 400 になる」manifest を許してしまう。`originalSize` は 1〜100 MiB、`width` / `height` は正、`filename` は 1〜255 文字、`takenAt` は ISO 8601、album の `title` は 1〜200 文字かつ保存されている綴りのまま
+- `createdAt` / `trashedAt` / `exportedAt` / album の `createdAt` は instant（`new Date().toISOString()` そのまま: UTC・ミリ秒・`Z`）に固定する。`verify` はこれらを文字列として比較するので、同じ時刻の別の綴りを認めると「restore はできたが verify が永久に `createdAt differs` を出す」状態になる。綴りだけでなく実在する日時かも見る（正規表現は `2024-99-99T99:99:99.999Z` を通し、`2024-02-30` は 3 月 1 日に繰り上がる）。`takenAt` は EXIF 由来の壁時計なので対象外（offset 任意のまま）
+- 未知の key は無視する。ただし backup は 10 年後に古い CLI が読む可能性があるので、v1 に足してよいのは「その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field」だけと決める。条件を満たすか判断できない追加は `formatVersion` を上げる側に倒す。知らない `formatVersion` は部分的に読まずに拒否する
+- `restore-state.json` も同じ方法で検証する。`--resume` は「対象ライブラリが空」の guard を飛ばすので、信用できない album ID 対応で稼働中のライブラリを触らせない
+- 検証は `readManifest` の 1 か所に置き、`check` / `restore` / `verify` が同じ結果を共有する。`restore` は manifest と `restore-state.json` を読み終えてから最初の request を送る
+- error は「どこが・なぜ」を 1 行ずつ、最大 10 件と残件数で出す。最初の 1 件で止めると、壊れたファイルを直すのに何度も実行することになる
+
+却下した案:
+
+- 未公開の旧形式への fallback を残す: 公開前なので維持する相手がいない（AGENTS.md §6）
+- `.strict()` で未知の key を拒否する: 任意 field の追加がすべて v2 になる
+- schema を 1 つにまとめて整合性まで表現する: 読めなくなり、error も「どの規則に違反したか」を失う
+- manifest から `objects` を落とす: asset ID から導けるが、R2 の生 dump から手で戻すときの唯一の手掛かり（operations.md §10）。CLI が読まないので古くなる危険もない
+
+影響: `pnpm backup export` が書く manifest の内容は変わりません。手で編集した manifest や、他所で生成した JSON は、これまで通らなかった点で拒否されるようになります。`restore-state.json` に `formatVersion` が入るため、この変更の前に始めて中断した restore は `--resume` できません（対象ライブラリを空にしてやり直します）。

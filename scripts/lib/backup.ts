@@ -2,14 +2,23 @@
 // Restore re-uploads through the normal reserve -> PUT -> finalize protocol, so no privileged
 // import endpoint exists. Asset ids change; content identity is the original's SHA-256.
 
-import { collectExportManifest } from '../../src/contracts/export-manifest.ts'
-import type {
-  ExportManifest,
-  StorageAuditIssue,
-  StorageAuditPage,
-  UploadFinalizeResult,
-  UploadReservation,
-} from '../../src/contracts/schemas'
+import { z } from '@hono/zod-openapi'
+import {
+  collectExportManifest,
+  EXPORT_FORMAT,
+  EXPORT_FORMAT_VERSION,
+  manifestIntegrityIssues,
+} from '../../src/contracts/export-manifest.ts'
+import {
+  type ExportManifest,
+  ExportManifestSchema,
+  IdSchema,
+  InstantSchema,
+  type StorageAuditIssue,
+  type StorageAuditPage,
+  type UploadFinalizeResult,
+  type UploadReservation,
+} from '../../src/contracts/schemas.ts'
 
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
@@ -97,8 +106,59 @@ async function download(client: ApiClient, url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer())
 }
 
-export function fetchManifest(client: ApiClient): Promise<ExportManifest> {
-  return collectExportManifest((path) => apiJson(client, path))
+export async function fetchManifest(client: ApiClient): Promise<ExportManifest> {
+  // The library's own answer is checked against the same contract as a manifest read from disk: `export`
+  // writes this straight into manifest.json, and `verify` compares a backup against it.
+  return validateManifest(await collectExportManifest((path) => apiJson(client, path)), 'the export API')
+}
+
+// Manifest problems are reported as a list of `where: why` lines rather than the first failure, so one run
+// tells the owner everything that is wrong with the file.
+const REPORTED_ISSUES_MAX = 10
+
+function issueList(what: string, lines: string[]): BackupError {
+  const shown = lines.slice(0, REPORTED_ISSUES_MAX)
+  const rest = lines.length - shown.length
+  const more = rest > 0 ? `\n  ... and ${rest} more` : ''
+  return new BackupError(`${what}:\n${shown.map((line) => `  ${line}`).join('\n')}${more}`)
+}
+
+function fieldPath(path: readonly PropertyKey[]): string {
+  let out = ''
+  for (const key of path) out += typeof key === 'number' ? `[${key}]` : out ? `.${String(key)}` : String(key)
+  return out || '(root)'
+}
+
+// Rejects anything that is not a v1 manifest before a caller can act on it. Split in two on purpose:
+// the schema decides whether every value is well formed, manifestIntegrityIssues whether the whole is
+// consistent. Unknown keys are ignored, so a later v1 may add optional fields (D-025).
+export function validateManifest(value: unknown, source: string): ExportManifest {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new BackupError(`${source} is not an EdgePhotos export manifest: expected a JSON object`)
+  }
+  // Checked before the schema so that a foreign file and a newer EdgePhotos get their own answer.
+  const header = value as { format?: unknown; formatVersion?: unknown }
+  if (header.format !== EXPORT_FORMAT) {
+    throw new BackupError(
+      `${source} is not an EdgePhotos export manifest: format is ${JSON.stringify(header.format)}, expected "${EXPORT_FORMAT}"`,
+    )
+  }
+  if (header.formatVersion !== EXPORT_FORMAT_VERSION) {
+    throw new BackupError(
+      `${source} has formatVersion ${JSON.stringify(header.formatVersion)}; this version reads ${EXPORT_FORMAT_VERSION}. ` +
+        'Use the EdgePhotos release that wrote this backup.',
+    )
+  }
+  const parsed = ExportManifestSchema.safeParse(value)
+  if (!parsed.success) {
+    throw issueList(
+      `${source} does not match the v1 export manifest contract`,
+      parsed.error.issues.map((issue) => `${fieldPath(issue.path)}: ${issue.message}`),
+    )
+  }
+  const inconsistent = manifestIntegrityIssues(parsed.data)
+  if (inconsistent.length > 0) throw issueList(`${source} is inconsistent`, inconsistent)
+  return parsed.data
 }
 
 const originalPath = (sha256: string) => `originals/${sha256}`
@@ -182,14 +242,18 @@ async function copyAsset(
   }
 }
 
+// The one gate for `check`, `restore` and `verify`: a manifest that cannot be trusted is rejected here,
+// before the first request to a library and before anything is uploaded.
 export async function readManifest(store: BlobStore): Promise<ExportManifest> {
   const raw = await store.get(MANIFEST)
-  if (!raw) throw new BackupError('manifest.json not found')
-  const manifest = JSON.parse(new TextDecoder().decode(raw)) as ExportManifest
-  if (manifest.format !== 'edgephotos-export' || manifest.formatVersion !== 1) {
-    throw new BackupError('unsupported export format')
+  if (!raw) throw new BackupError(`${MANIFEST} not found: this directory is not an EdgePhotos backup`)
+  let value: unknown
+  try {
+    value = JSON.parse(new TextDecoder().decode(raw))
+  } catch (err) {
+    throw new BackupError(`${MANIFEST} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`)
   }
-  return manifest
+  return validateManifest(value, MANIFEST)
 }
 
 export type CheckReport = { ok: boolean; assets: number; problems: string[] }
@@ -198,9 +262,7 @@ export type CheckReport = { ok: boolean; assets: number; problems: string[] }
 export async function checkBackup(store: BlobStore, log?: (line: string) => void): Promise<CheckReport> {
   const manifest = await readManifest(store)
   const problems: string[] = []
-  const ids = new Set<string>()
   for (const [i, asset] of manifest.assets.entries()) {
-    ids.add(asset.id)
     const original = await store.get(originalPath(asset.sha256))
     if (!original) problems.push(`missing file ${originalPath(asset.sha256)}`)
     else if (original.byteLength !== asset.originalSize || (await sha256Hex(original)) !== asset.sha256) {
@@ -212,13 +274,8 @@ export async function checkBackup(store: BlobStore, log?: (line: string) => void
     }
     if (every(i + 1, manifest.assets.length)) log?.(`check: ${i + 1} / ${manifest.assets.length}`)
   }
-  const shas = new Set(manifest.assets.map((a) => a.sha256))
-  if (shas.size !== manifest.assets.length) problems.push('manifest lists the same original twice')
-  for (const album of manifest.albums) {
-    for (const id of album.assetIds) {
-      if (!ids.has(id)) problems.push(`album ${album.id} refers to unknown asset ${id}`)
-    }
-  }
+  // Duplicate ids, repeated originals and album members that are not in the manifest are rejected by
+  // readManifest: what is left for `check` is whether the files beside the manifest are all there and intact.
   return { ok: problems.length === 0, assets: manifest.assets.length, problems }
 }
 
@@ -239,18 +296,44 @@ async function putTarget(client: ApiClient, target: UploadReservation['targets']
 
 // Written to the backup directory while a restore runs, so an interrupted restore can continue
 // (`pnpm backup restore --resume`). Album ids are the only thing the target library cannot tell us.
-type RestoreState = {
-  format: 'edgephotos-restore-state'
-  exportedAt: string
+// Not part of the published format: this file belongs to the run, not to the backup.
+const RestoreStateSchema = z.object({
+  format: z.literal('edgephotos-restore-state'),
+  formatVersion: z.literal(1),
+  // The manifest this run is restoring. A resume is only allowed into the same backup.
+  exportedAt: InstantSchema,
   // old album id -> album id in the target library
-  albums: Record<string, string>
-  albumsDone: boolean
-  finishedAt?: string
-}
+  albums: z.record(IdSchema, IdSchema),
+  albumsDone: z.boolean(),
+  finishedAt: InstantSchema.optional(),
+})
 
+type RestoreState = z.infer<typeof RestoreStateSchema>
+
+// `--resume` skips the "target library is empty" guard, so a state file that cannot be trusted must not
+// be acted on: a wrong album map would put photos into the wrong albums in a live library.
 async function readRestoreState(store: BlobStore): Promise<RestoreState | null> {
   const raw = await store.get(RESTORE_STATE)
-  return raw ? (JSON.parse(new TextDecoder().decode(raw)) as RestoreState) : null
+  if (!raw) return null
+  const advice =
+    `Delete ${RESTORE_STATE}. If the target library is still empty, restore without --resume; ` +
+    'otherwise empty it first.'
+  let value: unknown
+  try {
+    value = JSON.parse(new TextDecoder().decode(raw))
+  } catch (err) {
+    throw new BackupError(
+      `${RESTORE_STATE} is not valid JSON: ${err instanceof Error ? err.message : String(err)}. ${advice}`,
+    )
+  }
+  const parsed = RestoreStateSchema.safeParse(value)
+  if (!parsed.success) {
+    throw issueList(
+      `${RESTORE_STATE} is not a usable restore state (${advice})`,
+      parsed.error.issues.map((issue) => `${fieldPath(issue.path)}: ${issue.message}`),
+    )
+  }
+  return parsed.data
 }
 
 async function saveRestoreState(store: BlobStore, state: RestoreState) {
@@ -264,9 +347,10 @@ export async function restoreLibrary(
   store: BlobStore,
   opts: { resume?: boolean } = {},
 ): Promise<RestoreReport> {
+  // Everything this directory says is checked before the first request to the target library.
   const manifest = await readManifest(store)
-  const target = await fetchManifest(client)
   let state = await readRestoreState(store)
+  const target = await fetchManifest(client)
 
   const resuming = !!opts.resume && state !== null && state.exportedAt === manifest.exportedAt && !state.finishedAt
   if (resuming && state) {
@@ -294,7 +378,13 @@ export async function restoreLibrary(
           : 'target library is not empty; restore requires an empty environment (use --resume to continue an interrupted restore)',
       )
     }
-    state = { format: 'edgephotos-restore-state', exportedAt: manifest.exportedAt, albums: {}, albumsDone: false }
+    state = {
+      format: 'edgephotos-restore-state',
+      formatVersion: 1,
+      exportedAt: manifest.exportedAt,
+      albums: {},
+      albumsDone: false,
+    }
     await saveRestoreState(store, state)
   }
 

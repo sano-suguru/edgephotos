@@ -46,7 +46,7 @@ src/
     storage/               object keys, R2 presigner, finalize inspection, local blob emulation
   contracts/
     schemas.ts             zod schemas shared by Worker (runtime + OpenAPI) and Web (types only)
-    export-manifest.ts     assembles the paged export into a manifest (Web and backup CLI)
+    export-manifest.ts     manifest format id, paged-export assembly, integrity rules (zod-free)
     image-type.ts          magic-byte format detection (finalize and Web)
     errors.ts
 migrations/                D1 migrations (forward-only, applied by wrangler)

@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi'
+import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION } from './export-manifest.ts'
 
 // API schemas shared by the Worker (runtime validation + OpenAPI) and clients (types only).
 // Nothing here may reference server secrets or storage credentials.
@@ -207,37 +208,78 @@ export const ShareVariantSchema = z.enum(['thumbnail', 'preview'])
 
 // ---- Export ----
 
+// The backup manifest (`manifest.json`) is this contract, assembled from the paged export endpoints
+// (./export-manifest.ts). v1 is fixed: readers reject a formatVersion they do not know instead of reading
+// it partially, and readers ignore keys they do not know. What may be added to v1 is therefore only an
+// optional field that a reader which ignores it entirely can still restore from without losing data,
+// meaning or a verification result. Everything else bumps formatVersion. See docs/architecture.md, D-025.
+
+// Every timestamp EdgePhotos records is `new Date().toISOString()`: UTC, milliseconds, `Z`. The manifest
+// pins that exact spelling, so a restored library compares equal to its backup as a string
+// (`pnpm backup verify`). `takenAt` is the exception: it comes from EXIF and is a local wall time.
+// The spelling is checked first and alone, then the value must be a moment that exists: the regex would
+// take 2024-99-99T99:99:99.999Z, and a manifest full of dates no clock ever showed is not restorable.
+export const InstantSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, {
+    error: 'Expected a UTC instant such as 2024-05-01T10:20:30.000Z',
+    abort: true,
+  })
+  .refine((value) => {
+    const ms = Date.parse(value)
+    return Number.isFinite(ms) && new Date(ms).toISOString() === value
+  }, 'Expected a date and time that exists')
+  .openapi({ example: '2024-05-01T10:20:30.000Z' })
+
+// Restore re-uploads every photo through `POST /uploads`, so each field here is at least as strict as
+// UploadReserveSchema: a manifest that parses can be restored without failing part-way through.
 export const ExportAssetSchema = z
   .object({
     id: IdSchema,
     sha256: Sha256Schema,
-    originalSize: z.number().int(),
+    originalSize: z.number().int().positive().max(LIMITS.originalMaxBytes),
     contentType: z.enum(ORIGINAL_CONTENT_TYPES),
-    filename: z.string().nullable(),
-    width: z.number().int().nullable(),
-    height: z.number().int().nullable(),
-    takenAt: z.string().nullable(),
+    filename: z.string().min(1).max(LIMITS.filenameMax).nullable(),
+    width: z.number().int().positive().nullable(),
+    height: z.number().int().positive().nullable(),
+    takenAt: TakenAtSchema.nullable(),
     isFavorite: z.boolean(),
-    trashedAt: z.string().nullable(),
-    createdAt: z.string(),
+    // Null unless the photo is in the trash; trashed photos are exported and restored into the trash.
+    trashedAt: InstantSchema.nullable(),
+    // When the photo entered a library. Restore sends it back so the timeline order survives.
+    createdAt: InstantSchema,
+    // The R2 keys this photo had at export time, so a raw bucket dump can be matched to the manifest.
+    // Descriptive only: the backup CLI stores files by SHA-256 and never reads these.
     objects: z.object({ original: z.string(), thumbnail: z.string(), preview: z.string() }),
   })
   .openapi('ExportAsset')
 
+// Titles are stored trimmed (AlbumInputSchema). Keeping the manifest to the stored spelling means a
+// restored album compares equal to the backup instead of differing by whitespace.
+const ExportAlbumTitleSchema = z
+  .string()
+  .min(1)
+  .max(LIMITS.albumTitleMax)
+  .refine((t) => t === t.trim(), 'Expected the stored title (no leading or trailing whitespace)')
+
+export const ExportAlbumSchema = z
+  .object({
+    id: IdSchema,
+    title: ExportAlbumTitleSchema,
+    createdAt: InstantSchema,
+    // Ready photos in this album, in the manifest's own assets. Order is not significant.
+    assetIds: z.array(IdSchema),
+  })
+  .openapi('ExportAlbum')
+
 export const ExportManifestSchema = z
   .object({
-    format: z.literal('edgephotos-export'),
-    formatVersion: z.literal(1),
-    exportedAt: z.string(),
+    format: z.literal(EXPORT_FORMAT),
+    formatVersion: z.literal(EXPORT_FORMAT_VERSION),
+    // When the last export page was read. Identifies the backup while a restore resumes.
+    exportedAt: InstantSchema,
     assets: z.array(ExportAssetSchema),
-    albums: z.array(
-      z.object({
-        id: IdSchema,
-        title: z.string(),
-        createdAt: z.string(),
-        assetIds: z.array(IdSchema),
-      }),
-    ),
+    albums: z.array(ExportAlbumSchema),
   })
   .openapi('ExportManifest')
 
@@ -318,7 +360,7 @@ export const ExportAssetPageSchema = z
   .openapi('ExportAssetPage')
 
 export const ExportAlbumListSchema = z
-  .object({ items: z.array(z.object({ id: IdSchema, title: z.string(), createdAt: z.string() })) })
+  .object({ items: z.array(ExportAlbumSchema.omit({ assetIds: true })) })
   .openapi('ExportAlbumList')
 
 export const ExportMembershipPageSchema = z
@@ -345,4 +387,6 @@ export type ShareCreated = z.infer<typeof ShareCreatedSchema>
 export type SharedAlbum = z.infer<typeof SharedAlbumSchema>
 export type SignedUrl = z.infer<typeof SignedUrlSchema>
 export type ExportManifest = z.infer<typeof ExportManifestSchema>
+export type ExportAsset = z.infer<typeof ExportAssetSchema>
+export type ExportAlbum = z.infer<typeof ExportAlbumSchema>
 export type ApiError = z.infer<typeof ErrorSchema>
