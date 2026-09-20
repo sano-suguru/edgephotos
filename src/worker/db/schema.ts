@@ -49,7 +49,7 @@ export const uploads = sqliteTable(
     id: text().primaryKey(),
     // Column-level UNIQUE in 0001_initial.sql (an unnamed SQLite autoindex, not a named index). drizzle-kit
     // believes it is `uploads_asset_id_unique`: changing it generates a DROP INDEX that fails on real
-    // databases, so rewrite such a migration as a table rebuild (see docs/development.md §6 baseline).
+    // databases, so rewrite such a migration as a table rebuild (see docs/development.md §7 baseline).
     asset_id: text().notNull().unique(),
     status: text({ enum: ['pending', 'finalized', 'duplicate'] }).notNull(),
     sha256: text().notNull(),

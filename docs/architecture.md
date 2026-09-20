@@ -1,6 +1,8 @@
 # アーキテクチャ
 
-この文書は、EdgePhotos v1 で採用するシステム構造、責務分担、外部との境界を定義します。技術選定の理由や却下した案は [設計判断](decisions.md) を参照してください。
+この文書は、EdgePhotos v1 で採用するシステム構造、責務分担、外部との境界を定義します。
+
+技術選定の理由や却下した案は [decisions.md](decisions.md) にあります。
 
 ## 1. 全体構成
 
@@ -87,7 +89,9 @@ D1 は状態と索引を保持します。
 - shares
 - settings
 
-写真 binary、R2 credential、Access token、share secret 平文は保存しません。正確な schema は migration を正本とし、`src/worker/db/schema.ts`（Drizzle）はそれと一致することを test で確認した型・query 用の定義です（[D-017](decisions.md)）。
+写真 binary、R2 credential、Access token、share secret 平文は保存しません。
+
+正確な schema は migration が定義します。`src/worker/db/schema.ts`（Drizzle）は、それと一致することを test で確認した型・query 用の定義です（[D-017](decisions.md)）。
 
 ### private R2
 
@@ -101,19 +105,21 @@ derivatives/v1/{assetId}/preview.jpg
 
 original と再生成可能な derivative を物理的にも分離します。
 
-## 3. Identity boundary
+## 3. 認証境界
 
 Web と将来 Native で認証の入口が変わっても、application logic へ渡す identity は統一します。
 
-Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証します。検証した identity は、application-level の `AppPrincipal` に正規化します。application logic は `AppPrincipal` だけを受け取り、Access の具体的な claim structure に依存しません。こうすることで、認証の入口の変更を application logic から分離できます。
+Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証します。検証した identity は、application-level の `AppPrincipal` に正規化します。
 
-`AppPrincipal` のフィールドは [`src/worker/auth/access.ts`](../src/worker/auth/access.ts) の型定義を正本とします。
+application logic は `AppPrincipal` だけを受け取り、Access の具体的な claim structure に依存しません。こうすることで、認証の入口の変更を application logic から分離できます。
 
-v1 は 1 owner です。Access を通過した全ユーザーを owner とみなさず、設定された owner identity と一致する principal だけが private API を利用できます。
+`AppPrincipal` のフィールドは [`src/worker/auth/access.ts`](../src/worker/auth/access.ts) の型定義が定義します。
+
+v1 は 1 owner です。Access を通過した全ユーザーを owner とみなしません。設定された owner identity と一致する principal だけが private API を利用できます。
 
 将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とし、application service が Native 固有 token を直接解釈しない構造を維持します。
 
-## 4. API boundary
+## 4. API 境界
 
 API は Web の画面構造ではなく、写真ライブラリの操作を表現します。
 
@@ -122,7 +128,7 @@ API は Web の画面構造ではなく、写真ライブラリの操作を表�
 /share/api/v1/*  public share capability API
 ```
 
-HTTP/JSON を使用し、request / response / error schema は `@hono/zod-openapi` の route schema を正本とします。そこから runtime validation と OpenAPI を生成します。
+HTTP/JSON を使用します。request / response / error schema は `@hono/zod-openapi` の route schema が定義し、そこから runtime validation と OpenAPI を生成します。
 
 Web も将来の Native client も、同じ application API の consumer とします。
 
@@ -167,9 +173,13 @@ GET    /share/api/v1/shares/{shareId}           Authorization: Bearer <secret>
 GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
 ```
 
-画像 URL は短命な presigned GET を JSON で返します。Worker が画像 byte を中継することはありません。一覧（`GET /api/v1/assets`、album の assets）は thumbnail の URL だけを返し、preview の URL は個別の asset（`GET /api/v1/assets/{assetId}` など）で返します（[D-022](decisions.md)）。album 一覧は `covers=true` のときだけ、各 album の最新の写真の thumbnail URL を返します（album ごとの request を 1 回にまとめる）。
+画像 URL は短命な presigned GET を JSON で返します。Worker が画像 byte を中継することはありません。
 
-## 5. Upload protocol
+一覧（`GET /api/v1/assets`、album の assets）は thumbnail の URL だけを返します。preview の URL は個別の asset（`GET /api/v1/assets/{assetId}` など）で返します（[D-022](decisions.md)）。
+
+album 一覧は `covers=true` のときだけ、各 album の最新の写真の thumbnail URL を返します。album ごとの request を 1 回にまとめるためです。
+
+## 5. Upload の手順
 
 ```text
 1. Client preprocess
@@ -185,15 +195,19 @@ GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
 
 finalize での確認内容（[D-012](decisions.md)）:
 
-- 3 object の存在（欠けていれば `409 UPLOAD_OBJECT_MISSING`、upload は `pending` のまま再試行可能）
-- original について、R2 が記録した SHA-256（binding の `head().checksums.sha256`）が reserve 時の申告と一致（記録がなければ `checksum_missing`、不一致なら `checksum_mismatch`。どちらも `422 UPLOAD_OBJECT_INVALID`）。[D-018](decisions.md)
-- size が reserve 時の申告と一致
-- original の magic bytes が申告 content type と一致
-- thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG（違反は `422 UPLOAD_OBJECT_INVALID`）
+- 3 object の存在。欠けていれば `409 UPLOAD_OBJECT_MISSING` で、upload は `pending` のまま再試行できる
+- original について、R2 が記録した SHA-256（binding の `head().checksums.sha256`）が reserve 時の申告と一致すること。記録がなければ `checksum_missing`、不一致なら `checksum_mismatch` で、どちらも `422 UPLOAD_OBJECT_INVALID`（[D-018](decisions.md)）
+- size が reserve 時の申告と一致すること
+- original の magic bytes が申告 content type と一致すること
+- thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG であること。違反は `422 UPLOAD_OBJECT_INVALID`
 
-D1 への asset 作成と upload 状態更新は 1 つの D1 batch（transaction）で行います。asset は upload 行がまだ `pending` の場合だけ作ります（`INSERT ... SELECT ... WHERE status = 'pending'`。[D-023](decisions.md)）。asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
+D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transaction）で行います。asset は upload 行がまだ `pending` の場合だけ作ります（`INSERT ... SELECT ... WHERE status = 'pending'`。[D-023](decisions.md)）。
 
-presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw digest の base64）として署名します。R2 は body の digest が一致しない PUT を拒否し、object を作りません。Client はこの header を省略も変更もできません（[D-018](decisions.md)）。
+asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
+
+presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。
+
+original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw digest の base64）として署名します。R2 は body の digest が一致しない PUT を拒否し、object を作りません。Client はこの header を省略も変更もできません（[D-018](decisions.md)）。
 
 Client は一時的な PUT の失敗（network error、408、429、5xx）を backoff 付きで再試行し、`412` は保存済みとして扱います。`If-None-Match: *` と reserve ごとに固有の key により、`412` になるのは同じ upload の以前の試行が届いていた場合だけです。いずれにしても finalize が size と checksum を確認します（[D-020](decisions.md)）。
 
@@ -201,11 +215,11 @@ digest 不一致の PUT は R2 が `400` で拒否します。original が存在
 
 finalize は upload の期限を見ません。期限内に PUT が済んでいれば、background に回した tab が期限後に復帰しても finalize できます。PUT が済んでいない upload は、presigned URL が失効しているため完了できず、`pending` のまま残ります。
 
-中断した upload は、owner が実行する storage cleanup が片付けます（[D-023](decisions.md)）。期限から 1 日過ぎた `pending` のうち、3 object が揃って検査を通るものは finalize して写真にし、それ以外は終端状態にしてから、その upload の key の object だけを消します。cleanup の後に届いた finalize は `404` です。
+中断した upload は、owner が実行する storage cleanup が片付けます（[D-023](decisions.md)）。期限から 1 日過ぎた `pending` のうち、3 object が揃って検査を通るものは finalize して写真にします。それ以外は終端状態にしてから、その upload の key の object だけを消します。cleanup の後に届いた finalize は `404` です。
 
 reserve の `metadata.createdAt`（任意、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。
 
-Web の再試行は、前の試行の reservation の finalize から始めます。`409 UPLOAD_OBJECT_MISSING` なら URL の期限内に限って欠けた object だけを PUT し、期限切れ・`404`・`410`・`422` なら新しい reservation からやり直します（`src/web/features/uploads/transfer.ts`）。
+Web の再試行は、前の試行の reservation の finalize から始めます。`409 UPLOAD_OBJECT_MISSING` なら、URL の期限内に限って欠けた object だけを PUT します。期限切れ・`404`・`410`・`422` なら新しい reservation からやり直します（`src/web/features/uploads/transfer.ts`）。
 
 不変条件:
 
@@ -217,20 +231,24 @@ Web の再試行は、前の試行の reservation の finalize から始めま�
 - asset 行が使っている ID の key は、cleanup でも重複処理でも削除しない（削除するのは完全削除だけ）
 - D1 と R2 を 1 transaction として扱わない
 
-## 6. Derivative contract
+## 6. 保存する画像の契約
 
 ### original
 
 - 元 byte 列をそのまま保持
 - 再エンコードしない
 - EXIF / GPS を改変しない
-- SHA-256 を metadata として保持（D-018 以降に finalize された asset では R2 が upload 時に検証した値。それより前の asset は申告値で、`pnpm backup verify` で照合する。[D-018](decisions.md)）
+- SHA-256 を metadata として保持
 - owner のみ取得可能
 - share では配信しない
 
-Browser の JPEG encoder が付ける APP1 / APP13（WebKit は Exif の色空間・画素数と空の IPTC を書き出す）は、Client が PUT 前に取り除きます。finalize は引き続き APP1 / APP13 を含む derivative を拒否します（[D-020](decisions.md)）。
+SHA-256 の出どころは 2 通りです。D-018 以降に finalize された asset では、R2 が upload 時に検証した値です。それより前の asset は申告値で、`pnpm backup verify` で照合します（[D-018](decisions.md)）。
 
-original の形式は JPEG / PNG / WebP です。HEIC / HEIF は Client が明示的に拒否します。iPhone の通常経路では、Safari の写真ピッカーが HEIC を JPEG に変換して渡す、現在報告されている挙動に任せます。この挙動は Web 標準の保証ではありません。HEIC がそのまま渡された場合は、明示的なエラーになります（[D-019](decisions.md)）。
+Browser の JPEG encoder が付ける APP1 / APP13 は、Client が PUT 前に取り除きます。WebKit は Exif の色空間・画素数と空の IPTC を書き出します。finalize は引き続き APP1 / APP13 を含む derivative を拒否します（[D-020](decisions.md)）。
+
+original の形式は JPEG / PNG / WebP です。HEIC / HEIF は Client が明示的に拒否します。
+
+iPhone の通常経路では、Safari の写真ピッカーが HEIC を JPEG に変換して渡す、現在報告されている挙動に任せます。これは Web 標準の保証ではありません。HEIC がそのまま渡された場合は、明示的なエラーになります（[D-019](decisions.md)）。
 
 Web 版が保存する original は「Browser から受け取った byte 列」です。iOS が選択時に JPEG へ変換した場合、カメラロールの HEIC そのものは保存されません。
 
@@ -239,7 +257,8 @@ Web 版が保存する original は「Browser から受け取った byte 列」�
 - Client は EXIF の `DateTimeOriginal`（なければ `CreateDate`）を読みます。offset は `OffsetTimeOriginal`（`CreateDate` には `OffsetTime`）があるときだけ付けます
 - offset が無い日時は、offset を補わずにそのまま保存します（例: `2024-05-01T10:20:30`）。Browser の timezone も付けません。撮影地の時刻として書かれた値を、別の timezone の値に変えないためです
 - timeline の並び順（`sort_at`）だけは、offset の無い日時を UTC とみなして計算します。そのため、日本時間で動く offset を書かないカメラの写真は、同じ瞬間に offset 付きで撮った写真より 9 時間新しいものとして並びます
-- EXIF は original に残っているため、将来 GPS や端末の設定から offset を推定する場合も、保存済みの original から計算し直せます。`takenAt` は backup / restore でも文字列のまま保持されます
+- EXIF は original に残っているため、将来 GPS や端末の設定から offset を推定する場合も、保存済みの original から計算し直せます
+- `takenAt` は backup / restore でも文字列のまま保持されます
 
 ### thumbnail
 
@@ -273,20 +292,22 @@ original が無事で thumbnail / preview だけが欠けた写真は、original
 7. status: 'ok' when both derivatives are present and pass the checks
 ```
 
-この endpoint は state を持たず、冪等です。呼び出しが「何が足りないか」と「作り直したものが妥当か」を兼ねるため、再送・応答の消失・tab を閉じた・同時実行は、すべてもう一度呼べば収束します。`status: 'ok'` だけが完了で、PUT の成功は完了を意味しません。
+この endpoint は state を持たず、冪等です。呼び出しが「何が足りないか」と「作り直したものが妥当か」を兼ねます。そのため、再送・応答の消失・tab を閉じた・同時実行は、すべてもう一度呼べば収束します。
 
-derivative の生成は upload と同じ Browser の pipeline（`renderDerivatives`）です。長辺・quality・metadata の除去は upload と同一で、Worker は画像を decode しません。検査も finalize と同じ（[D-012](decisions.md)）で、これに size 上限を足します。
+`status: 'ok'` だけが完了です。PUT の成功は完了を意味しません。
+
+derivative の生成は upload と同じ Browser の pipeline（`renderDerivatives`）です。長辺・quality・metadata の除去は upload と同一で、Worker は画像を decode しません。検査も finalize と同じで（[D-012](decisions.md)）、これに size 上限を足します。
 
 不変条件:
 
 - original は読むだけ。repair が署名するのは derivative key の PUT と original の GET だけ
-- object key は asset ID から server が決める。client から key を受け取らない
+- object key は asset ID から Server が決める。client から key を受け取らない
 - object を 1 つも削除しない。使えない derivative は削除せず置き換える
 - PUT は必ず条件付き。key が空なら `If-None-Match: *`、使えない object があるなら検査時点の ETag への `If-Match`。妥当な derivative は上書きできず、古い target は 412 になる
 - D1 へ書かない。asset ID・album・favorite・trash・createdAt / takenAt は変わらない
 - 失敗しても「original は無事、derivative は直っていない」より悪くならない。新しい repair の結果を古い repair が取り消すこともない
 
-## 7. Share architecture
+## 7. 共有の仕組み
 
 共有リンクは次の形式を採用します。
 
@@ -311,24 +332,33 @@ D1 には secret の hash のみ保存します。
 
 share session / share Cookie は v1 では作りません。
 
-検証に失敗した場合は、理由を区別せず一律に `404 SHARE_UNAVAILABLE` を返します。share ID の存在確認に使われることを防ぐためです。share から発行する URL の期限は 300 秒以下で、share の残り期限も超えません。album を削除すると、その album の share は revoke されます。
+検証に失敗した場合は、理由を区別せず一律に `404 SHARE_UNAVAILABLE` を返します。share ID の存在確認に使われることを防ぐためです。
 
-## 7.1 削除と復元
+share から発行する URL の期限は 300 秒以下で、share の残り期限も超えません。album を削除すると、その album の share は revoke されます。
 
-- `trash` は論理削除です。timeline・album・share から見えなくなりますが、original は残ります。
-- `restore` で元に戻せます。album 所属も復帰します。
-- 完全削除は trash 内の asset に対してのみ実行できます。`purging` に遷移して全画面から隠したあと、R2 object を削除し、最後に D1 row を削除します。途中で失敗した場合も、同じ `DELETE` を再実行すれば再開できます。
-- 止まった削除の asset ID は `GET /api/v1/diagnostics` の `purgingAssetIds`（古い順に最大 100 件）で分かります。ライブラリ画面の「削除を再開」がそれぞれに `DELETE` を送ります。同じ写真を upload し直した場合も、reserve / finalize が削除を完了させます（[D-014](decisions.md)）。
-- 完全削除は、asset が `ready` かつ trash 内である場合だけ `purging` にします。別の tab からの復元が間に入った場合は `409 ASSET_NOT_TRASHED` で、何も削除しません。
-- 削除するのはこの asset を作った upload 行だけです。この asset の重複として決着した upload 行は `duplicate_of` を `NULL` にして残します。その行は「自分が予約した key はどの asset のものでもない」という唯一の記録で、best-effort だった object 削除が届いていなければ storage cleanup がこの行から後始末します（[D-027](decisions.md)）。
+## 8. 削除と復元
 
-## 7.2 Export / Restore
+- `trash` は論理削除です。timeline・album・share から見えなくなりますが、original は残ります
+- `restore` で元に戻せます。album 所属も復帰します
+- 完全削除は trash 内の asset に対してのみ実行できます。`purging` に遷移して全画面から隠したあと、R2 object を削除し、最後に D1 row を削除します。途中で失敗した場合も、同じ `DELETE` を再実行すれば再開できます
+- 止まった削除の asset ID は `GET /api/v1/diagnostics` の `purgingAssetIds`（古い順に最大 100 件）で分かります。ライブラリ画面の「削除を再開」がそれぞれに `DELETE` を送ります。同じ写真を upload し直した場合も、reserve / finalize が削除を完了させます（[D-014](decisions.md)）
+- 完全削除は、asset が `ready` かつ trash 内である場合だけ `purging` にします。別の tab からの復元が間に入った場合は `409 ASSET_NOT_TRASHED` で、何も削除しません
 
-export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/album-assets`）です。Client は `src/contracts/export-manifest.ts` で asset metadata・album 構成・object manifest・期待 SHA-256 を持つ format 1 の manifest に組み立てます。1 response にまとめないのは、10 万枚で Worker の memory 上限に近づくためです（[D-024](decisions.md)）。original 本体を含む backup（差分）、backup ディレクトリの検査、空環境への restore（再開可能）、整合性検証は `pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)、[D-024](decisions.md)）。
+削除するのはこの asset を作った upload 行だけです。この asset の重複として決着した upload 行は、`duplicate_of` を `NULL` にして残します。
+
+その行は「自分が予約した key はどの asset のものでもない」という唯一の記録です。best-effort だった object 削除が届いていなければ、storage cleanup がこの行から後始末します（[D-027](decisions.md)）。
+
+## 9. Export と restore
+
+export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/album-assets`）です。
+
+Client は `src/contracts/export-manifest.ts` で manifest に組み立てます。asset metadata・album 構成・object manifest・期待 SHA-256 を持つ format 1 の manifest です。1 response にまとめないのは、10 万枚で Worker の memory 上限に近づくためです（[D-024](decisions.md)）。
+
+original 本体を含む backup（差分）、backup ディレクトリの検査、空環境への restore（再開可能）、整合性検証は、`pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)、[D-024](decisions.md)）。
 
 ### backup manifest v1
 
-`manifest.json`（backup ディレクトリ）と、ライブラリ画面からダウンロードする JSON は同じ contract です。shape は `ExportManifestSchema`（`src/contracts/schemas.ts`）、整合性の規則は `manifestIntegrityIssues`（`src/contracts/export-manifest.ts`）を正本とします（[D-025](decisions.md)）。
+`manifest.json`（backup ディレクトリ）と、ライブラリ画面からダウンロードする JSON は同じ contract です。shape は `ExportManifestSchema`（`src/contracts/schemas.ts`）、整合性の規則は `manifestIntegrityIssues`（`src/contracts/export-manifest.ts`）が定義します（[D-025](decisions.md)）。
 
 ```jsonc
 {
@@ -356,9 +386,11 @@ export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/alb
 | `createdAt` | instant | | ライブラリに入った時刻。restore が送り直すので保たれます |
 | `objects` | `{ original, thumbnail, preview }` | | export 時点の R2 key。R2 の生 dump から手で戻すための記述で、CLI は読みません |
 
-`albums[]`: `id`（UUID v4 の書式）、`title`（1〜200 文字、保存されている綴りのまま = 前後の空白なし）、`createdAt`（instant）、`assetIds`（この manifest の `assets` にある ID。順序に意味はありません）。
+`albums[]` の field は 4 つです。`id`（UUID v4 の書式）、`title`（1〜200 文字、保存されている綴りのまま = 前後の空白なし）、`createdAt`（instant）、`assetIds`（この manifest の `assets` にある ID。順序に意味はありません）。
 
-instant は `new Date().toISOString()` がそのまま入ります（UTC・ミリ秒・`Z`）。`verify` は文字列として比較するので、同じ時刻の別の綴り（`+00:00`、ミリ秒なし）は v1 では不正です。綴りに加えて、実在する日時であることも確かめます（`2024-02-30T00:00:00.000Z` は綴りだけなら通りますが、3 月 1 日に繰り上がるため拒否します）。
+instant は `new Date().toISOString()` がそのまま入ります（UTC・ミリ秒・`Z`）。`verify` は文字列として比較するので、同じ時刻の別の綴り（`+00:00`、ミリ秒なし）は v1 では不正です。
+
+綴りに加えて、実在する日時であることも確かめます。`2024-02-30T00:00:00.000Z` は綴りだけなら通りますが、3 月 1 日に繰り上がるため拒否します。
 
 shape とは別に、次を満たさない manifest は拒否します。
 
@@ -373,15 +405,27 @@ versioning:
 - 上の条件を満たさない追加、および既存 field の意味・書式・必須性の変更では `formatVersion` を上げます
 - 未公開の旧形式への fallback は持ちません
 
-paged export は、ライブラリが変化しうる間に 1 ページずつ読みます。asset ページに無い写真への membership は組み立て時に落とすので、manifest が知らない写真を指すことはありません。落として直せないのは、1 つの original が 2 つの asset として現れる場合（ページとページの間に完全削除と再 upload が起きた）です。写真の同一性は SHA-256 だけで決まるため、この manifest を restore すると 2 件が黙って 1 件に潰れます。`collectExportManifest` はこれを返さずに拒否します。ライブラリは無傷で、何も書かれていないので、export をやり直せば正しい manifest が得られます（[D-027](decisions.md)）。したがって Web のダウンロードも CLI も、`check` / `restore` / `verify` が拒否する manifest を手にすることはありません。
+paged export は、ライブラリが変化しうる間に 1 ページずつ読みます。asset ページに無い写真への membership は組み立て時に落とすので、manifest が知らない写真を指すことはありません。
 
-`pnpm backup` の `check` / `restore` / `verify` はすべて `readManifest` を通ります。JSON として壊れている、contract に合わない、整合しない manifest は、対象ライブラリへ最初の request を送る前に、どの field がなぜ不正かを並べて拒否します。restore の再開に使う `restore-state.json` も同様に検証します（こちらは backup の contract ではなく実行状態のファイルです）。
+落として直せないのは、1 つの original が 2 つの asset として現れる場合です。ページとページの間に完全削除と再 upload が起きたときに生じます。写真の同一性は SHA-256 だけで決まるため、この manifest を restore すると 2 件が黙って 1 件に潰れます。
 
-## 7.3 D1 / R2 の突合
+`collectExportManifest` はこれを返さずに拒否します。ライブラリは無傷で、何も書かれていないので、export をやり直せば正しい manifest が得られます（[D-027](decisions.md)）。したがって Web のダウンロードも CLI も、`check` / `restore` / `verify` が拒否する manifest を手にすることはありません。
 
-`GET /api/v1/storage/audit` は、asset ID の範囲ごとに R2 の list と D1 の `assets` / `uploads` を突き合わせる読み取り専用の API です。original・derivative の欠落、size の違い、（`deep`）R2 が記録した SHA-256 との違い、止まった削除、中断した upload、重複の残り、どの行も指さない object、layout 外の key を返します。何も修復しません。書き込みは 2 つに限ります。`POST /api/v1/storage/cleanup` は中断した upload とその object だけを扱い（[D-023](decisions.md)）、`POST /api/v1/assets/{assetId}/derivatives/repair` は欠けた derivative だけを作り直します（[D-026](decisions.md)、§6）。どちらも original を削除・変更しません。`missing_original` などの破損は自動では直さず、backup から戻します（operations.md §12）。
+`pnpm backup` の `check` / `restore` / `verify` はすべて `readManifest` を通ります。JSON として壊れている、contract に合わない、整合しない manifest は、対象ライブラリへ最初の request を送る前に、どの field がなぜ不正かを並べて拒否します。
 
-## 8. Access routing
+restore の再開に使う `restore-state.json` も同様に検証します（こちらは backup の contract ではなく実行状態のファイルです）。
+
+## 10. D1 / R2 の突合
+
+`GET /api/v1/storage/audit` は、asset ID の範囲ごとに R2 の list と D1 の `assets` / `uploads` を突き合わせる読み取り専用の API です。
+
+返すもの: original・derivative の欠落、size の違い、（`deep`）R2 が記録した SHA-256 との違い、止まった削除、中断した upload、重複の残り、どの行も指さない object、layout 外の key。何も修復しません。
+
+書き込みは 2 つに限ります。`POST /api/v1/storage/cleanup` は中断した upload とその object だけを扱います（[D-023](decisions.md)）。`POST /api/v1/assets/{assetId}/derivatives/repair` は欠けた derivative だけを作り直します（§6、[D-026](decisions.md)）。どちらも original を削除・変更しません。
+
+`missing_original` などの破損は自動では直さず、backup から戻します（operations.md §12）。
+
+## 11. Access の経路分け
 
 同一 Worker の private area と public share area を分けます。
 
@@ -396,7 +440,7 @@ Workers Static Assets 利用時の `ctx.access` だけには依存せず、Acces
 
 静的 JS / CSS は `/share/assets/*` に出力し、共有ページも読み込めるようにします（[D-011](decisions.md)）。Worker は `/api/*`、`/share/*`（`/share/assets/*` を除く）を static assets より先に処理します。
 
-## 9. Native client への拡張境界
+## 12. Native client への拡張境界
 
 v1 では Web と API の間に client-specific BFF を置きません。
 
@@ -406,7 +450,7 @@ Preact Web -----+
 Future Native --+
 ```
 
-将来、Client ごとに具体的な集約・性能要求が生じた場合だけ adapter / BFF の追加を判断します。
+将来、Client ごとに具体的な集約・性能要求が生じた場合だけ、adapter / BFF の追加を判断します。
 
 Native 対応のために現在保証すること:
 

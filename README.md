@@ -10,9 +10,15 @@ EdgePhotos は、利用者自身の Cloudflare アカウントへデプロイす
 
 **private alpha**。upload、timeline、favorite、album、期限付き共有と失効、trash と完全削除、export / restore を実装しています。
 
-実 Cloudflare 環境（`remote-test`）で Access、private R2 への直接 upload、共有と失効、backup / restore を確認済みです。production 環境での deploy と、iPhone / Android 実機での取り込みはまだ確認していません。確認した内容と日付は [検証記録](docs/verification.md) にあります。
+実 Cloudflare 環境（`remote-test`）で、Access、private R2 への直接 upload、共有と失効、backup / restore を確認済みです。production 環境での deploy と、iPhone / Android 実機での取り込みはまだ確認していません。確認した内容と日付は [検証記録](docs/verification.md) にあります。
 
-EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[運用](docs/operations.md) §9）。保存内容と記録の食い違いは、ライブラリ画面の「ストレージの点検」または `pnpm storage audit` で確認できます（§12）。
+### 唯一の保存先にしないでください
+
+EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残してください。
+
+定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[運用](docs/operations.md) §9）。
+
+保存内容と記録の食い違いは、ライブラリ画面の「ストレージの点検」または `pnpm storage audit` で確認できます（[運用](docs/operations.md) §12）。
 
 ## ローカルで試す
 
@@ -57,7 +63,9 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 
 ### 「original」の意味
 
-EdgePhotos は original を byte 単位で変更せずに保存します。Web 版の original は、Browser から受け取った byte 列です。iPhone の Safari では、写真を選んだ時点で HEIC が JPEG に変換されることがあり、その場合に保存されるのは変換後の JPEG です。画面では「保存したファイル」と表記しています。詳しくは [D-019](docs/decisions.md) を参照してください。
+EdgePhotos は original を byte 単位で変更せずに保存します。Web 版の original は、Browser から受け取った byte 列です。
+
+iPhone の Safari では、写真を選んだ時点で HEIC が JPEG に変換されることがあります。その場合に保存されるのは変換後の JPEG です。画面では「保存したファイル」と表記しています。詳しくは [D-019](docs/decisions.md) を参照してください。
 
 ## アーキテクチャ概要
 
@@ -79,7 +87,9 @@ metadata        originals / derivatives
 Web / Future Native -- presigned PUT/GET --> R2
 ```
 
-Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署名 URL の発行を担当します。写真バイナリは通常 Worker を経由せず、短命な presigned URL を使って Client と private R2 の間で直接転送します。
+Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署名 URL の発行を担当します。
+
+写真バイナリは通常 Worker を経由しません。短命な presigned URL を使って、Client と private R2 の間で直接転送します。
 
 詳細は [アーキテクチャ](docs/architecture.md) を参照してください。
 
@@ -105,7 +115,8 @@ Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署�
 - [設計判断](docs/decisions.md) — 重要な選択とその理由
 - [検証記録](docs/verification.md) — 実環境と Browser で確認した内容
 - [測定](docs/benchmarks.md) — scale と取り込み memory の数値
-- [ロードマップ](docs/roadmap.md) — 実装順序と各段階の到達点
+- [ロードマップ](docs/roadmap.md) — これからの実装順序と到達点
+- [変更の記録](docs/changelog.md) — 完了した実装段階
 - [AGENTS.md](AGENTS.md) — AI / 開発支援ツール向けの作業ガードレール
 
 ## ライセンス

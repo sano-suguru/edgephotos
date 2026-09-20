@@ -1,6 +1,8 @@
 # 測定
 
-1,000〜100,000 asset を想定した scale の測定結果と、その結果をもとに下した判断を記録します。Browser での取り込みの memory も記録します。測定は合成データと公開サンプルで行い、利用者の写真は使っていません。
+この文書は、1,000〜100,000 asset を想定した scale の測定結果と、その結果をもとに下した判断を記録します。Browser での取り込みの memory も記録します。
+
+測定は合成データと公開サンプルで行い、利用者の写真は使っていません。
 
 再測定:
 
@@ -15,7 +17,8 @@ BENCH_SIZES=100000 BENCH_BACKUP_MAX=0 BENCH_BIG_ALBUM=50000 pnpm bench
 - API は実際の SigV4 signer（偽の credential）で URL を署名して測った。ネットワーク遅延は含まない
 - `rows_read` は、app が実際に発行した SQL を記録し、同じ bind 値で再実行して取った
 - remote の往復時間は remote-test で実測した（read-only。次の表）
-- Browser は `vite dev`（development build）に 10,000 件を投入し、Playwright の Chromium と WebKit で測った。画像は route で 22KB の JPEG に差し替え、R2 と転送時間は含めない
+- Browser は `vite dev`（development build）に 10,000 件を投入し、Playwright の Chromium と WebKit で測った
+- Browser の測定では、画像を route で 22KB の JPEG に差し替えた。R2 と転送時間は含まない
 
 remote-test の往復時間（中央値、東京から）:
 
@@ -29,7 +32,9 @@ remote-test の往復時間（中央値、東京から）:
 
 ## 100,000 件（local、中央値、2026-09-17）
 
-合成 100,000 件（1% favorite、5% trash、21 album。大きい album は 5,000 枚と 50,000 枚の 2 通り）。左が修正前、右が修正後（[D-023](decisions.md)、[D-024](decisions.md)、部分 index）。
+合成 100,000 件です。1% favorite、5% trash、21 album で、大きい album は 5,000 枚と 50,000 枚の 2 通りを用意しました。
+
+矢印の左が修正前、右が修正後です（[D-023](decisions.md)、[D-024](decisions.md)、部分 index）。
 
 | 操作 | 時間 | rows_read |
 | --- | --- | --- |
@@ -53,10 +58,15 @@ remote-test の往復時間（中央値、東京から）:
 | storage audit 1 ページ（500） | 779 ms（最初のページ）、deep 873 ms | assets 501 |
 | storage audit 全件（200 ページ） | 16 s（1 ページ平均 80 ms） | |
 
-- 最初に劣化したのは export でした。1 response の JSON が 55 MiB になり、Worker の memory 上限（128 MB）に行 object と文字列を同時に持つため、remote では失敗する見込みでした。ページに分けました（D-024）
-- 修正後に最初に劣化するのは、大きな album です。album の page・件数・共有ページが album の枚数に比例して読みます（50,000 枚で 1 ページ約 15 万行、65〜111 ms）。Workers Free の D1 上限（1 日 500 万行）なら、このページを 1 日 34 回開くと上限に達します。直すには `album_assets` に `sort_at` を持たせる非正規化とデータ移行が要るため、今回は見送りました（roadmap の既知の制約）
-- storage audit の最初のページが遅いのは、layout 外の key を探す `delimiter` 付きの list が、Miniflare では bucket 全体を走査するためです。2 ページ目以降は list 2〜3 回と D1 2 回です。R2 の list は I/O で、Worker の CPU はほとんど使いません。実 R2 での時間は未測定です
-- timeline は 10,000 件と同じで、page の深さにも library の大きさにもよりません
+**最初に劣化したのは export でした。** 1 response の JSON が 55 MiB になりました。Worker の memory 上限（128 MB）に行 object と文字列を同時に持つため、remote では失敗する見込みでした。ページに分けました（[D-024](decisions.md)）。
+
+**修正後に最初に劣化するのは、大きな album です。** album の page・件数・共有ページが、album の枚数に比例して読みます（50,000 枚で 1 ページ約 15 万行、65〜111 ms）。Workers Free の D1 上限（1 日 500 万行）なら、このページを 1 日 34 回開くと上限に達します。
+
+直すには `album_assets` に `sort_at` を持たせる非正規化とデータ移行が要るため、今回は見送りました（[roadmap.md](roadmap.md) の既知の制約）。
+
+**storage audit の最初のページが遅いのは、Miniflare の事情です。** layout 外の key を探す `delimiter` 付きの list が、Miniflare では bucket 全体を走査します。2 ページ目以降は list 2〜3 回と D1 2 回です。R2 の list は I/O で、Worker の CPU はほとんど使いません。実 R2 での時間は未測定です。
+
+**timeline は 10,000 件と同じです。** page の深さにも library の大きさにもよりません。
 
 ## API（local、中央値）
 
@@ -145,11 +155,13 @@ remote での見積もり（上の往復時間から。original の転送時間�
 
 production build の bundle（gzip）: app 83 KB、共通 CSS / JS 14 KB、共有ページ 1.5 KB。
 
-期限切れ URL の回復（[D-021](decisions.md)）の cost（1,020 件表示時、Chromium）: API 17 回。表示済みの thumbnail は再取得しない（修正前の実装では 1,021 枚を取り直していた）。1 分以内に次の失敗が起きても再取得しない。
+期限切れ URL の回復（[D-021](decisions.md)）の cost は、1,020 件表示時の Chromium で API 17 回でした。表示済みの thumbnail は再取得しません（修正前の実装では 1,021 枚を取り直していた）。1 分以内に次の失敗が起きても再取得しません。
 
 ## Browser の取り込み memory（2026-09-17）
 
-local の `vite dev`、Playwright の Chromium 151 と WebKit 26.5、macOS。Browser のプロセスツリーの RSS を 50ms ごとに採取し、1 枚処理中の増分を記録した。画像は [verification.md](verification.md) の「Browser での取り込み」と同じ。
+local の `vite dev`、Playwright の Chromium 151 と WebKit 26.5、macOS。
+
+Browser のプロセスツリーの RSS を 50ms ごとに採取し、1 枚処理中の増分を記録した。画像は [verification.md](verification.md) の「Browser での取り込み」と同じ。
 
 | 画素数 | 1 枚処理中の RSS 増分 |
 | --- | --- |
@@ -160,7 +172,7 @@ local の `vite dev`、Playwright の Chromium 151 と WebKit 26.5、macOS。Bro
 
 decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の ArrayBuffer（最大 23MB）は小さい。
 
-200 件の連続 upload（計 920MB、48MP / 50MP を 6 件含む）で RSS は単調増加せず、peak は Chromium 約 1.1GB、WebKit 約 0.9GB（WebContent 単体では約 0.6GB）だった。
+200 件の連続 upload（計 920MB、48MP / 50MP を 6 件含む）で、RSS は単調増加しなかった。peak は Chromium 約 1.1GB、WebKit 約 0.9GB（WebContent 単体では約 0.6GB）。
 
 前処理の並列数（48MP を 6 件）:
 
@@ -209,8 +221,14 @@ decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の 
 
 ### plan に依存する注意
 
-Workers Free の CPU 上限は 1 request 10 ms です。timeline の 1 ページの署名は、修正前の約 8 ms から約 4 ms になりました。ただし isolate の起動直後の最初の署名は、それだけで 16〜41 ms かかります。10,000 件の export は `JSON.stringify` だけで約 11 ms です。Node での測定なので本番の CPU 時間とは一致しませんが、Free の 10 ms に収まる根拠もありません。
+Workers Free の CPU 上限は 1 request 10 ms です。timeline の 1 ページの署名は、修正前の約 8 ms から約 4 ms になりました。
 
-このため、継続利用の手順（[operations.md](operations.md) §1）では Workers Paid（CPU 上限は既定 30 秒）を推奨しています。Free でしか使えないことが要件になった場合は、export を分割するなどの対応を、そのとき測って決めます。
+ただし isolate の起動直後の最初の署名は、それだけで 16〜41 ms かかります。10,000 件の export は `JSON.stringify` だけで約 11 ms です。
 
-D1 の rows read も plan で上限が違います（Free は 1 日 500 万行）。修正後、timeline を 1 ページ読む cost は page の深さによらず約 60 行です。album 一覧と album の page は、album の大きさに比例します。
+Node での測定なので本番の CPU 時間とは一致しません。Free の 10 ms に収まる根拠もありません。
+
+このため、継続利用の手順では Workers Paid（CPU 上限は既定 30 秒）を推奨しています（[operations.md](operations.md) §1）。Free でしか使えないことが要件になった場合は、export を分割するなどの対応を、そのとき測って決めます。
+
+D1 の rows read も plan で上限が違います（Free は 1 日 500 万行）。
+
+修正後、timeline を 1 ページ読む cost は page の深さによらず約 60 行です。album 一覧と album の page は、album の大きさに比例します。
