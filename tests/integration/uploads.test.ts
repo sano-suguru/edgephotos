@@ -552,6 +552,35 @@ describe('HEIC originals', () => {
     expect(await assetCount(p.sha256)).toBe(0)
   })
 
+  it('refuses an original whose box headers run past what finalize reads', async () => {
+    const app = await makeApp()
+    // A `free` box longer than the inspection window: the walk cannot reach the next header, so finalize
+    // cannot tell whether the file is whole. Fail closed rather than accept what it did not check.
+    const padded = new Uint8Array(400_000)
+    padded.set(heicFixture().subarray(0, 36))
+    const box = (at: number, size: number, type: string) => {
+      padded.set([size >>> 24, (size >>> 16) & 0xff, (size >>> 8) & 0xff, size & 0xff], at)
+      padded.set(new TextEncoder().encode(type), at + 4)
+    }
+    // The free box ends past the 256KB window, so the header after it is somewhere finalize cannot see.
+    box(36, 300_000, 'free')
+    box(300_036, padded.byteLength - 300_036, 'mdat')
+    expect(sniffImageType(padded)).toBe('image/heic')
+    const p = {
+      original: padded,
+      thumbnail: syntheticJpeg(),
+      preview: syntheticJpeg({ padding: 32 }),
+      sha256: await sha256(padded),
+    }
+    const r = await reserve(app, p, {}, 'image/heic')
+    await put(app, r, p)
+    const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
+    expect(res.status).toBe(422)
+    const body = (await res.json()) as { error: { details: { problems: { object: string; problem: string }[] } } }
+    expect(body.error.details.problems).toContainEqual({ object: 'original', problem: 'structure_unverified' })
+    expect(await assetCount(p.sha256)).toBe(0)
+  })
+
   it('refuses a HEIC cut before its brand is even readable', async () => {
     const app = await makeApp()
     const broken = uniqueHeic().slice(0, 12)

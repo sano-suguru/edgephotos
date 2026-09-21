@@ -131,12 +131,18 @@ async function verifyObjects(ctx: ServiceContext, upload: UploadRow) {
       problems.push({ object: 'original', problem: 'content_type_mismatch' })
     } else if (isIsoBmff(upload.original_content_type)) {
       // A HEIC that lost its second half still decodes in some browsers, so the client having made a
-      // thumbnail from it proves nothing. Every top-level box header is in the head we already read, and
-      // each box states its own length: the file either accounts for all of its bytes or it does not
-      // (docs/decisions.md D-030). 'unverified' means the headers ran past the head, which no camera file
-      // does; it is not treated as a problem.
-      if (scanIsoBmffBoxes(originalHead, upload.original_size) === 'incomplete') {
-        problems.push({ object: 'original', problem: 'incomplete_file' })
+      // thumbnail from it proves nothing. Each box states its own length, and their headers sit at the
+      // front of the file, so the head finalize already read settles whether the declared lengths and the
+      // stored size agree (docs/decisions.md D-030).
+      const scan = scanIsoBmffBoxes(originalHead, upload.original_size)
+      // 'unverified' is not agreement: the headers ran past the head, so this check never saw the end of
+      // the file. Nothing observed writes an original like that, and an unchecked original is not one to
+      // store. If a real camera file ever lands here, read the next header from R2 rather than relax this.
+      if (scan !== 'complete') {
+        problems.push({
+          object: 'original',
+          problem: scan === 'incomplete' ? 'incomplete_file' : 'structure_unverified',
+        })
       }
     }
     for (const [name, head] of [

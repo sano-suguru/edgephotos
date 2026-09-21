@@ -647,7 +647,7 @@ image sequence を拒否するのは、今回のスコープが still image だ�
 
 WebKit は、後半が失われた HEIC からでも画像を返します（途中で切れた JPEG と同じ挙動）。thumbnail が出ることは、original が全部揃っていることの証拠になりません。写真庫が預かるのは original なので、ここは decoder の寛容さに任せません。
 
-ISO BMFF の box は自分の長さを持つので、**top-level box を歩いて、宣言された長さがファイル全体を過不足なく覆うか**だけを確かめます。image data の中身は見ません。確認するのは 1 点、「手元にある byte 列がそのファイルの全部か」です。
+ISO BMFF の box は自分の長さを持つので、**top-level box を歩いて、ファイル自身が宣言する box の長さと、受け取った byte 数が整合するか**だけを確かめます。確認するのはこの整合性だけで、original が完全であることの証明ではありません。box の中身は読まず、中で壊れているものや、size 0 の box で長さを言い切っていないものは分かりません。
 
 - 宣言が EOF を越える box があれば拒否する（途中で切れたファイル）
 - box header より小さい size、box に属さない余り byte も拒否する
@@ -655,9 +655,11 @@ ISO BMFF の box は自分の長さを持つので、**top-level box を歩い�
 - top-level の box type は印字可能な 4 文字であることを要求する。padding は box ではない
 - header がこちらの持つ byte 列を越える場合は判定しない（unverified）。実ファイルでは起きない
 
-Client はファイル全体を持っているので必ず判定できます。Worker は finalize で既に読んでいる先頭 256KB だけで判定します。box header は先頭に集まるため、100MB の original でも追加の読み出しは要りません。不一致は `incomplete_file` として `422` で拒否し、asset を作りません。
+Client はファイル全体を持っているので必ず判定できます。Worker は finalize で既に読んでいる先頭 256KB だけで判定します。box header は先頭に集まるため、100MB の original でも追加の読み出しは要りません。
 
-この検査は「宣言された構造がファイルを覆っている」ことしか言いません。box の中の image data が壊れていないことは保証しません。JPEG / PNG / WebP には同じ検査を入れていません（今回の範囲外です。途中で切れた JPEG の扱いは [D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する) のままです）。
+Worker も fail-closed です。整合しないものは `incomplete_file`、window の内側で判定しきれなかったもの（`unverified`）は `structure_unverified` として `422` で拒否し、どちらも asset を作りません。検査できなかった original を保存しないためです。実機の HEIC で `structure_unverified` が出るようなら、そのときに次の box header だけを R2 から range read して続きを読みます。先回りしては作りません。
+
+この検査が言うのは「宣言された box の長さと受け取った byte 数が合っている」ことだけです。image data が壊れていないことも、original が完全であることも保証しません。JPEG / PNG / WebP には同じ検査を入れていません（今回の範囲外です。途中で切れた JPEG の扱いは [D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する) のままです）。
 
 ### metadata の読み取りは decode のあとに置く
 

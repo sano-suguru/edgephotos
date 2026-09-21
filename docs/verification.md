@@ -463,9 +463,9 @@ fixture の orientation は EXIF の `Orientation` で持っている。実機�
 
 Chromium はどれも `InvalidStateError`。
 
-途中で切れた HEIC が WebKit で decode できるのは、途中で切れた JPEG と同じ挙動（上の「Browser での取り込み」）。thumbnail が出ることは original が全部揃っている証拠にならないので、top-level box を歩いて宣言された長さがファイルを覆うかを確認し、覆わないものは Client と Worker の両方で拒否する（[D-030](decisions.md)）。
+途中で切れた HEIC が WebKit で decode できるのは、途中で切れた JPEG と同じ挙動（上の「Browser での取り込み」）。thumbnail が出ることは original が全部揃っている証拠にならないので、top-level box を歩いて、宣言された box の長さと受け取った byte 数が整合するかを Client と Worker の両方で確認する（[D-030](decisions.md)）。
 
-最後の 2 行のとおり、構造が揃っていれば中身が壊れていても受け入れる。この検査が言うのは「手元の byte 列がそのファイルの全部か」だけである。
+最後の 2 行のとおり、長さが整合していれば中身が壊れていても受け入れる。この検査が言うのは長さの整合だけで、original が完全であることの証明ではない。
 
 ### exifr が返ってこなくなる HEIC
 
@@ -484,6 +484,8 @@ Chromium はどれも `InvalidStateError`。
 - v1 manifest は今も読め、v1 で `image/heic` を名乗る manifest は `contentType` を名指しして拒否される
 - e2e: WebKit は HEIC を追加し、記録された形式が `image/heic`、寸法が 32x64（EXIF Orientation 6 が反映された値）、`takenAt` が `2019-07-14T09:30:05`。timeline の thumbnail も 32x64 で、derivative 自体が正しい向きになっている。Chromium は「このブラウザでは HEIC を処理できません」と表示し、reserve へ進まない
 - e2e: 半分で切った HEIC と、`ftyp` の後を padding にした HEIC は、WebKit では「ファイルが最後まで揃っていません」、Chromium では decode 不能として先に止まり、どちらでも asset にならない
+- box header が finalize の 256KB window を越える original は、判定しきれないものとして `structure_unverified` で拒否される
+- e2e: `File.type` が `application/octet-stream` の HEIC bytes も、sniff の結果どおり `image/heic` として取り込まれる
 - 「probe は通るがそのファイルだけ decode に失敗する」経路は unit test のみ。WebKit は構造の揃った変種をすべて decode したため、e2e では再現できていない
 
 ### 観測した不安定な失敗

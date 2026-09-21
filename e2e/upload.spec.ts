@@ -46,6 +46,19 @@ test('uploads a photo with browser-made derivatives, and takes HEIC where it can
     expect(await naturalSize(heicThumbnail)).toEqual({ width: 32, height: 64 })
     // The capture time comes from the HEIC's own EXIF, so the timeline can order it by when it was taken.
     expect(stored.takenAt).toBe('2019-07-14T09:30:05')
+
+    // The picker does not always say what it handed over. The same bytes under a type that claims nothing
+    // are the same photo: a `free` box makes them a different file without changing what they are.
+    const relabelled = Buffer.concat([heicFixture(), Buffer.from([0, 0, 0, 12, 0x66, 0x72, 0x65, 0x65, 1, 2, 3, 4])])
+    const opaque = await uploadFiles(page, [
+      { name: 'unlabelled.heic', mimeType: 'application/octet-stream', buffer: relabelled },
+    ])
+    expect(opaque.get('unlabelled.heic')).toContain('完了')
+    const byBytes = await page.evaluate(async () => {
+      const res = await fetch('/api/v1/assets?limit=200')
+      return (await res.json()).items.find((i: { filename: string }) => i.filename === 'unlabelled.heic')
+    })
+    expect(byBytes.contentType).toBe('image/heic')
   } else {
     // A failure keeps the summary (and its rows) until dismissed.
     await expect(uploadRow(page, 'camera.heic')).toContainText('このブラウザでは HEIC を処理できません')
