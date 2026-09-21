@@ -16,6 +16,8 @@ storage が前の reservation の PUT を拒否したときは、新しい reser
 
 batch の state machine は `src/web/features/uploads/batch.ts` に分けて、Browser なしで自動テストできるようにしました。
 
+保証するのは画面を開いている間だけです。reload や tab を閉じたあとに再試行はできません。Browser から選んだ file をあとから読み直す方法がないため、その場合は選び直しになります（閉じる前に確認を出します）。完成した asset が二重に作られることはなく、finalize されなかった upload の残りは storage cleanup が片付けます（[D-023](decisions.md)）。
+
 判断は [D-020](decisions.md)、確認内容は [verification.md](verification.md)。
 
 ## HEIC / HEIF の original 保存（2026-09-22）

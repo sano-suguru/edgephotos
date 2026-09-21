@@ -527,6 +527,14 @@ batch の state machine を、upload protocol の代役に対して動かした�
 
 CI の Linux runner でも同じ経路を通る（HEIC の decode 可否に依存しない）。
 
+### 未解決: suite 全体で落ちる HEIC の test（macOS）
+
+`upload.spec.ts` の「uploads a photo with browser-made derivatives…」が、mobile-webkit で suite 全体を通したときだけ落ちる（`e2e/upload.spec.ts:48`、HEIC の thumbnail が `naturalWidth` 0 のまま）。この test だけを実行すると通る。
+
+この branch の変更を stash した `main` の状態でも同じように落ちたので、今回の変更が原因ではない。原因は特定していない。
+
+CI は Linux runner の WebKit で HEIC を decode できないため、この assertion のある分岐（`if (heicDecodes)`）に入らない。CI が緑でもこの経路は通っていない。
+
 ## 未検証
 
 ### iPhone / Android 実機での取り込み
