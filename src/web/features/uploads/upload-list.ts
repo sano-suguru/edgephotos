@@ -20,3 +20,30 @@ export function mergeUploadList<T extends UploadListItem>(previous: T[], added: 
   let room = limit - added.length - previous.filter(isActiveUpload).length
   return [...added, ...previous.filter((u) => isActiveUpload(u) || room-- > 0)]
 }
+
+export type UploadCounts = { total: number; active: number; done: number; duplicate: number; failed: number }
+
+export function countUploads(items: UploadListItem[]): UploadCounts {
+  const count = (state: UploadState) => items.filter((u) => u.state === state).length
+  return {
+    total: items.length,
+    active: items.filter(isActiveUpload).length,
+    done: count('done'),
+    duplicate: count('duplicate'),
+    failed: count('error'),
+  }
+}
+
+// One line for the whole selection. While photos are still running it counts them off; once the batch is
+// over it names every outcome it has, so one failure among a hundred never reads as a hundred failures and
+// a photo the library already had is not counted as one that was lost.
+export function uploadHeadline(c: UploadCounts): string {
+  if (c.active > 0) return `${c.total - c.active} / ${c.total} 枚 完了`
+  const parts: [number, string, string][] = [
+    [c.done, `${c.done} 枚を追加しました`, `${c.done} 枚を追加`],
+    [c.duplicate, `${c.duplicate} 枚はすでに登録済みでした`, `${c.duplicate} 枚は登録済み`],
+    [c.failed, `${c.failed} 枚を追加できませんでした`, `${c.failed} 枚は追加できませんでした`],
+  ]
+  const said = parts.filter(([n]) => n > 0).map(([, first, rest], i) => (i === 0 ? first : rest))
+  return said.length > 0 ? said.join('、') : `${c.total} 枚`
+}

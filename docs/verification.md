@@ -10,7 +10,7 @@
 
 ## 現在の状況
 
-- 最終確認: 2026-09-21
+- 最終確認: 2026-09-22
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`
 - 未確認: production 環境の作成と deploy、iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
@@ -496,6 +496,45 @@ Chromium はどれも `InvalidStateError`。
 ### 観測した不安定な失敗
 
 `upload.spec.ts` の「a clean upload summary clears itself…」が mobile-webkit で 1 度だけ落ちた（`uploadPanel` が自動で消えることを見る assertion、`e2e/upload.spec.ts:90`）。同じ file 単独・両 engine・suite 全体の 3 回の再実行では再現しなかった。原因は特定できていない。この test は HEIC の経路を通らないので、HEIC の変更が原因とは言えないが、無関係だとも確認できていない。
+
+## 大量 upload の partial failure（2026-09-22）
+
+数十〜数百枚を選んだときに、一部が失敗しても成功した写真が壊れず、失敗した行だけを再試行できることの確認。合成した JPEG だけを使い、実写真は使っていない。
+
+### 合成 batch（`tests/unit/upload-batch.test.ts`、workerd）
+
+batch の state machine を、upload protocol の代役に対して動かした。代役は server 側の test が固定している性質（SHA-256 ごとに asset は 1 つ、finalize は冪等、object を確認してから ready）を守る。
+
+| 混ぜたもの | 結果 |
+| --- | --- |
+| 80 行 / 60 枚（20 枚は二重選択）、5 回に 1 回の転送失敗 | 1 回目で失敗した行が残り、成功と duplicate は確定。再試行後は失敗 0、asset は 60 |
+| 100 枚をまとめて選択 | 同時に前処理した枚数の最大は 2（`createTaskLimiter(2)`、[D-020](decisions.md)）。全件 done、asset は 100 |
+| 1 枚だけ転送失敗、他は成功 | 失敗 1・完了 4。asset は 4。再試行では失敗した行の file だけを前処理し直し、asset は 5 になる |
+| 転送済みで finalize の応答だけ失った | 再試行は前の reservation の finalize だけを送る（prepare 0 回、reserve 0 回、PUT 0 回）。asset は 1 |
+| 同上で、再試行時に file が decode できない | 完了する。server へ先に聞くため前処理に入らない。asset は 1 |
+| storage が PUT を拒否し続ける | 再試行のたびに新しい reservation から始める（2 回の再試行で reserve 3 回）。拒否された reservation へ送り直し続けない |
+| 到達できない network | reservation を保持したまま（2 回の試行で reserve 1 回） |
+| 100MB 超・途中で切れた file・HEIC を decode できない Browser・decode 失敗 | 再試行の対象にしない。file を手放すので、ボタンからも拾われない |
+| finalize が original を `incomplete_file` で拒否 | 再試行の対象にしない。asset は 0 |
+| finalize が thumbnail の `size_mismatch` で拒否 | 再試行できる。再試行で done |
+
+### Browser（Playwright、`e2e/upload.spec.ts`）
+
+2 枚を選び、先に storage へ届いた側の object をすべて `403` で拒否した。
+
+- 失敗 1・完了 1。完了した写真は timeline に出たままで、summary は「1 枚を追加しました、1 枚は追加できませんでした」
+- 「失敗した 1 枚を再試行」を押すと、その行だけが前の reservation から続きを送って完了する
+- 2 枚とも `/api/v1/assets` に 1 件ずつだけ現れる
+
+CI の Linux runner でも同じ経路を通る（HEIC の decode 可否に依存しない）。
+
+### 未解決: suite 全体で落ちる HEIC の test（macOS）
+
+`upload.spec.ts` の「uploads a photo with browser-made derivatives…」が、mobile-webkit で suite 全体を通したときだけ落ちる（`e2e/upload.spec.ts:48`、HEIC の thumbnail が `naturalWidth` 0 のまま）。この test だけを実行すると通る。
+
+この branch の変更を stash した `main` の状態でも同じように落ちたので、今回の変更が原因ではない。原因は特定していない。
+
+CI は Linux runner の WebKit で HEIC を decode できないため、この assertion のある分岐（`if (heicDecodes)`）に入らない。CI が緑でもこの経路は通っていない。
 
 ## 未検証
 

@@ -2,8 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { SNIFF_HEAD_BYTES, scanIsoBmffBoxes } from '../../src/contracts/image-type'
 import { LIMITS, ORIGINAL_CONTENT_TYPES } from '../../src/contracts/schemas'
 import { resumePurges } from '../../src/web/features/settings/resume-purges'
-import { canAutoDismissUploads, mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
-import { unsupportedFileMessage } from '../../src/web/features/uploads/upload-message'
+import {
+  canAutoDismissUploads,
+  countUploads,
+  mergeUploadList,
+  type UploadListItem,
+  uploadHeadline,
+} from '../../src/web/features/uploads/upload-list'
+import { unstorableOriginalMessage, unsupportedFileMessage } from '../../src/web/features/uploads/upload-message'
 import { captureParts, formatDate, monthKey } from '../../src/web/lib/dates'
 import { exifDateToIso } from '../../src/web/lib/exif-date'
 import {
@@ -156,6 +162,27 @@ describe('upload list merging', () => {
   it('fills the remaining room with the most recent finished items', () => {
     const previous = [item('a', 'done'), item('b', 'duplicate'), item('c', 'error')]
     expect(mergeUploadList(previous, [item('n', 'queued')], 3).map((u) => u.id)).toEqual(['n', 'a', 'b'])
+  })
+})
+
+describe('upload summary headline', () => {
+  const line = (...states: UploadListItem['state'][]) =>
+    uploadHeadline(countUploads(states.map((state, i) => ({ id: String(i), state }))))
+
+  it('counts photos off while the batch runs', () => {
+    expect(line('done', 'uploading', 'queued')).toBe('1 / 3 枚 完了')
+  })
+
+  it('names every outcome the finished batch has', () => {
+    expect(line('done', 'done')).toBe('2 枚を追加しました')
+    expect(line('duplicate')).toBe('1 枚はすでに登録済みでした')
+    expect(line('error')).toBe('1 枚を追加できませんでした')
+    expect(line('done', 'duplicate', 'error')).toBe('1 枚を追加しました、1 枚は登録済み、1 枚は追加できませんでした')
+  })
+
+  it('does not let one failure read as a failed batch', () => {
+    const many = Array.from({ length: 99 }, (): UploadListItem['state'] => 'done')
+    expect(line(...many, 'error')).toBe('99 枚を追加しました、1 枚は追加できませんでした')
   })
 })
 
@@ -347,6 +374,28 @@ describe('upload failure messages', () => {
     expect(incomplete).not.toMatch(/ブラウザ/)
     expect(unsupportedFileMessage(new FileTooLargeError('too big'))).toMatch(/100MB/)
     expect(unsupportedFileMessage(new UnsupportedFileError('nope'))).toMatch(/対応していない形式/)
+  })
+
+  it('separates what finalize says about the original from what it says about the transfer', () => {
+    const problems = (...p: { object: string; problem: string }[]) => ({ problems: p })
+    // The file itself: another attempt sends the same bytes and gets the same answer.
+    expect(unstorableOriginalMessage(problems({ object: 'original', problem: 'incomplete_file' }))).toMatch(
+      /最後まで揃っていません/,
+    )
+    expect(unstorableOriginalMessage(problems({ object: 'original', problem: 'content_type_mismatch' }))).toMatch(
+      /形式の宣言と合っていません/,
+    )
+    // What was transferred, not what was chosen: retryable, so no settled message.
+    expect(unstorableOriginalMessage(problems({ object: 'original', problem: 'size_mismatch' }))).toBeNull()
+    expect(unstorableOriginalMessage(problems({ object: 'thumbnail', problem: 'metadata_segment' }))).toBeNull()
+    // One retryable problem among them is enough: the retry may leave nothing but the file's own.
+    expect(
+      unstorableOriginalMessage(
+        problems({ object: 'original', problem: 'incomplete_file' }, { object: 'preview', problem: 'size_mismatch' }),
+      ),
+    ).toBeNull()
+    expect(unstorableOriginalMessage(undefined)).toBeNull()
+    expect(unstorableOriginalMessage({ problems: [] })).toBeNull()
   })
 
   it('offers the picker exactly the formats the server accepts', () => {

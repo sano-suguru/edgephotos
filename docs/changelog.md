@@ -4,6 +4,24 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## 大量 upload の partial failure（2026-09-22）
+
+数十〜数百枚を選んだ upload で、一部が失敗しても成功した写真をそのまま残し、失敗した行だけを再試行できるようにしました。新しい upload manager や background upload は作っていません。
+
+summary は batch の終わりに、追加した枚数・登録済みだった枚数・追加できなかった枚数をすべて出します。100 枚のうち 1 枚が失敗しても、99 枚が失敗したようには読めません。
+
+同じ file では変わらない失敗（100MB 超、途中で切れた file、decode できない HEIC、server が original そのものを拒否した場合）は再試行の対象から外し、理由を出します。duplicate は失敗ではなく通常の結果のままです。
+
+再試行は file に触れる前に server へ聞きます。転送も登録も終わっていて応答だけ失った写真は、1 往復で確定します。decode や derivative の作り直しは行いません。前処理でしか起きない失敗（memory 不足、decode 失敗）が、すでに保存済みの写真を失敗として見せることがなくなりました。
+
+storage が前の reservation の PUT を拒否したときは、新しい reservation から始めます。端末の時計が遅れていると、失効した presigned URL をまだ期限内と読み続けて、同じ拒否を繰り返していました。
+
+batch の state machine は `src/web/features/uploads/batch.ts` に分けて、Browser なしで自動テストできるようにしました。
+
+保証するのは画面を開いている間だけです。reload や tab を閉じたあとに再試行はできません。Browser から選んだ file をあとから読み直す方法がないため、その場合は選び直しになります（閉じる前に確認を出します）。完成した asset が二重に作られることはなく、finalize されなかった upload の残りは storage cleanup が片付けます（[D-023](decisions.md)）。
+
+判断は [D-020](decisions.md)、確認内容は [verification.md](verification.md)。
+
 ## HEIC / HEIF の original 保存（2026-09-22）
 
 HEIC / HEIF を original として受け付けるようにしました。受け取った byte 列は変更せず保存し、timeline や share で使う thumbnail / preview は今までどおり Browser の canvas で作る JPEG です。HEIC を JPEG へ変換して original と呼ぶことはしません。

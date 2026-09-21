@@ -4,7 +4,7 @@ import { Button, buttonClass, cn } from '../../components/ui/button'
 import { Close, Upload } from '../../components/ui/icons'
 import { SUPPORTED_TYPES } from '../../lib/image'
 import { activeUploads, clearFinishedUploads, enqueueFiles, retryUploads, type UploadItem, uploads } from './upload'
-import { canAutoDismissUploads } from './upload-list'
+import { canAutoDismissUploads, countUploads, uploadHeadline } from './upload-list'
 
 // Same as an info toast.
 const AUTO_DISMISS_MS = 5_000
@@ -58,12 +58,8 @@ export function UploadButton() {
 export function UploadList() {
   const summary = useComputed(() => {
     const list = uploads.value
-    const count = (s: UploadItem['state']) => list.filter((u) => u.state === s).length
     return {
-      total: list.length,
-      done: count('done'),
-      duplicate: count('duplicate'),
-      failed: count('error'),
+      ...countUploads(list),
       retryable: list.filter((u) => u.state === 'error' && u.retryable).length,
       // The file currently being worked on. No byte counts are available, so the bar counts photos.
       current: list.find((u) => u.state === 'preparing' || u.state === 'uploading' || u.state === 'finalizing'),
@@ -78,13 +74,9 @@ export function UploadList() {
   }, [autoDismiss.value])
   if (uploads.value.length === 0) return null
   const s = summary.value
-  const active = activeUploads.value > 0
-  const finished = s.total - activeUploads.value
-  const headline = active
-    ? `${finished} / ${s.total} 枚 完了`
-    : s.failed > 0
-      ? `${s.failed} 枚をアップロードできませんでした${s.done > 0 ? `（${s.done} 枚は追加済み）` : ''}`
-      : `${s.done} 枚をアップロードしました${s.duplicate > 0 ? `（${s.duplicate} 枚は登録済み）` : ''}`
+  const active = s.active > 0
+  const finished = s.total - s.active
+  const headline = uploadHeadline(s)
 
   return (
     <div

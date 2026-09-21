@@ -210,3 +210,56 @@ test('recovers after the presigned image URLs expire', async ({ page }) => {
   await expect.poll(() => naturalSize(viewer.locator('img'))).toEqual({ width: 800, height: 600 })
   expect(stale.has((await viewer.locator('img').getAttribute('src')) ?? '')).toBe(false)
 })
+
+// The asset a presigned local-blob URL belongs to: its key is `originals/{assetId}` or
+// `derivatives/v1/{assetId}/...`, so every object of one photo answers with the same id.
+function assetOf(url: string): string {
+  const payload = url.split('/').pop()?.split('.')[0] ?? ''
+  const key: string = JSON.parse(Buffer.from(payload, 'base64url').toString()).k
+  return key.replace(/^originals\/|^derivatives\/v1\//, '').split('/')[0]
+}
+
+test('keeps the photos a batch stored and retries only the one storage refused', async ({ page }) => {
+  await openApp(page)
+  const names = [`${uniqueName('batch-a')}.jpg`, `${uniqueName('batch-b')}.jpg`]
+
+  // Storage refuses every object of whichever photo reaches it first, the way an expired signature does.
+  // Which one that is depends on the order the two transfers interleave, so the test reads it off the rows.
+  let doomed: string | null = null
+  let refusing = true
+  await page.route('**/__local/blobs/**', async (route) => {
+    if (route.request().method() !== 'PUT') return route.continue()
+    const asset = assetOf(route.request().url())
+    doomed ??= asset
+    if (refusing && asset === doomed) return route.fulfill({ status: 403, body: 'Request has expired' })
+    return route.continue()
+  })
+
+  const rows = await uploadFiles(
+    page,
+    await Promise.all(
+      names.map(async (name) => ({ name, mimeType: 'image/jpeg', buffer: await makeJpeg(page, 640, 480) })),
+    ),
+  )
+  const failed = names.filter((n) => rows.get(n)?.includes('失敗'))
+  const stored = names.filter((n) => rows.get(n)?.includes('完了'))
+  expect([failed.length, stored.length]).toEqual([1, 1])
+
+  // One failure is one failure: the photo that was stored is in the timeline and counted as added.
+  await expect(uploadPanel(page)).toContainText('1 枚を追加しました、1 枚は追加できませんでした')
+  await expectImageLoaded(tile(page, stored[0]).locator('img'))
+  await expect(tile(page, failed[0])).toHaveCount(0)
+
+  refusing = false
+  await page.getByRole('button', { name: '失敗した 1 枚を再試行' }).click()
+  await expect(uploadRow(page, failed[0])).toContainText('完了', { timeout: 30_000 })
+  await expectImageLoaded(tile(page, failed[0]).locator('img'))
+
+  // The retry finished the reservation the first attempt left behind: one asset per photo, not three.
+  const items = await page.evaluate(async (wanted: string[]) => {
+    const res = await fetch('/api/v1/assets?limit=200')
+    const body = (await res.json()) as { items: { filename: string }[] }
+    return body.items.filter((i) => wanted.includes(i.filename)).map((i) => i.filename)
+  }, names)
+  expect(items.sort()).toEqual([...names].sort())
+})

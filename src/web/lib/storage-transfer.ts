@@ -1,11 +1,11 @@
-import { putOutcome } from './storage-put'
+import { putOutcome, StorageUploadError } from './storage-put'
 
 // The single presigned-PUT implementation the Web client uses, for upload and for derivative repair
 // (docs/decisions.md D-026), so both treat a lost response, a `412` and a hard refusal identically.
 // Separate from ./storage-put.ts because that file stays free of `fetch` options the Workers runtime
 // does not have, so its retry policy can be unit-tested outside the browser.
 
-export class StorageUploadError extends Error {}
+export { StorageUploadError }
 
 const PUT_ATTEMPTS = 4
 
@@ -28,11 +28,7 @@ export async function putSigned(
     }
     const outcome = putOutcome(status)
     if (outcome === 'stored') return
-    if (outcome === 'fail' || attempt === PUT_ATTEMPTS) {
-      throw new StorageUploadError(
-        status === 'network' ? 'Storage upload failed (network)' : `Storage upload failed (${status})`,
-      )
-    }
+    if (outcome === 'fail' || attempt === PUT_ATTEMPTS) throw new StorageUploadError(status)
     await wait(1000 * 2 ** (attempt - 1))
   }
 }
