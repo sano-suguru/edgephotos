@@ -88,7 +88,7 @@ Presigned URL は bearer capability として扱います。
 - 操作を PUT または GET に限定する。
 - object key を限定する。
 - 有効期限を短くする。
-- Browser の R2 CORS は `APP_ORIGIN` に限定する。derivative の作り直しは original を `fetch()` で読むため、`GET` も必要（operations.md §6）。
+- Browser の R2 CORS は `APP_ORIGIN` に限定する。derivative の作り直しは original を `fetch()` で読むため、`GET` も必要（[R2 CORS](operations.md#6-r2-cors)）。
 - Access Cookie / JWT を R2 へ送らない。
 
 | 操作 | TTL | 署名に含めるもの | 保証 |

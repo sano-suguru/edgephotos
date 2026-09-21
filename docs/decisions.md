@@ -1,10 +1,8 @@
 # 設計判断
 
-この文書は、後から「なぜこの構成を選んだのか」を確認するための Decision Log です。
+後から「なぜこの構成を選んだのか」を確認するための Decision Log です。
 
-粒度は 2 種類あります。初期に構成を決めただけの判断（D-001〜D-011）は数行です。運用で学んだ判断（D-019 以降）は、却下した案と残るリスクまで書きます。長さの違いは重要度の違いではなく、決めるまでに検討した幅の違いです。
-
-D-028 以降は、背景・判断・理由・守ること・却下した案・影響と残るリスク・再検討の条件の順で書きます。「守ること」は、この判断のあとに実装者が破ってはいけない境界です（D-023、D-026、D-027 と同じ位置づけ）。当てはまらない項目は省きます。過去の判断は書き直しません。
+書くのは、判断と、その理由と、見直す条件です。却下した案・残るリスク・実装者が破ってはいけない境界は、後から判断を理解するのに要る場合だけ足します。過去の判断は書き直しません。
 
 現在の構造は [architecture.md](architecture.md)、開発時のルールは [development.md](development.md) と [AGENTS.md](../AGENTS.md) にあります。
 
@@ -44,7 +42,7 @@ Web UI の component tree や route 構造を API に露出させません。Hon
 
 **状態:** 採用
 
-Web 認証は Cloudflare Access を使用します。Access 固有 assertion は HTTP 層で検証し、application logic へは正規化した principal を渡します。
+Web 認証は Cloudflare Access を使います。Access 固有の assertion は HTTP 層で検証し、認証後の処理へは正規化した principal だけを渡します。
 
 将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とし、独自 auth server は初期構成へ導入しません。
 
@@ -151,7 +149,7 @@ reserve と finalize は、その asset の完全削除を最後まで実行し�
 
 理由は、`purging` の行が全画面から隠れていながら、`assets.sha256` の UNIQUE を持ったままだからです。以前は、同じ写真を選び直すと reserve が `409 DUPLICATE_ASSET` を返し、画面には「登録済み」と表示されていました。実際にはライブラリに無い写真です。削除前に reserve した upload を finalize すると、新しく PUT した object を「重複」として消し、`410` を返していました。
 
-この扱いが安全な理由は 2 つです。削除は owner がすでに確定した操作で、再実行しても安全です（[architecture.md](architecture.md) §8）。新しい upload の object key は別の asset ID なので、削除の対象になりません。
+この扱いが安全な理由は 2 つです。削除は owner がすでに確定した操作で、再実行しても安全です。新しい upload の object key は別の asset ID なので、削除の対象になりません。
 
 止まった削除は、ライブラリ画面の「削除を再開」からも完了できます。対象の asset ID は `GET /api/v1/diagnostics` が返します。
 
@@ -210,7 +208,7 @@ Migration:
 
 既存の `0001_initial.sql` は手書きのまま baseline として扱い、drizzle-kit の snapshot と journal を後から合わせました。production DB の再作成は不要です。
 
-baseline の具体的な扱い（journal の `idx: 1`、SQL と snapshot の差、CI の rehearsal が保証する範囲）は [development.md](development.md) §7 にあります。
+baseline の具体的な扱い（journal の `idx: 1`、SQL と snapshot の差、CI の rehearsal が保証する範囲）は開発ガイドの [D1 / migration](development.md#7-d1--migration) にあります。
 
 ## D-018: original の SHA-256 を R2 に upload 時に検証させる
 
@@ -237,7 +235,7 @@ finalize 側の根拠は、R2 が put 時に指定された checksum を object 
 
 影響:
 
-- Browser は `x-amz-checksum-sha256` を送るため、R2 CORS の AllowedHeaders に追加が必要（operations.md §6）
+- Browser は `x-amz-checksum-sha256` を送るため、R2 CORS の AllowedHeaders に追加が必要（[R2 CORS](operations.md#6-r2-cors)）
 - この変更以前に reserve した upload の PUT URL は checksum を含まない。そのまま finalize すると `checksum_missing` になるため、再 upload が必要（URL の期限は 600 秒）
 - この変更以前に `ready` になった asset の `sha256` は申告値のまま。`pnpm backup verify` が R2 から読み直して照合する
 - local 開発と test では、local blob route が同じ header を検証し、R2 binding の `put(..., { sha256 })` で digest を検証する。Miniflare も不一致を拒否し、`head().checksums.sha256` を返す
@@ -329,7 +327,7 @@ workerd の test（`pnpm test`）は Server の契約を検証しますが、Bro
 - ただし読み込みに失敗した thumbnail は表示済みの扱いから外し、新しい URL にする。一度表示できた画像が、後で再取得されて `403` になる場合があるため
 - viewer: 開くたびに asset を取得して preview の URL を得る（[D-022](#d-022-一覧では-thumbnail-の-url-だけを署名する)）。それでも preview が失敗したら 1 回だけ取り直す
 - 経過時間は `performance.now()` で測る。端末の時計のずれに左右されず、object が本当に欠けている場合も再取得は上の頻度で止まる
-- URL の有効期限（security.md §6）と Server の契約は変えない。URL を長くする案は、bearer capability を長く生かすことになるため採らない
+- URL の有効期限と Server の契約は変えない。URL を長くする案は、bearer capability を長く生かすことになるため採らない
 
 ## D-022: 一覧では thumbnail の URL だけを署名する
 
@@ -354,7 +352,7 @@ preview の URL は常に viewer を開いた時点のものになり、期限�
 
 **状態:** 採用（2026-09-17。roadmap の「未完了 upload の cleanup は未実装」を置き換える）
 
-D1 と R2 は 1 transaction にできません（[architecture.md](architecture.md) §5）。以前は、期限切れの `uploads` 行を数えるだけで、R2 側から見た不整合（行の無い object、object の無い asset）を調べる手段がありませんでした。5 年使ったライブラリで original が 1 枚欠けても、backup を取るまで気付けません。
+D1 と R2 は 1 transaction にできません。以前は、期限切れの `uploads` 行を数えるだけで、R2 側から見た不整合（行の無い object、object の無い asset）を調べる手段がありませんでした。5 年使ったライブラリで original が 1 枚欠けても、backup を取るまで気付けません。
 
 **`GET /api/v1/storage/audit`（読み取りのみ）:** R2 の key と D1 の id は、どちらも asset ID 順に並びます。そこで 1 ページ = 1 つの ID 範囲として、`originals/` と `derivatives/v1/` の list、`assets`、`uploads` を突き合わせます。
 
@@ -378,13 +376,13 @@ D1 と R2 は 1 transaction にできません（[architecture.md](architecture.
 
 - 消す key は `uploads.asset_id` から作るものだけ。その ID の `assets` 行（`ready` でも `purging` でも）があれば消さない
 - finalize は、upload 行がまだ `pending` のときだけ、同じ D1 batch の中で asset を作る（`INSERT ... SELECT ... WHERE status = 'pending'`）。cleanup は行を先に終端状態にするので、検査を終えた finalize が後から asset を作って、消した object を指すことはない
-- `unreferenced_objects`（どの行も指さない object）は消さない。D1 を time travel で戻すと、写真の object が行を失った状態で残る（security.md §10）。original を誤って消す可能性のある自動修復は入れない
-- `missing_original` などの破損も自動では直さない。backup から戻す（operations.md §12）
+- `unreferenced_objects`（どの行も指さない object）は消さない。D1 を time travel で戻すと、写真の object が行を失った状態で残る。original を誤って消す可能性のある自動修復は入れない
+- `missing_original` などの破損も自動では直さない。backup から戻す（[監視と点検](operations.md#12-監視と点検)）
 
 却下した案:
 
-- Cron で定期実行する: 件数を観測できるようになり、手動の実行で足りる。中断した upload は写真の整合性を壊さず、急いで消す理由がない。定期実行が要るのは、owner が実行しないまま R2 の料金や件数が問題になった場合（AGENTS.md §6）
-- `uploads.status` に `abandoned` を足す: `uploads` の CHECK を変えるには table の作り直しが要り、baseline の無名 UNIQUE の扱いが難しい（development.md §7）。`duplicate` + `duplicate_of = NULL` で「asset を作らずに終わった upload」を表す（`src/worker/db/schema.ts` に注記）
+- Cron で定期実行する: 件数を観測できるようになり、手動の実行で足りる。中断した upload は写真の整合性を壊さず、急いで消す理由がない。定期実行が要るのは、owner が実行しないまま R2 の料金や件数が問題になった場合
+- `uploads.status` に `abandoned` を足す: `uploads` の CHECK を変えるには table の作り直しが要り、baseline の無名 UNIQUE の扱いが難しい（[D1 / migration](development.md#7-d1--migration)）。`duplicate` + `duplicate_of = NULL` で「asset を作らずに終わった upload」を表す（`src/worker/db/schema.ts` に注記）
 - R2 lifecycle rule で `originals/` を期限切れにする: 写真の original まで消える
 
 影響: 中断した upload を後から finalize すると、cleanup の前なら従来どおり完了し、cleanup の後なら `410`（片付け途中）または `404`（行が消えた）になります。Web の再試行は、どちらでも新しい reservation からやり直します（[D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する)）。
@@ -447,10 +445,10 @@ original が壊れている・無い写真は名前を挙げて続行し、最�
 
 却下した案:
 
-- 未公開の旧形式への fallback を残す: 公開前なので維持する相手がいない（AGENTS.md §6）
+- 未公開の旧形式への fallback を残す: 公開前なので維持する相手がいない
 - `.strict()` で未知の key を拒否する: 任意 field の追加がすべて v2 になる
 - schema を 1 つにまとめて整合性まで表現する: 読めなくなり、error も「どの規則に違反したか」を失う
-- manifest から `objects` を落とす: asset ID から導けるが、R2 の生 dump から手で戻すときの唯一の手掛かり（operations.md §10）。CLI が読まないので古くなる危険もない
+- manifest から `objects` を落とす: asset ID から導けるが、R2 の生 dump から手で戻すときの唯一の手掛かり（[Restore](operations.md#10-restore)）。CLI が読まないので古くなる危険もない
 
 影響: `pnpm backup export` が書く manifest の内容は変わりません。手で編集した manifest や、他所で生成した JSON は、これまで通らなかった点で拒否されるようになります。`restore-state.json` に `formatVersion` が入るため、この変更の前に始めて中断した restore は `--resume` できません（対象ライブラリを空にしてやり直します）。
 
@@ -470,7 +468,7 @@ storage audit は `missing_derivative`（original は無事だが thumbnail / pr
 
 **derivative の生成は Browser の既存 pipeline をそのまま使う。** `renderDerivatives` で、upload と同じ renderer・同じ長辺・同じ metadata 除去です。Worker に画像処理は入れません。
 
-**URL を発行する条件。** `assets` 行が `ready` で、original が finalize の確認したものと同一（size と、R2 が記録した SHA-256。[D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる)）のときだけ発行します。original が壊れている写真に必要なのは新しい thumbnail ではなく backup なので、`409 REPAIR_SOURCE_UNUSABLE` で断ります（operations.md §12）。
+**URL を発行する条件。** `assets` 行が `ready` で、original が finalize の確認したものと同一（size と、R2 が記録した SHA-256。[D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる)）のときだけ発行します。original が壊れている写真に必要なのは新しい thumbnail ではなく backup なので、`409 REPAIR_SOURCE_UNUSABLE` で断ります（[監視と点検](operations.md#12-監視と点検)）。
 
 **key にある derivative は finalize と同じ検査に size 上限を足して見る（[D-012](decisions.md)）。** 通らない object は削除せず、置き換えます。
 
@@ -491,7 +489,7 @@ storage audit は `missing_derivative`（original は無事だが thumbnail / pr
 
 - upload と同じ `reserve -> PUT -> finalize` を derivative 用に作る: `uploads` に似た行と状態遷移が増え、期限切れの後始末も要る。作り直せるものにその重さは要らない
 - 写真を削除して upload し直す（現状の手順）: 派生画像の欠損を直すために original を消す。直そうとした事故で写真を失う
-- Worker で画像を再生成する（Queue / 別 Worker / 外部 service / `sharp`）: Worker が画像を decode しない方針（architecture.md §2）を崩す。Browser に同じ pipeline が既にある（AGENTS.md §6）
+- Worker で画像を再生成する（Queue / 別 Worker / 外部 service / `sharp`）: Worker が画像を decode しない方針を崩す。Browser に同じ pipeline が既にある
 - CLI に `pnpm storage repair` を足す: Node に canvas が無く、画像 encoder を依存に加えることになる。API は client 非依存なので、後から別 client が同じ endpoint を使える
 
 **使えない derivative を削除してから、空の key へ `If-None-Match: *` で PUT させる案**（当初の実装）も却下しました。削除と PUT の間に隙間ができるためです。
@@ -502,7 +500,7 @@ storage audit は `missing_derivative`（original は無事だが thumbnail / pr
 
 影響: `missing_derivative` の対応が「削除して upload し直す」から、ライブラリ画面の「サムネイルを作り直す」になります。
 
-- R2 CORS の `AllowedMethods` に `GET` が要ります。repair は original を `<img>` ではなく `fetch()` で読むためです。operations.md §6 の rule は元から `GET` を含みますが、`pnpm diagnose` の `r2: CORS` が `GET` も検査するようになります
+- R2 CORS の `AllowedMethods` に `GET` が要ります。repair は original を `<img>` ではなく `fetch()` で読むためです。運用の [R2 CORS](operations.md#6-r2-cors) の規則は元から `GET` を含みますが、`pnpm diagnose` の `r2: CORS` が `GET` も検査するようになります
 - presigned PUT に `If-Match` を使うのはこの経路が初めてです（upload は `If-None-Match: *` だけ）
 
 残るリスク:
@@ -542,7 +540,7 @@ INSERT INTO shares SELECT ... FROM shares WHERE id = ? AND revoked_at IS NULL AN
 
 - 再発行の前に revoked を JS で確認するだけにする: 読みと書きの間が開いたままで、UI が revoke 済みの share に再発行を出さないのと同じ強さしかない
 - torn な export を、後に現れた asset を採って重複解消する: asset ID は UUID v4 なので「後のページ = 新しい写真」ではない。生きている asset の方を黙って落としうる
-- export の一貫した snapshot を作る（版管理・スナップショット表・長い transaction）: ライブラリの変化中に完全な snapshot を要求しない方針（AGENTS.md §6）に反し、得られるのは「やり直せば済む」ものの自動化だけ
+- export の一貫した snapshot を作る（版管理・スナップショット表・長い transaction）: ライブラリの変化中に完全な snapshot を要求しない方針に反し、得られるのは「やり直せば済む」ものの自動化だけ
 
 影響:
 
@@ -552,6 +550,6 @@ INSERT INTO shares SELECT ... FROM shares WHERE id = ? AND revoked_at IS NULL AN
 
 残るリスク:
 
-- revoke / 完全削除の**直前**に発行済みの presigned URL は、残り TTL の間だけ有効です（share は最大 300 秒。[security.md](security.md) §5・§6）。これは設計上の既知 risk で、この決定は変えません
+- revoke / 完全削除の**直前**に発行済みの presigned URL は、残り TTL の間だけ有効です（share は最大 300 秒）。これは設計上の既知 risk で、この決定は変えません
 - 同じ share に対する再発行が 2 つ同時に成立すると、有効な share が 2 つできます。どちらも古い share を revoke するため、古い link は確実に死にます。owner の share 一覧に両方出るので、隠れた link にはなりません
 - export のやり直しは owner の操作です。自動では再試行しません

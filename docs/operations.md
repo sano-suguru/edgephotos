@@ -1,8 +1,8 @@
 # 運用・デプロイ・復元
 
-この文書は、EdgePhotos v1 のセットアップ、更新、backup / restore、uninstall の運用契約を定義します。
+EdgePhotos v1 のセットアップ、更新、backup / restore、アンインストールの手順をまとめます。
 
-どの環境で何を確認済みかは [verification.md](verification.md) に記録します。この文書には書きません。
+どの環境で何を確認済みかは [verification.md](verification.md) にあります。この文書には書きません。
 
 ## 1. セットアップの方針
 
@@ -38,7 +38,7 @@ pnpm wrangler deploy --config dist/edgephotos/wrangler.json
 
 R2 bucket は public access（r2.dev / custom domain）を有効にしません。
 
-初回の deploy は、deploy の成功で終わりにしません。§7 の `pnpm diagnose` と、Browser での写真 1 枚の upload までを一続きの作業として行います。
+初回の deploy は、deploy の成功で終わりにしません。[セットアップの確認](#7-セットアップの確認) の `pnpm diagnose` と、Browser での写真 1 枚の upload までを一続きの作業として行います。
 
 migration は forward-only です。通常の test command から remote migration は実行しません。適用は `wrangler d1 migrations apply` だけで行い、`drizzle-kit push` / `migrate` は使いません。`migrations/meta/` は drizzle-kit 用の snapshot で、wrangler は `.sql` だけを適用します。
 
@@ -180,17 +180,17 @@ production は `--env` を付けません。確認する内容と、失敗時に
 | `worker: secrets` | `wrangler secret put` の漏れ（名前だけ確認。値の形式は下の probe で分かる） |
 | `d1: migrations` | `wrangler d1 migrations apply --remote` の実行漏れ |
 | `r2: r2.dev URL` / `custom domains` | bucket の公開設定（どちらも無効が正） |
-| `r2: CORS` | Browser と同じ preflight（`PUT` + 3 header）を `EDGEPHOTOS_URL` の origin で送る。AllowedOrigins / AllowedHeaders と、`GET`（derivative の作り直しに必要。§6） |
+| `r2: CORS` | bucket の CORS 規則。AllowedOrigins が `EDGEPHOTOS_URL` の origin と一致しない、AllowedHeaders または `GET` が足りない |
 | `access: private path` | 匿名 request が Access login へ redirect されない（Access application の hostname） |
 | `access: share bypass + worker config` | `/share` の Bypass application。`503` なら secret の欠落か形式違い（`ACCESS_TEAM_DOMAIN` は host のみ、`R2_ACCOUNT_ID` は 32 桁 hex） |
 | `owner API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `OWNER_EMAIL` |
 | `worker: APP_ORIGIN` | `APP_ORIGIN` が `EDGEPHOTOS_URL` の origin と一致しない（scheme、host、custom domain 追加後の更新漏れ） |
 | `worker: D1 schema` | Worker が見ている D1 の最新 migration と checkout の不一致（別 DB を bind している、migration 未適用） |
 | `r2: presigned GET` | Worker が署名した URL を R2 が拒否（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`）。library が空なら SKIP |
-| `library: interrupted uploads`（WARN） | finalize されないまま期限（600 秒）を過ぎた upload がある。設定の誤りではない。1 日たったら `pnpm storage cleanup --apply`（またはライブラリ画面の「ストレージの点検」）で片付ける（§12） |
+| `library: interrupted uploads`（WARN） | finalize されないまま期限（600 秒）を過ぎた upload がある。設定の誤りではない。1 日たったら `pnpm storage cleanup --apply`（またはライブラリ画面の「ストレージの点検」）で片付ける（[監視と点検](#12-監視と点検)） |
 | `library: unfinished deletes`（WARN） | 完全削除が途中で止まった写真がある。ライブラリ画面の「削除を再開」で完了させる |
 
-`worker: APP_ORIGIN` が不一致だと、Browser からの書き込みが `403 ORIGIN_NOT_ALLOWED` になり、共有リンクも別の origin を指します。確認には中身が空の album 作成を送ります。Worker は body を検証する前に Origin を検査するため、どちらの場合も何も作られません。
+`worker: APP_ORIGIN` が不一致だと、Browser からの書き込みが `403 ORIGIN_NOT_ALLOWED` になり、共有リンクも別の origin を指します。`EDGEPHOTOS_URL` の origin に合わせてください。
 
 Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠落・不正な設定の**名前**が `{"problem":"misconfigured","settings":[...]}` として出ます（値は出しません）。
 
@@ -247,10 +247,10 @@ migration は旧 Worker でも動く形（列・table の追加）で書きま�
 - restore は D1 をその場で上書きする破壊的な操作です
 - 戻せるのは直近 30 日以内（Workers Free では 7 日）です
 - bookmark 以降の D1 の書き込み（upload の登録、album 操作）は失われます
-- その間に upload された R2 object は D1 から参照されないまま残ります。自動では消しません（[security.md](security.md) §10 の方針どおり）
+- その間に upload された R2 object は D1 から参照されないまま残ります。自動では消しません（[削除](security.md#10-削除) の方針どおり）
 - 失った登録は、直近の backup と比較して upload し直します
 
-time travel の期限を過ぎた、または D1 / R2 自体を失った場合は、§10 の restore（新しい空環境へ）で戻します。
+time travel の期限を過ぎた、または D1 / R2 自体を失った場合は、[Restore](#10-restore)（新しい空環境へ）で戻します。
 
 ### 依存関係の更新
 
@@ -266,7 +266,7 @@ EdgePhotos が唯一のバックアップであるとは説明しません。
 - `pnpm backup export <dir>`: manifest に加え、original と derivative を presigned URL 経由で取得し、各 original の SHA-256 を検証して保存する
 - `pnpm backup check <dir>`: backup ディレクトリだけを読み、manifest のすべての original の SHA-256 と derivative の有無を確かめる（network 不要）
 
-`manifest.json` は format v1 の contract です（[architecture.md](architecture.md) §9、[D-025](decisions.md)）。
+`manifest.json` は format v1 に従います（[Export と restore](architecture.md#9-export-と-restore)、[D-025](decisions.md)）。
 
 `check` / `restore` / `verify` は読み込み時に検証します。JSON として壊れている・contract に合わない・整合しない manifest は、ライブラリへ最初の request を送る前に、不正な field とその理由を並べて拒否します。
 
@@ -291,7 +291,7 @@ size が同じまま中身が壊れたファイル（ディスクの劣化など
 
 manifest はページごとに順に読むので、ある一瞬の完全な写しではありません。export の最中に favorite・trash・album を変更すると、変更前と変更後が混ざることがあります（知らない写真を指す membership は捨てます）。backup の間は、まとまった整理操作をしないでください。
 
-保存されている original が壊れている、または無い写真があると、`export` はその写真を名前で挙げて残りを続け、最後に失敗（exit 1）で終わります。原因は `pnpm storage audit --deep` で確認します（§12）。
+保存されている original が壊れている、または無い写真があると、`export` はその写真を名前で挙げて残りを続け、最後に失敗（exit 1）で終わります。原因は `pnpm storage audit --deep` で確認します（[監視と点検](#12-監視と点検)）。
 
 含めないもの: R2 credential、JWT、share secret、presigned URL。Access token は API request の header にだけ使い、R2 へは送らず、保存もしません。
 
@@ -420,7 +420,7 @@ cleanup が触れないもの: 写真（`assets` 行のある ID の object）�
 
 ## 13. R2 credential の更新と漏洩対応
 
-R2 API token（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）は presigned URL の署名にだけ使います。対象 bucket だけの Object Read & Write に限定します（§3）。
+R2 API token（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）は presigned URL の署名にだけ使います。対象 bucket だけの Object Read & Write に限定します（[利用者が設定する値](#3-利用者が設定する値)）。
 
 定期更新、または漏洩の疑いがある場合:
 
@@ -429,13 +429,13 @@ R2 API token（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）は presigned URL �
 3. `pnpm wrangler secret put R2_ACCESS_KEY_ID [--env <env>]`、同じく `R2_SECRET_ACCESS_KEY`
 4. `pnpm diagnose` で `r2: presigned GET` が PASS になることを確認する（library が空なら写真を 1 枚 upload）
 
-切り替えの間に upload 中だった写真は、PUT が `403` で失敗します。その写真を選び直せば upload されます。途中まで PUT された object は finalize されず、未完了の upload として残ります（§12 の cleanup で片付く）。
+切り替えの間に upload 中だった写真は、PUT が `403` で失敗します。その写真を選び直せば upload されます。途中まで PUT された object は finalize されず、未完了の upload として残ります（[監視と点検](#12-監視と点検) の cleanup で片付く）。
 
 漏洩時に確認すること:
 
 - R2 の古い token で何ができたか: 対象 bucket の読み書き。original を含むすべての写真を読めた可能性があります。上書きは reserve ごとの key と `If-None-Match` に守られません（token を持つ者は条件なしで PUT できる）
 - original の改ざんを疑う場合は `pnpm backup verify <直近の backup>` を実行します。R2 から original を取り直し、SHA-256 を照合します
-- Access の service token や Cloudflare account の API token が漏れた場合は、この節ではなく Cloudflare 側で revoke します。EdgePhotos は owner の email を持たない identity を受け付けません（[security.md](security.md) §3）
+- Access の service token や Cloudflare account の API token が漏れた場合は、この節ではなく Cloudflare 側で revoke します。EdgePhotos は owner の email を持たない identity を受け付けません（[private API の認証と認可](security.md#3-private-api-の認証と認可)）
 
 share secret が漏れた場合は、その share を revoke するか再発行します（`/api/v1/shares/{id}/revoke`、`/regenerate`）。
 
@@ -443,7 +443,7 @@ share secret が漏れた場合は、その share を revoke するか再発行�
 
 年に 1 回程度、または大きな変更の前に、restore できることを確かめます。
 
-手順は §2〜§4 で空の環境（例: `restore-test`）を作り、§10 の restore を実行するだけです。2026-09-16 の drill の記録は [verification.md](verification.md) にあります。
+手順は [リソース作成とデプロイ](#2-リソース作成とデプロイ) から [Cloudflare Access](#4-cloudflare-access) までで空の環境（例: `restore-test`）を作り、[Restore](#10-restore) を実行するだけです。2026-09-16 の drill の記録は [verification.md](verification.md) にあります。
 
 drill で見るもの:
 

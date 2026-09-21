@@ -16,9 +16,9 @@ EdgePhotos は、利用者自身の Cloudflare アカウントへデプロイす
 
 EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残してください。
 
-定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[運用](docs/operations.md) §9）。
+定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[Backup と export](docs/operations.md#9-backup-と-export)）。
 
-保存内容と記録の食い違いは、ライブラリ画面の「ストレージの点検」または `pnpm storage audit` で確認できます（[運用](docs/operations.md) §12）。
+保存内容と記録の食い違いは、ライブラリ画面の「ストレージの点検」または `pnpm storage audit` で確認できます（[監視と点検](docs/operations.md#12-監視と点検)）。
 
 ## ローカルで試す
 

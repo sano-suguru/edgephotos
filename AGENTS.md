@@ -1,6 +1,6 @@
 # AGENTS.md
 
-このファイルは、EdgePhotos を変更する AI エージェントおよび開発支援ツール向けのガードレールです。
+EdgePhotos を変更する AI エージェントと開発支援ツール向けのガードレールです。
 
 設計理由の正本ではありません。作業中に破ってはいけない条件と、変更時に確認すべき文書だけを記載します。
 
@@ -45,9 +45,9 @@
 
 ## 4. 認証の境界
 
-Cloudflare Access 固有の token / assertion / Cookie を application logic へ直接持ち込まないでください。
+Cloudflare Access 固有の token / assertion / Cookie を、認証後の処理へ直接持ち込まないでください。
 
-HTTP 層で検証し、正規化した principal を application logic へ渡します。具体的な Principal contract は `docs/architecture.md` にあります。文書とコードが食い違う場合は、実装の型定義を優先します。
+HTTP 層で検証し、正規化した principal だけを渡します。`AppPrincipal` の定義はアーキテクチャの [認証境界](docs/architecture.md#3-認証境界) にあります。文書とコードが食い違う場合は、実装の型定義を優先します。
 
 v1 は 1 owner です。Access を通過した全員を owner と扱わないでください。
 
@@ -114,7 +114,7 @@ D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>`
 
 UI の余白変更などで Decision Log を追加しないでください。
 
-文章と表記の規約は `docs/development.md` §12 にあります。
+文章と表記の規約は開発ガイドの [ドキュメントの規約](docs/development.md#12-ドキュメントの規約) にあります。
 
 ## 8. テストの厚さはリスクで決める
 
