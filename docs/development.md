@@ -173,7 +173,7 @@ pnpm db:check && pnpm test
 ```
 
 - migration は forward-only。適用済みの `.sql` を編集・改名しない
-- 適用されるのは commit した `migrations/*.sql`。`schema.ts` との一致は `pnpm db:check`（snapshot との差分）と `tests/integration/migrations.test.ts`（適用後の D1 との差分）で検証する
+- 実際に適用されるのは commit した `migrations/*.sql` で、`schema.ts` と食い違う場合も `.sql` が優先される。一致は `pnpm db:check`（snapshot との差分）と `tests/integration/migrations.test.ts`（適用後の D1 との差分）で検証する
 - 既存データがある前提で migration を書く
 - `drizzle-kit push` / `drizzle-kit migrate` は使わない。適用は `wrangler d1 migrations apply` だけ
 - production migration を通常の test command から実行しない
@@ -237,7 +237,7 @@ auth
 
 ### Browser E2E（Playwright）
 
-workerd の test では見えない、Browser 固有の部分だけを対象にします。Server の挙動（認可、finalize の検査、share の検証など）は integration test が担当し、Browser E2E では再検査しません。
+workerd の test では見えない、Browser 固有の部分だけを対象にします。Server の挙動（認可、finalize の検査、share の検証など）は integration test が固定し、Browser E2E では再検査しません。挙動の判断が分かれた場合は integration test を優先します。
 
 | spec | 確認すること | project |
 | --- | --- | --- |
@@ -344,7 +344,7 @@ Remote の破壊操作を通常の test command に含めません。CI は Clou
 
 ### どこに何を書くか
 
-API の詳細は OpenAPI、DB の詳細は migration（と一致を検証した `src/worker/db/schema.ts`）、動作の細部は test を参照先とします。
+文書と実装が食い違う場合の優先順位を決めておきます。API 契約は `@hono/zod-openapi` の route schema、DB schema は適用済みの `migrations/*.sql`、`AppPrincipal` の具体的な型は実装の型定義、動作の細部は test を優先します。
 
 実環境や Browser で確かめた結果は [verification.md](verification.md)、性能と memory の数値は [benchmarks.md](benchmarks.md) に書きます。operations / decisions / roadmap / README には検証の詳しい経過や測定値を重複して書かず、状態や判断に必要な短い要約とリンクだけを置きます。
 
@@ -353,7 +353,7 @@ API の詳細は OpenAPI、DB の詳細は migration（と一致を検証した 
 ### 文章
 
 - 本文は日本語、path と code identifier は英語
-- 1 文 1 主張。100 字を超えたら分ける
+- 1 文 1 主張。長い文は分割を検討する。目安は 100 字だが、条件と結果を 1 文でつないだ方が明確ならその限りではない
 - 括弧の中に句点を 2 つ以上入れない。入るなら本文へ出す
 - 箇条書きの 1 項目は 1〜2 文。3 文以上になるなら小見出しと段落にする
 - 節番号は `## N. 見出し` の 1 段だけ。`## N.1` を作らず、独立した節へ上げる
@@ -362,7 +362,7 @@ API の詳細は OpenAPI、DB の詳細は migration（と一致を検証した 
 
 - 見出しは日本語を基本とする。固有名詞はラテン文字のまま（例: `## 7. D1 / migration`）
 - ただし roadmap の段階名（Foundation、Post-merge verification、Release polish など）は原綴りのままとする。他文書から名前で参照する固有の呼称のため
-- 層・実行主体を指す語は大文字で始める: Client、Server、Browser、Worker、Native client
+- 層・実行主体を指す語は、原則として大文字で始める: Client、Server、Browser、Worker、Native client。既存の文に合わせる程度でよく、統一のためだけの変更は作らない
 - 製品名・固有名詞は原綴り。Cloudflare、Access、R2、D1、Preact、Hono、Vite、Drizzle、Miniflare、Playwright、Chromium、WebKit、Safari など
 - それ以外の一般名詞は小文字: upload、share、asset、original、derivative、thumbnail、preview、manifest、token、bucket
 - 具体物としての server は小文字（`vite dev` の dev server、auth server）

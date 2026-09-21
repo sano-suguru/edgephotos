@@ -47,7 +47,7 @@
 
 Cloudflare Access 固有の token / assertion / Cookie を application logic へ直接持ち込まないでください。
 
-HTTP 層で検証し、正規化した principal を application logic へ渡します。具体的な Principal contract は `docs/architecture.md`、実装後はコードを参照先とします。
+HTTP 層で検証し、正規化した principal を application logic へ渡します。具体的な Principal contract は `docs/architecture.md` にあります。文書とコードが食い違う場合は、実装の型定義を優先します。
 
 v1 は 1 owner です。Access を通過した全員を owner と扱わないでください。
 
@@ -141,6 +141,6 @@ UI の余白変更などで Decision Log を追加しないでください。
 
 ## 10. 開発プロセス
 
-変更の進め方は `docs/development.md` を参照先とします。
+変更の進め方は `docs/development.md` に従います。この文書と食い違う場合は `docs/development.md` を優先します。
 
 機能スコープは小さくしてよい一方、重要な認証・データ・API 境界を「後で置き換える前提の仮実装」にしないでください。

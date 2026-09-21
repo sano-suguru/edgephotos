@@ -108,7 +108,7 @@ SSR、RSC、Server Actions を中心要件にせず、vinext や Astro をアプ
 
 **状態:** 採用（SHA-256 の扱いは [D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で更新）
 
-`assets.sha256` を client-asserted content identity とする判断は、現在の契約ではありません。[D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で置き換えられています。現在の SHA-256 の契約は D-018 にあります。
+`assets.sha256` を client-asserted content identity とする判断は、現在の契約ではありません。[D-018](#d-018-original-の-sha-256-を-r2-に-upload-時に検証させる) で置き換えられています。現在の SHA-256 の契約は D-018 が定めます。
 
 finalize の確認項目と、Worker が original 全体を hash しない方針は現在も有効です。
 
@@ -313,7 +313,7 @@ workerd の test（`pnpm test`）は Server の契約を検証しますが、Bro
 `@playwright/test` を devDependency に加え、少数の spec（`e2e/`）だけを置きます。
 
 - 対象: canvas での derivative 生成と finalize の成立、file input、共有ページ、Base UI の keyboard / focus、phone 幅の layout と tap
-- 対象外: Server の認可・検査・share の検証。integration test が定義元で、Browser では再検査しない
+- 対象外: Server の認可・検査・share の検証。これらは integration test が固定し、Browser では再検査しない
 - 実行環境: `vite dev`（D-016 の Access / presigned URL 模擬）を、使い捨ての local D1 / R2（`.wrangler/e2e`）で起動する。remote には触れない
 - Browser: Chromium（desktop）と WebKit（iPhone 13 相当）。WebKit は iOS Safari の代わりにはならないが、D-020 の不具合は WebKit で再現した
 - `pnpm check` には含めず、CI の別 job で実行する。bundle と Worker には影響しない

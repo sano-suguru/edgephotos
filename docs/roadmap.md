@@ -1,18 +1,20 @@
 # ロードマップ
 
-この文書は、v1 を完成させるための実装順序と、各段階の到達点を管理します。
+この文書は、これから行う作業だけを管理します。段階ごとに、何をもって到達したとみなすかを書きます。
 
-完了した段階の記録は [changelog.md](changelog.md) にあります。設計の理由は [decisions.md](decisions.md)、不変条件は [architecture.md](architecture.md) と [security.md](security.md) にあります。
+完了した段階は [changelog.md](changelog.md) にあります。設計の理由は [decisions.md](decisions.md)、不変条件は [architecture.md](architecture.md) と [security.md](security.md) にあります。
 
-状態の凡例（2026-09-17 時点）:
+状態の凡例（2026-09-18 時点）:
 
 - ✅ 実装・自動テスト済み
 - 🟡 実装済みだが一部未検証
 - ⬜ 未着手
 
+完了した段階に ✅ だけが並ぶようになったら、その段階を changelog.md へ移します。
+
 ## Foundation
 
-以後の feature を載せる共通基盤を作ります。
+以後の feature を載せる共通基盤です。残っているのは production 環境と、UI primitive の実機確認です。
 
 到達点:
 
@@ -24,49 +26,6 @@
 - 🟡 shadcn/ui + Base UI の主要 component が Preact production build で成立する（Dialog / Menu の keyboard・focus と、phone 幅の tap は Browser E2E で自動化済み。Select は未使用、touch の実機は未確認）
 - ✅ `/share/*` の公開経路と private path の Access 保護を実環境で検証できる
 - ✅ R2 presigned PUT / GET と CORS を実環境で検証できる
-
-## Feature 1: Upload + Timeline
-
-到達点:
-
-- ✅ owner が写真を upload できる
-- ✅ upload 完了後に timeline へ表示される
-- ✅ original / thumbnail / preview が想定した経路で保存・取得できる（実 R2 で確認済み。PUT / GET とも Browser から R2 へ直行し、Worker は本体を中継しない）
-- ✅ refresh 後も状態が一貫する
-
-## Feature 2: Favorite + Albums
-
-到達点:
-
-- ✅ favorite を切り替えられる
-- ✅ album を作成・変更・削除できる
-- ✅ asset を album へ追加・削除できる
-
-## Feature 3: Sharing
-
-到達点:
-
-- ✅ album の共有リンクを発行できる
-- ✅ expiry、revoke、regenerate が機能する
-- ✅ guest は許可された thumbnail / preview のみ閲覧できる
-
-## Feature 4: Delete + Restore
-
-到達点:
-
-- ✅ asset を trash へ移動・復元できる
-- ✅ permanent delete を明示操作として実行できる
-- ✅ 中断した purge を再開できる
-
-## Feature 5: Export + Restore
-
-到達点:
-
-- ✅ metadata と original manifest を export できる
-- ✅ 別の空環境へ restore できる（local の別 D1 / R2 で自動テスト済み、実環境でも `edgephotos-restore-test` へ実測済み）
-- ✅ restore 後に asset 数、hash、album 関係を検証できる
-
-この段階を外部 alpha の前提とします。
 
 ## Remote integration verification
 
