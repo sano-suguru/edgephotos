@@ -169,9 +169,11 @@ Playwright の Chromium で、API を test 側が答える 5,000 枚（25 か月
 | 末尾まで読み込む（5,000 枚） | 5,000 | 15,128 |
 | 年月から開く（`?m=2022-05`） | 120 | 419 |
 
-`performance.memory` はどの状態でも 10.0MB のままで、差が見えませんでした（粒度の問題で、この測定では使えません）。末尾まで読み込んだ状態から画面中央へ scroll しても 1 フレーム内でした。
+`performance.memory` はどの状態でも 10.0MB のままでした。この API では差が見えないので、memory の根拠には使えません。
 
-同じ画面を実機の memory で見る項目は [roadmap.md](roadmap.md) の Post-merge verification にあります。
+memory の目安になるのは、上の「Browser（10,000 件、`vite dev`）」の 64 MB / 30,487 node です。こちらは 22KB の JPEG を実際に表示した値です。
+
+同じ画面を実機で見る項目は [roadmap.md](roadmap.md) の Post-merge verification にあります。
 
 ## Browser（10,000 件、`vite dev`）
 

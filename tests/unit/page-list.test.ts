@@ -165,6 +165,23 @@ describe('paged list starting at a month', () => {
     expect(list.topCursor.value).toBeNull()
   })
 
+  it('keeps the list and stops reading up when the page above turns out to be empty', async () => {
+    const { calls, load } = manualLoader()
+    const list = createPageList(load, () => 'failed')
+    // The newest month: the jump had a cursor, so the server reports a position above it without knowing
+    // whether a photo is there.
+    const jump = list.loadPage(true, 'newest-month')
+    calls[0].resolve({ items: ['m1'], nextCursor: 'c1', prevCursor: 'above' })
+    await jump
+
+    const up = list.loadNewer()
+    calls[1].resolve({ items: [], nextCursor: 'c1', prevCursor: null })
+    await up
+    expect(list.items.value).toEqual(['m1'])
+    expect(list.topCursor.value).toBeNull()
+    expect(list.error.value).toBeNull()
+  })
+
   it('keeps the list when a newer page fails and reports it on that side', async () => {
     const { calls, load } = manualLoader()
     const list = createPageList(load, () => 'failed')

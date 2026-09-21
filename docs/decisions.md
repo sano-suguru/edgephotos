@@ -755,6 +755,8 @@ jump した位置より新しい写真を読む方法が必要です。`AssetSum
 
 cursor が null のときだけ「その方向に写真が無い」を意味します。request が来た側の cursor は、その先を読んでいないので null にしません。渡すと空の page が返ることがあります。これを厳密にするには、page ごとにもう 1 回 query することになるため、意味の方を弱く定義しています。
 
+そのため、最も新しい月へ jump したときも「これより新しい写真」が出ます。押すと空の page が返り、button は消えます。1 行の存在確認を足せば消せますが、page ごとに D1 への往復が 1 回増えます。実際に分かりにくいと分かった時点で入れます。
+
 上方向は IntersectionObserver ではなく button です。上へ足すと、読んでいた写真の位置がずれます。押したときだけ動く方が分かりやすく、押した結果として新しい写真が画面に出ます。
 
 読んでいた位置を保つ案は採りません。足した分の高さが要りますが、section は `content-visibility: auto` なので、render されるまで高さは `contain-intrinsic-size` の見積もりです。実測では、押した直後に合わせても、その section が render された時点で約 1,200px ずれました（Chromium）。Safari には `overflow-anchor` も無いため、どちらの方法でも browser 任せにはできません。
@@ -771,11 +773,13 @@ cursor が null のときだけ「その方向に写真が無い」を意味し�
 
 grid は `content-visibility: auto` で画面外の section を render しません。Chromium の実測では、年月から開いた画面は 120 tile・419 node です。末尾まで読み込めば 5,000 tile・15,128 node になりますが、年月へ直接移動できるようになったので、古い写真を見るために末尾まで読む必要はありません（[benchmarks.md](benchmarks.md)）。
 
-この測定の thumbnail は 1x1 の画像なので、decode 済み画像の memory は含みません。実機の memory は [roadmap.md](roadmap.md) の Post-merge verification で見ます。そこで問題が出たときに virtualization を候補に入れます。
+この測定の thumbnail は 1x1 の画像なので、decode 済み画像の memory は含みません。実際に画像を表示した値は、10,000 件を末尾まで読み込んだ Chromium の 64 MB / 30,487 node です（[benchmarks.md](benchmarks.md)）。
+
+つまり「全部 scroll すれば枚数の分だけ node を持つ」ことは変わっていません。変えたのは、古い写真を見るために全部 scroll する必要をなくしたことです。実機の memory は [roadmap.md](roadmap.md) の Post-merge verification で見ます。そこで問題が出たときに virtualization を候補に入れます。
 
 ### 範囲外
 
-full text search、AI / semantic search、tag、場所、uploader での絞り込み、member ごとの timeline は作りません。navigation は library 全体に対するもので、household の 2 人には同じ年月構成が見えます（[D-028](#d-028-許可した複数の-email-が-1-つの-library-を対等に共同利用する)）。
+full text search、AI / semantic search、tag、場所、uploader での絞り込み、member ごとの timeline は作りません。viewer の ←/→ は読み込み済みの範囲のままで、jump した先頭より新しい写真へは進みません（grid の button で読んでから開きます）。navigation は library 全体に対するもので、household の 2 人には同じ年月構成が見えます（[D-028](#d-028-許可した複数の-email-が-1-つの-library-を対等に共同利用する)）。
 
 ### 再検討する条件
 

@@ -44,6 +44,7 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 
 - ⬜ 普段の入力経路でスマートフォン写真を数枚 upload し、timeline の orientation と preview を確認する
 - ⬜ iPhone Safari の実機で、取り込みの memory と lifecycle を確認する（確認項目は [verification.md](verification.md) の「未検証」）
+- ⬜ 数千枚の timeline を年月から開き、末尾まで scroll したときの memory と scroll の滑らかさを iPhone / Android で確認する（local の測定は [benchmarks.md](benchmarks.md)。virtualization の要否はこの結果で決める。[D-031](decisions.md)）
 - ⬜ Android の実機で、同じ項目のうち該当するものを確認する
 - ✅ 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
 - ✅ remote で backup export → verify → 別の空環境への restore を 1 回成功させる

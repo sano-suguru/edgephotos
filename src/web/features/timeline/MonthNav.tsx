@@ -40,18 +40,27 @@ export function MonthNav() {
 
   return (
     <>
-      {/* The label says where the timeline is; the name stays the same so it is still the same control. */}
+      {/* The label says where the timeline is, and the name keeps the visible text so it can be spoken. */}
       <Button
         variant="secondary"
         size="sm"
         pill
-        aria-label="年月で移動"
+        aria-label={selected ? `年月で移動（${formatMonthKey(selected)}）` : '年月で移動'}
         onClick={() => (open.value = true)}
         disabled={!list?.length}
       >
         <Calendar class="size-4" />
         {selected ? formatMonthKey(selected) : '年月で移動'}
       </Button>
+      {/* Without the list the button cannot be opened, so the failure and the retry belong next to it. */}
+      {monthsError.value && !list?.length && (
+        <p class="flex items-center gap-1 text-sm text-muted-foreground">
+          年月を読み込めませんでした。
+          <Button variant="ghost" size="sm" onClick={() => void loadMonths()}>
+            再試行
+          </Button>
+        </p>
+      )}
       <Dialog
         open={open.value}
         onOpenChange={(v) => (open.value = v)}
