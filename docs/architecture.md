@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-この文書は、EdgePhotos v1 で採用するシステム構造、責務分担、外部との境界を定義します。
+EdgePhotos v1 の構造と、どの層が何を担当するかをまとめます。
 
 技術選定の理由や却下した案は [decisions.md](decisions.md) にあります。
 
@@ -58,16 +58,16 @@ Client が担当しないもの:
 - object key の決定
 - share 対象 asset の最終判定
 
-将来 Native client を追加する場合も、「Client が前処理し、Server が保存契約と認可を検証する」という境界を維持します。
+将来 Native client を追加する場合も分担は同じです。画像の前処理は Client で行い、保存の可否と認可は Server が判断します。
 
 ### Worker / Hono
 
-Worker は control plane を担当します。
+Worker が担当するのは次の範囲です。
 
 - Access assertion の検証
 - `AppPrincipal` への正規化
-- owner authorization
-- API request validation
+- owner かどうかの確認
+- リクエストの検証
 - D1 への状態保存
 - R2 object の存在・属性確認
 - presigned URL 発行
@@ -107,17 +107,17 @@ original と再生成可能な derivative を物理的にも分離します。
 
 ## 3. 認証境界
 
-Web と将来 Native で認証の入口が変わっても、application logic へ渡す identity は統一します。
+Web と将来 Native で認証方式が変わっても、認証後の処理へ渡す利用者情報は同じ形にします。
 
-Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証します。検証した identity は、application-level の `AppPrincipal` に正規化します。
+Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証します。検証した結果は `AppPrincipal` という 1 つの型にまとめます。
 
-application logic は `AppPrincipal` だけを受け取り、Access の具体的な claim structure に依存しません。こうすることで、認証の入口の変更を application logic から分離できます。
+認証後の処理は `AppPrincipal` だけを受け取り、Access の claim 形式には依存しません。認証方式を変えても、その後の処理は変えずに済みます。
 
-`AppPrincipal` のフィールドは [`src/worker/auth/access.ts`](../src/worker/auth/access.ts) の型定義が定義します。
+`AppPrincipal` の定義は [`src/worker/auth/access.ts`](../src/worker/auth/access.ts) を正とします。
 
-v1 は 1 owner です。Access を通過した全ユーザーを owner とみなしません。設定された owner identity と一致する principal だけが private API を利用できます。
+v1 は 1 owner です。Access を通過した全員を owner とはみなしません。設定された owner と一致する principal だけが private API を使えます。
 
-将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とし、application service が Native 固有 token を直接解釈しない構造を維持します。
+将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とします。Native 固有の token を Worker の中で直接解釈しない形は変えません。
 
 ## 4. API 境界
 
@@ -128,9 +128,9 @@ API は Web の画面構造ではなく、写真ライブラリの操作を表�
 /share/api/v1/*  public share capability API
 ```
 
-HTTP/JSON を使用します。request / response / error schema は `@hono/zod-openapi` の route schema が定義し、そこから runtime validation と OpenAPI を生成します。
+HTTP/JSON を使います。request / response / error は `@hono/zod-openapi` の route schema で定義し、そこから実行時の検証と OpenAPI を生成します。
 
-Web も将来の Native client も、同じ application API の consumer とします。
+Web も将来の Native client も、同じ API を使います。
 
 エラー形式は以下を基本とします。
 
@@ -419,9 +419,9 @@ restore の再開に使う `restore-state.json` も同様に検証します（�
 
 返すもの: original・derivative の欠落、size の違い、（`deep`）R2 が記録した SHA-256 との違い、止まった削除、中断した upload、重複の残り、どの行も指さない object、layout 外の key。何も修復しません。
 
-書き込みは 2 つに限ります。`POST /api/v1/storage/cleanup` は中断した upload とその object だけを扱います（[D-023](decisions.md)）。`POST /api/v1/assets/{assetId}/derivatives/repair` は欠けた derivative だけを作り直します（§6、[D-026](decisions.md)）。どちらも original を削除・変更しません。
+書き込みは 2 つに限ります。`POST /api/v1/storage/cleanup` は中断した upload とその object だけを扱います（[D-023](decisions.md)）。`POST /api/v1/assets/{assetId}/derivatives/repair` は欠けた derivative だけを作り直します（[保存する画像の契約](#6-保存する画像の契約)、[D-026](decisions.md)）。どちらも original を削除・変更しません。
 
-`missing_original` などの破損は自動では直さず、backup から戻します（operations.md §12）。
+`missing_original` などの破損は自動では直さず、backup から戻します（[監視と点検](operations.md#12-監視と点検)）。
 
 ## 11. Access の経路分け
 

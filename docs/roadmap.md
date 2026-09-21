@@ -1,6 +1,6 @@
 # ロードマップ
 
-この文書は、これから行う作業だけを管理します。段階ごとに、何をもって到達したとみなすかを書きます。
+これから行う作業だけを管理します。段階ごとに、何ができたら終わりとみなすかを書きます。
 
 完了した段階は [changelog.md](changelog.md) にあります。設計の理由は [decisions.md](decisions.md)、不変条件は [architecture.md](architecture.md) と [security.md](security.md) にあります。
 
@@ -58,14 +58,14 @@ v1 の完成条件には含めません。
 
 finalize されなかった upload の行と object は、owner が storage cleanup を実行するまで残ります（[D-023](decisions.md)）。写真の整合性には影響しません。
 
-定期実行は入れていません。次のどちらかが続く場合に、Cron も候補に含めて検討します（[AGENTS.md](../AGENTS.md) §6）。
+定期実行は入れていません。次のどちらかが続く場合に、Cron も候補に含めて検討します（[将来要件を先回りしない](../AGENTS.md#6-将来要件を先回りしない)）。
 
 - cleanup を実行しても `library: interrupted uploads` の件数がすぐに増える
 - R2 使用量が、export manifest の `originalSize` 合計を大きく上回り、storage audit に出ない差がある
 
 ### original の破損の修復は手作業
 
-storage audit は original / derivative の欠落や違いを見つけますが、original は直しません。backup の original から upload し直す手順は [operations.md](operations.md) §12 にあります。
+storage audit は original / derivative の欠落や違いを見つけますが、original は直しません。backup の original から upload し直す手順は運用の [監視と点検](operations.md#12-監視と点検) にあります。
 
 欠けた derivative だけは、original に触れずに作り直せます（[D-026](decisions.md)）。
 

@@ -1,6 +1,6 @@
 # 開発ガイド
 
-この文書は、EdgePhotos のコードをどこに置き、どう検証し、どう変更するかを定義します。
+コードをどこに置き、どう検証し、どう変更するかをまとめます。
 
 ## 1. 変更の進め方
 
@@ -352,12 +352,10 @@ Remote の破壊操作を通常の test command に含めません。CI は Clou
 
 ### 文章と表記
 
-- 本文は日本語、path と code identifier は英語
-- 1 文 1 主張を基本とし、長い文・入れ子・複数の主張は分ける。ただし条件と結果を 1 文でつないだ方が誤読しにくい場合は、そのままにする
-- 箇条書きの 1 項目は 1〜2 文。3 文以上になるなら小見出しと段落にする
-- 節番号は `## N. 見出し` の 1 段だけ。`## N.1` を作らず、独立した節へ上げる
-- 見出しは日本語を基本とする。固有名詞はラテン文字のまま（例: `## 7. D1 / migration`）
-- ただし roadmap の段階名（Foundation、Post-merge verification、Release polish など）は原綴りのままとする。他文書から名前で参照する固有の呼称のため
-- 層・実行主体を指す語は大文字で始める（Client、Server、Browser、Worker、Native client）。既存の文に合わせればよく、統一のためだけの変更はしない
-- 製品名・固有名詞は原綴り（Cloudflare、Access、R2、D1、Preact、Hono、Vite など）。それ以外の一般名詞は小文字（upload、share、asset、original、derivative、manifest、bucket）
+- 本文は日本語で書く。path と code identifier は英語のまま
+- 製品名・固有名詞は原綴り（Cloudflare、Access、R2、D1、Preact、Hono、Vite など）
+- コード上の名称と EdgePhotos 固有の用語は原綴りを使う。説明の文は自然な日本語を優先する。既存の文を、統一のためだけに書き換えない
+- 短く書く。一文に論点を詰め込みすぎない。ただし字数や文の数で機械的に区切らない
+- 節番号は `## N. 見出し` の 1 段だけ。`## N.1` を作らず、独立した節へ上げる。見出しは日本語を基本とし、固有名詞はラテン文字のまま（例: `## 7. D1 / migration`）。roadmap の段階名（Foundation、Release polish など）は、他文書から名前で参照する呼称なので原綴りのままとする
+- 他の文書の一部を指すときは、節番号ではなく見出し名のリンクで書く
 - 画面に出る文言は「」でくくる。code identifier と command は `` ` `` でくくる

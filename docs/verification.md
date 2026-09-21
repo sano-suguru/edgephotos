@@ -1,6 +1,6 @@
 # 検証記録
 
-この文書は、EdgePhotos を実環境と Browser で確認した結果を記録します。まだ確認していない項目も記録します。
+実環境と Browser で確認した結果と、まだ確認していない項目を書きます。
 
 確認済みの項目には、環境・日付・使ったデータ・結果を書きます。再現と判断に必要な範囲に限ります。
 
@@ -29,7 +29,7 @@ migration 適用、fail-closed、upload → timeline → album → share → rev
 - `wrangler d1 create` の後、`wrangler.jsonc` に `database_id` を書かなくても deploy できた。wrangler が `database_name` で既存 D1 を解決する（wrangler 4.131 で確認）。
 - Access 境界: private path（`/`、`/api/v1/*`）が Access login へ 302 した。`/share`・`/share/{shareId}`・`/share/api/v1/*`・`/share/assets/*` は Access を通過して Worker に到達した。
 - owner 以外の identity を Worker が `403` にする経路は、remote-test では実測できない。Access policy が owner のみ Allow である限り、Worker まで到達しないため。この検査は多層防御であり、回帰は unit test 側で担保する。
-- preview URL: 無効化前は、preview URL 上の private API が Access のリダイレクトを受けなかった。Worker 自身の JWT 検証だけが `401 UNAUTHENTICATED` で拒否していた。漏洩はなかった。無効化後は preview URL が `404` になることを確認済み（無効にする理由は [operations.md](operations.md) §4）。
+- preview URL: 無効化前は、preview URL 上の private API が Access のリダイレクトを受けなかった。Worker 自身の JWT 検証だけが `401 UNAUTHENTICATED` で拒否していた。漏洩はなかった。無効化後は preview URL が `404` になることを確認済み（無効にする理由は運用の [Cloudflare Access](operations.md#4-cloudflare-access)）。
 - secret 運用: 7 件を Worker secret 化した。`secrets.required` が未充足のとき、deploy が不足名を挙げて失敗することを確認。充足後は fail-closed が解け、share API が `503` から `404 SHARE_UNAVAILABLE` になった。
 - R2 CORS: bucket 限定の rule を適用し、読み戻しを確認済み。`x-amz-checksum-sha256` を AllowedHeaders に加えた rule も適用・読み戻し済み（[D-018](decisions.md)）。
 
@@ -66,7 +66,7 @@ duplicate handling と完全削除: 同一 original の再 upload が `409 DUPLI
 - derivative は `*.r2.cloudflarestorage.com` から直接取得した。
 - CSRF 境界: 他 origin からの `POST /api/v1/albums` が `403 ORIGIN_NOT_ALLOWED`。
 - presigned URL の失効: share の derivative URL が、発行 300 秒後に R2 で `403 ExpiredRequest` になることを確認済み。
-- revoke 済み share の既発行 URL が残り TTL の間だけ有効なのは、契約どおり（[security.md](security.md) §5）。
+- revoke 済み share の既発行 URL が残り TTL の間だけ有効なのは、契約どおり（[共有失効（revoke）の意味](security.md#5-共有失効revokeの意味)）。
 
 ### backup / restore
 
@@ -102,7 +102,7 @@ local の `vite dev`、Playwright の Chromium 151 と WebKit 26.5、macOS。
 - 公開されている実機サンプル: [metadata-extractor-images](https://github.com/drewnoakes/metadata-extractor-images) と [exif-samples](https://github.com/ianare/exif-samples)。iPhone 4S〜6 Plus、Pixel 2、Galaxy S4〜S8 / Note 8、OnePlus 8、LG G3、Xperia Z3、Moto G、Oppo R7 Plus、Nokia 8.3 ほかを含む
 - Pillow で作った合成 fixture
 
-どちらも repository には入れていない。script は scratch 環境で一度きり実行し、commit していない（[development.md](development.md) §9）。
+どちらも repository には入れていない。script は scratch 環境で一度きり実行し、commit していない（[テスト用 fixture](development.md#9-テスト用-fixture)）。
 
 metadata:
 
@@ -203,7 +203,7 @@ Playwright（Chromium / WebKit iPhone 13 相当）で確認した。各 spec は
 
 **iOS Safari 実機での入力時 zoom と touch 操作は未確認。**
 
-常設の回帰は `e2e/keyboard.spec.ts`、`e2e/mobile.spec.ts`、`e2e/viewer.spec.ts`（[development.md](development.md) §8）。**iPhone / Android の実機での swipe と safe area は未確認。**
+常設の回帰は `e2e/keyboard.spec.ts`、`e2e/mobile.spec.ts`、`e2e/viewer.spec.ts`（[テスト方針](development.md#8-テスト方針)）。**iPhone / Android の実機での swipe と safe area は未確認。**
 
 ## 見た目の整理（2026-09-17）
 
@@ -306,9 +306,9 @@ restore の入口: 壊れた manifest と壊れた `restore-state.json` は、�
 - restore 先の `pnpm backup verify` は通常・`--quick` とも `ok: true`（問題 0 件）。`pnpm storage audit --deep` も「不整合なし」
 - 中断した restore が残した reservation 1 件は `uploads in progress` として見えた（期限内なので cleanup の対象外）
 - 終了後に Worker・D1・R2 bucket を削除した（R2 bucket は object を消してから削除）。この drill 用の R2 API token（対象は drill の bucket のみ）も削除した
-- Access application 2 件は、次の drill で再利用できるため残した（[operations.md](operations.md) §14）
+- Access application 2 件は、次の drill で再利用できるため残した（[復旧 drill](operations.md#14-復旧-drill)）
 
-作業中に分かった運用上の注意（[operations.md](operations.md) §3 に反映）:
+作業中に分かった運用上の注意（[利用者が設定する値](operations.md#3-利用者が設定する値) に反映）:
 
 - `wrangler secret put` で先に Worker を作ってから deploy すると、deploy 前に入れた secret は残らなかった
 - 標準入力が端末でない環境では、secret の値が空のまま「Success」と表示される
@@ -358,9 +358,9 @@ restore の入口: 壊れた manifest と壊れた `restore-state.json` は、�
 
 作り直しは original を `<img>` ではなく `fetch()` で読むため、応答に `Access-Control-Allow-Origin` が要る（[D-026](decisions.md)）。`edgephotos-remote-test` の bucket に対して、認証なしの読み取りだけで確認した。
 
-- `wrangler r2 bucket cors list edgephotos-remote-test` の結果は、`allowed_origins` が app origin 1 つ、`allowed_methods` が `GET, PUT`、`allowed_headers` が `content-type, if-none-match, x-amz-checksum-sha256`。[operations.md](operations.md) §6 の rule のままで、作り直しのための設定変更は不要だった
+- `wrangler r2 bucket cors list edgephotos-remote-test` の結果は、`allowed_origins` が app origin 1 つ、`allowed_methods` が `GET, PUT`、`allowed_headers` が `content-type, if-none-match, x-amz-checksum-sha256`。運用の [R2 CORS](operations.md#6-r2-cors) の規則のままで、作り直しのための設定変更は不要だった
 - 実 R2 への preflight（`OPTIONS`、app origin）: `GET` / `PUT` とも `204` で、`Access-Control-Allow-Origin` に app origin、`Access-Control-Allow-Methods` に `GET, PUT` が返った。`fetch()` が original の body を読めることの前提を実環境で確認した
-- 別 origin（`https://evil.example`）からの同じ preflight は `403` で、CORS header を返さない（「`APP_ORIGIN` に限定する」。[security.md](security.md) §6）
+- 別 origin（`https://evil.example`）からの同じ preflight は `403` で、CORS header を返さない（「`APP_ORIGIN` に限定する」。セキュリティの [presigned URL](security.md#6-presigned-url)）
 
 **Browser から実際に壊れた写真を作り直す往復は未実施**（下の「未検証」）。
 
