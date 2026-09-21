@@ -2,11 +2,15 @@ import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { toHex } from '../../src/worker/lib/crypto'
 import { hexToBase64 } from '../../src/worker/storage/signer'
+import type { UploadFinalizeResult } from '../../src/contracts/schemas'
 import {
   assetIdFromTarget,
   call,
   callJson,
+  heicFixture,
   makeApp,
+  MEMBER_B,
+  memberToken,
   photo,
   putObject,
   reserve,
@@ -451,5 +455,104 @@ describe('upload finalize', () => {
     const app = await makeApp()
     const res = await call(app, 'POST', `/api/v1/uploads/${crypto.randomUUID()}/finalize`)
     expect(res.status).toBe(404)
+  })
+})
+
+describe('HEIC originals', () => {
+  let heicSeed = 0
+
+  // A `free` box is legal ISO BMFF padding, so appending one leaves a valid HEIC while giving each test its
+  // own SHA-256. The library is shared by the tests in this file, and duplicates are refused by design.
+  const uniqueHeic = () => {
+    const base = heicFixture()
+    const seed = ++heicSeed
+    const out = new Uint8Array(base.byteLength + 12)
+    out.set(base)
+    out.set([0, 0, 0, 12, 0x66, 0x72, 0x65, 0x65, 0, 0, seed >> 8, seed & 0xff], base.byteLength)
+    return out
+  }
+
+  const heicPhoto = async () => {
+    const original = uniqueHeic()
+    return {
+      original,
+      thumbnail: syntheticJpeg(),
+      preview: syntheticJpeg({ padding: 64 }),
+      sha256: await sha256(original),
+    }
+  }
+
+  const put = async (app: Awaited<ReturnType<typeof makeApp>>, r: Awaited<ReturnType<typeof reserve>>, p: Awaited<ReturnType<typeof heicPhoto>>) => {
+    for (const v of ['original', 'thumbnail', 'preview'] as const) {
+      const res = await putObject(app, r.targets[v], p[v])
+      expect(res.ok).toBe(true)
+    }
+  }
+
+  it('stores the bytes it was given, unchanged', async () => {
+    const app = await makeApp()
+    const p = await heicPhoto()
+    const r = await reserve(app, p, { filename: 'camera.heic' }, 'image/heic')
+    await put(app, r, p)
+    const { asset } = await callJson<UploadFinalizeResult>(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, {
+      expect: 200,
+    })
+    expect(asset.contentType).toBe('image/heic')
+    expect(asset.sha256).toBe(p.sha256)
+
+    const stored = await env.BUCKET.get(`originals/${asset.id}`)
+    const bytes = new Uint8Array(await (stored as R2ObjectBody).arrayBuffer())
+    expect(bytes).toEqual(p.original)
+    expect(await sha256(bytes)).toBe(p.sha256)
+  })
+
+  it('refuses an original whose bytes are not the reserved type', async () => {
+    const app = await makeApp()
+    // Reserved as HEIC, but the bytes are a JPEG. finalize decides from the stored bytes, not the claim.
+    const jpeg = syntheticJpeg({ padding: 96 })
+    const p = { original: jpeg, thumbnail: syntheticJpeg(), preview: syntheticJpeg({ padding: 32 }), sha256: await sha256(jpeg) }
+    const r = await reserve(app, p, {}, 'image/heic')
+    await put(app, r, p)
+    const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
+    expect(res.status).toBe(422)
+    const body = (await res.json()) as { error: { details: { problems: { object: string; problem: string }[] } } }
+    expect(body.error.details.problems).toContainEqual({ object: 'original', problem: 'content_type_mismatch' })
+    expect(await assetCount(p.sha256)).toBe(0)
+  })
+
+  it('refuses a truncated HEIC instead of storing it half-understood', async () => {
+    const app = await makeApp()
+    const broken = uniqueHeic().slice(0, 12)
+    const p = { original: broken, thumbnail: syntheticJpeg(), preview: syntheticJpeg({ padding: 32 }), sha256: await sha256(broken) }
+    const r = await reserve(app, p, {}, 'image/heic')
+    await put(app, r, p)
+    const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
+    expect(res.status).toBe(422)
+    expect(await assetCount(p.sha256)).toBe(0)
+  })
+
+  it('converges on one asset when both household members upload the same HEIC', async () => {
+    const app = await makeApp()
+    const p = await heicPhoto()
+    const first = await reserve(app, p, {}, 'image/heic')
+    await put(app, first, p)
+    const created = await callJson<UploadFinalizeResult>(app, 'POST', `/api/v1/uploads/${first.upload.id}/finalize`, {
+      expect: 200,
+    })
+    expect(created.result).toBe('created')
+
+    const res = await call(app, 'POST', '/api/v1/uploads', {
+      token: await memberToken(MEMBER_B),
+      body: {
+        original: { size: p.original.byteLength, contentType: 'image/heic', sha256: p.sha256 },
+        thumbnail: { size: p.thumbnail.byteLength },
+        preview: { size: p.preview.byteLength },
+        metadata: {},
+      },
+    })
+    expect(res.status).toBe(409)
+    const body = (await res.json()) as { error: { code: string; details: { assetId: string } } }
+    expect(body.error.code).toBe('DUPLICATE_ASSET')
+    expect(body.error.details.assetId).toBe(created.asset.id)
   })
 })

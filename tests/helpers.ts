@@ -233,9 +233,14 @@ export async function putObject(app: App, target: UploadReservation['targets']['
   return app.request(target.url, { method: 'PUT', headers: target.headers, body: bytes as Uint8Array<ArrayBuffer> })
 }
 
-export async function uploadPhoto(app: App, p?: PhotoFixture, metadata: Record<string, unknown> = {}) {
+export async function uploadPhoto(
+  app: App,
+  p?: PhotoFixture,
+  metadata: Record<string, unknown> = {},
+  contentType = 'image/jpeg',
+) {
   const fixture = p ?? (await photo())
-  const r = await reserve(app, fixture, metadata)
+  const r = await reserve(app, fixture, metadata, contentType)
   for (const v of ['original', 'thumbnail', 'preview'] as const) {
     const res = await putObject(app, r.targets[v], fixture[v])
     if (!res.ok) throw new Error(`PUT ${v} failed: ${res.status}`)

@@ -14,7 +14,7 @@ export const LIMITS = {
   shareMaxDays: 365,
 } as const
 
-export const ORIGINAL_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
+export const ORIGINAL_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] as const
 
 export const IdSchema = z
   .string()

@@ -1,6 +1,16 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { assetIdFromTarget, call, callJson, clock, makeApp, uploadPhoto } from '../helpers'
+import {
+  assetIdFromTarget,
+  call,
+  callJson,
+  clock,
+  heicFixture,
+  makeApp,
+  sha256,
+  syntheticJpeg,
+  uploadPhoto,
+} from '../helpers'
 
 type App = Awaited<ReturnType<typeof makeApp>>
 
@@ -105,6 +115,42 @@ describe('public share API', () => {
       headers: { authorization: `Bearer ${created.secret}` },
     })
     expect(owner.status).toBe(401)
+  })
+
+  it('serves only derivatives for a HEIC photo, and says nothing about the original', async () => {
+    const app = await makeApp()
+    const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'HEIC' }, expect: 201 })
+    const original = heicFixture()
+    const fixture = {
+      original,
+      thumbnail: syntheticJpeg(),
+      preview: syntheticJpeg({ padding: 64 }),
+      sha256: await sha256(original),
+    }
+    const { result } = await uploadPhoto(app, fixture, { filename: 'camera.heic' }, 'image/heic')
+    await call(app, 'PUT', `/api/v1/albums/${album.id}/assets/${result.asset.id}`)
+    const created = (await callJson(app, 'POST', `/api/v1/albums/${album.id}/shares`, {
+      body: { expiresInDays: 7 },
+      expect: 201,
+    })) as { share: { id: string }; secret: string }
+
+    const list = await guest(app, `/shares/${created.share.id}`, created.secret)
+    const text = await list.text()
+    // A guest learns the thumbnail and the display size; not the format, the name or the digest.
+    expect(Object.keys(JSON.parse(text).items[0]).sort()).toEqual(['height', 'id', 'thumbnailUrl', 'width'])
+    for (const forbidden of ['originals/', 'camera.heic', 'image/heic', fixture.sha256]) {
+      expect(text).not.toContain(forbidden)
+    }
+    for (const variant of ['original', 'originals']) {
+      const res = await guest(app, `/shares/${created.share.id}/assets/${result.asset.id}/${variant}`, created.secret)
+      expect(res.status === 400 || res.status === 404).toBe(true)
+    }
+    // What is served is the JPEG derivative the upload made, on the derivative key.
+    const preview = await guest(app, `/shares/${created.share.id}/assets/${result.asset.id}/preview`, created.secret)
+    const body = (await preview.json()) as { url: string }
+    expect(assetIdFromTarget(body.url)).toBe(`derivatives/v1/${result.asset.id}/preview.jpg`)
+    const image = await app.request(body.url)
+    expect(image.headers.get('content-type')).toBe('image/jpeg')
   })
 
   it('does not expose assets outside the shared album or arbitrary keys', async () => {
