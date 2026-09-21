@@ -301,6 +301,14 @@ owner 以外の identity（service token 等）では API を利用できない�
 
 外部公開前に、別の空環境へ restore できることを実測します。
 
+### 前提
+
+- 対象 library が空であること。空でなければ restore は拒否します
+- backup ディレクトリが書き込み可能であること。進行状況を `restore-state.json` に書きます
+- 対象環境の Access token
+
+### 実行
+
 ```bash
 EDGEPHOTOS_URL=https://restore-test.example.com \
 EDGEPHOTOS_ACCESS_TOKEN="$(cloudflared access token -app=https://restore-test.example.com)" \
@@ -310,7 +318,9 @@ pnpm backup verify ./edgephotos-backup            # 任意の時点で再検証�
 pnpm backup verify ./edgephotos-backup --quick    # original を download せずに検証
 ```
 
-restore は通常の upload API で再登録します（[D-015](decisions.md)）。対象 library が空でなければ拒否します。進行状況を backup ディレクトリの `restore-state.json` に書くため、ディレクトリは書き込み可能にしておきます。
+restore は通常の upload API で再登録します（[D-015](decisions.md)）。
+
+### 確認
 
 verify が確認する項目:
 
@@ -322,17 +332,20 @@ verify が確認する項目:
 
 `--quick` は download しません。R2 が upload 時に検証・記録した SHA-256 が D1 の値と一致することを、storage audit（deep）で確かめます。記録の無い古い original（D-018 より前）は `--quick` でも download します。
 
-restore した環境では過去の share を再有効化しません（share は export に含めません）。asset ID と trash に入れた日時は変わります。`createdAt` は保持します（[D-024](decisions.md)）。
-
-`pnpm backup` は、通信エラー・`408`・`429`・`5xx` を backoff 付きで最大 4 回まで再試行します。作成系の request である upload の予約と album の作成は、重複を避けるため再試行しません。10,000 件の backup / restore は、remote で 1 時間以上かかる見積もりです（[benchmarks.md](benchmarks.md)）。
-
-### 止まった restore の続き
+### 失敗したとき
 
 restore が再試行でも回復せず途中で止まった場合（Access token の期限切れ、長い通信断など）は、原因を直してから同じコマンドに `--resume` を付けて再実行します。
 
 それまでに restore した写真はそのまま残り、SHA-256 で飛ばされます。`--resume` は、対象ライブラリの写真がすべて backup にあり、album がすべて `restore-state.json` に記録済みのときだけ続けます。
 
 album の作成の応答が失われた場合は、記録に無い album の名前を挙げて止まります。その album をアプリで削除してから再実行します。restore 中に reserve の応答が失われると、中断した upload が 1 件残ります（`pnpm storage cleanup` で片付く）。
+
+### 注意
+
+- 過去の share は再有効化しません（share は export に含めません）
+- asset ID と trash に入れた日時は変わります。`createdAt` は保持します（[D-024](decisions.md)）
+- `pnpm backup` は、通信エラー・`408`・`429`・`5xx` を backoff 付きで最大 4 回まで再試行します。作成系の request である upload の予約と album の作成は、重複を避けるため再試行しません
+- 10,000 件の backup / restore は、remote で 1 時間以上かかる見積もりです（[benchmarks.md](benchmarks.md)）
 
 ## 11. アンインストール
 

@@ -350,20 +350,14 @@ Remote の破壊操作を通常の test command に含めません。CI は Clou
 
 完了した実装段階の記録は [changelog.md](changelog.md)、これからの作業は [roadmap.md](roadmap.md) に書きます。
 
-### 文章
+### 文章と表記
 
 - 本文は日本語、path と code identifier は英語
-- 1 文 1 主張。長い文は分割を検討する。目安は 100 字だが、条件と結果を 1 文でつないだ方が明確ならその限りではない
-- 括弧の中に句点を 2 つ以上入れない。入るなら本文へ出す
+- 1 文 1 主張。長い文、入れ子、複数の主張は分ける
 - 箇条書きの 1 項目は 1〜2 文。3 文以上になるなら小見出しと段落にする
 - 節番号は `## N. 見出し` の 1 段だけ。`## N.1` を作らず、独立した節へ上げる
-
-### 表記
-
 - 見出しは日本語を基本とする。固有名詞はラテン文字のまま（例: `## 7. D1 / migration`）
 - ただし roadmap の段階名（Foundation、Post-merge verification、Release polish など）は原綴りのままとする。他文書から名前で参照する固有の呼称のため
-- 層・実行主体を指す語は、原則として大文字で始める: Client、Server、Browser、Worker、Native client。既存の文に合わせる程度でよく、統一のためだけの変更は作らない
-- 製品名・固有名詞は原綴り。Cloudflare、Access、R2、D1、Preact、Hono、Vite、Drizzle、Miniflare、Playwright、Chromium、WebKit、Safari など
-- それ以外の一般名詞は小文字: upload、share、asset、original、derivative、thumbnail、preview、manifest、token、bucket
-- 具体物としての server は小文字（`vite dev` の dev server、auth server）
+- 層・実行主体を指す語は大文字で始める（Client、Server、Browser、Worker、Native client）。既存の文に合わせればよく、統一のためだけの変更はしない
+- 製品名・固有名詞は原綴り（Cloudflare、Access、R2、D1、Preact、Hono、Vite など）。それ以外の一般名詞は小文字（upload、share、asset、original、derivative、manifest、bucket）
 - 画面に出る文言は「」でくくる。code identifier と command は `` ` `` でくくる
