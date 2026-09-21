@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { SNIFF_HEAD_BYTES } from '../../src/contracts/image-type'
-import { LIMITS } from '../../src/contracts/schemas'
+import { LIMITS, ORIGINAL_CONTENT_TYPES } from '../../src/contracts/schemas'
 import { resumePurges } from '../../src/web/features/settings/resume-purges'
 import { canAutoDismissUploads, mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
+import { unsupportedFileMessage } from '../../src/web/features/uploads/upload-message'
 import { captureParts, formatDate, monthKey } from '../../src/web/lib/dates'
 import { exifDateToIso } from '../../src/web/lib/exif-date'
+import {
+  FileTooLargeError,
+  HeicNotDecodableHereError,
+  ImageDecodeError,
+  UnsupportedFileError,
+} from '../../src/web/lib/image-errors'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
 import { originalTypeOf } from '../../src/web/lib/original-type'
 import { putOutcome } from '../../src/web/lib/storage-put'
+import { SUPPORTED_TYPES } from '../../src/web/lib/supported-types'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
 import { scanJpegForMetadata, sniffImageType } from '../../src/worker/storage/inspect'
 import { heicFixture, syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
@@ -319,5 +327,24 @@ describe('HEIC fixture', () => {
     expect(bytes.byteLength).toBeLessThan(2048)
     expect(String.fromCharCode(...bytes.subarray(4, 8))).toBe('ftyp')
     expect(String.fromCharCode(...bytes.subarray(8, 12))).toBe('heic')
+  })
+})
+
+describe('upload failure messages', () => {
+  it('tells a browser limitation apart from a broken file', () => {
+    expect(unsupportedFileMessage(new HeicNotDecodableHereError('no decoder', 'image/heic'))).toMatch(
+      /このブラウザでは HEIC/,
+    )
+    expect(unsupportedFileMessage(new ImageDecodeError('failed', 'image/heic'))).toMatch(/HEIC を読み取れませんでした/)
+    // Never a browser-wide claim for generic HEIF: one HEIC probe cannot speak for other codecs.
+    const heif = unsupportedFileMessage(new ImageDecodeError('failed', 'image/heif'))
+    expect(heif).toMatch(/HEIF を読み取れませんでした/)
+    expect(heif).not.toMatch(/このブラウザでは HEIF/)
+    expect(unsupportedFileMessage(new FileTooLargeError('too big'))).toMatch(/100MB/)
+    expect(unsupportedFileMessage(new UnsupportedFileError('nope'))).toMatch(/対応していない形式/)
+  })
+
+  it('offers the picker exactly the formats the server accepts', () => {
+    expect([...SUPPORTED_TYPES]).toEqual([...ORIGINAL_CONTENT_TYPES])
   })
 })

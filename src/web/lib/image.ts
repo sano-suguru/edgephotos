@@ -1,21 +1,15 @@
 import exifr from 'exifr'
 import type { ContentType } from '../../contracts/image-type'
 import { exifDateToIso } from './exif-date'
+import { canDecodeHeic } from './heic-probe'
+import { FileTooLargeError, HeicNotDecodableHereError, ImageDecodeError, UnsupportedFileError } from './image-errors'
 import { stripJpegMetadata } from './jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from './original-limit'
 import { originalTypeOf } from './original-type'
+import { SUPPORTED_TYPES, type SupportedType } from './supported-types'
 
 // Client-side preprocessing. The original File is uploaded untouched; derivatives are re-rendered
 // through a canvas, so they never carry the original's EXIF/GPS (encoder-added segments are stripped).
-
-export const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
-export type SupportedType = (typeof SUPPORTED_TYPES)[number]
-
-// The sniff knows more formats than the upload UI offers; one list is the contract, the other is what this
-// client is ready to prepare. A unit test keeps them from drifting apart silently.
-function isSupported(type: ContentType | null): type is SupportedType {
-  return type !== null && (SUPPORTED_TYPES as readonly string[]).includes(type)
-}
 
 export const THUMBNAIL_MAX_EDGE = 512
 export const PREVIEW_MAX_EDGE = 2048
@@ -33,13 +27,13 @@ export type PreparedPhoto = {
   preview: Blob
 }
 
-export class UnsupportedFileError extends Error {}
-export class FileTooLargeError extends UnsupportedFileError {}
-
-// HEIC/HEIF is not accepted in v1 (docs/decisions.md D-019). Desktop browsers may report an empty type,
-// so the extension is checked too.
-export function isHeic(file: File): boolean {
-  return /^image\/hei[cf](-sequence)?$/.test(file.type) || /\.(heic|heif|hif)$/i.test(file.name)
+export {
+  FileTooLargeError,
+  HeicNotDecodableHereError,
+  ImageDecodeError,
+  SUPPORTED_TYPES,
+  type SupportedType,
+  UnsupportedFileError,
 }
 
 export async function sha256Hex(data: ArrayBuffer): Promise<string> {
@@ -99,11 +93,22 @@ async function renderAll(bitmap: ImageBitmap, variants: readonly DerivativeVaria
   return out
 }
 
-async function decode(source: Blob): Promise<ImageBitmap> {
+// `imageOrientation: 'from-image'` also covers HEIC, whose orientation lives in the file rather than in a
+// JPEG APP1 segment: a decoded bitmap is already the right way up.
+async function decode(source: Blob, contentType: ContentType | null): Promise<ImageBitmap> {
   try {
     return await createImageBitmap(source, { imageOrientation: 'from-image' })
   } catch {
-    throw new UnsupportedFileError('The image could not be decoded')
+    throw new ImageDecodeError('The image could not be decoded', contentType)
+  }
+}
+
+// Refuses a HEIC in a browser with no HEVC decoder, before anything is read, reserved or stored. Only
+// image/heic is asked about: the probe answers for HEVC, and a generic image/heif may hold another codec,
+// so that file's own decode is what decides for it.
+async function refuseIfHeicIsUndecodableHere(contentType: ContentType | null) {
+  if (contentType === 'image/heic' && !(await canDecodeHeic())) {
+    throw new HeicNotDecodableHereError('This browser cannot decode HEIC', contentType)
   }
 }
 
@@ -114,7 +119,10 @@ export async function renderDerivatives(
   source: Blob,
   variants: readonly DerivativeVariant[],
 ): Promise<Partial<Record<DerivativeVariant, Blob>>> {
-  const bitmap = await decode(source)
+  // The repair download sets the Blob type from the asset's recorded content type.
+  const contentType = (SUPPORTED_TYPES as readonly string[]).includes(source.type) ? (source.type as ContentType) : null
+  await refuseIfHeicIsUndecodableHere(contentType)
+  const bitmap = await decode(source, contentType)
   try {
     return await renderAll(bitmap, variants)
   } finally {
@@ -123,16 +131,20 @@ export async function renderDerivatives(
 }
 
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
-  // Cheap refusals before reading: HEIC by name or type, non-images by the browser's type, oversized files.
-  if (isHeic(file) || (file.type !== '' && !file.type.startsWith('image/'))) {
+  // Cheap refusals before reading: non-images by the browser's type, oversized files. The format itself is
+  // decided from the bytes below, never from the name or the type the picker guessed.
+  if (file.type !== '' && !file.type.startsWith('image/')) {
     throw new UnsupportedFileError(`Unsupported file type: ${file.type || 'unknown'}`)
   }
   if (file.size > ORIGINAL_MAX_BYTES) throw new FileTooLargeError(`File is larger than ${ORIGINAL_MAX_BYTES} bytes`)
   const buffer = await file.arrayBuffer()
   const contentType = originalTypeOf(buffer)
-  if (!isSupported(contentType)) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
+  if (!contentType) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
+  // Before the reservation and before any PUT: a photo this browser cannot turn into derivatives must not
+  // reach storage half-done.
+  await refuseIfHeicIsUndecodableHere(contentType)
   const [sha256, takenAt] = await Promise.all([sha256Hex(buffer), readTakenAt(buffer)])
-  const bitmap = await decode(file)
+  const bitmap = await decode(file, contentType)
   try {
     const { thumbnail, preview } = await renderAll(bitmap, ['thumbnail', 'preview'])
     return {
