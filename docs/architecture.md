@@ -196,12 +196,12 @@ album 一覧は `covers=true` のときだけ、各 album の最新の写真の 
 finalize での確認内容（[D-012](decisions.md)）:
 
 - 3 object の存在。欠けている間、upload は `pending` のまま再試行できる
-- original について、R2 が記録した SHA-256（binding の `head().checksums.sha256`）が reserve 時の申告と一致すること（[D-018](decisions.md)）
+- original の SHA-256 が reserve 時の申告と一致すること。R2 が upload 時に記録した値（binding の `head().checksums.sha256`）を使います（[D-018](decisions.md)）
 - size が reserve 時の申告と一致すること
 - original の magic bytes が申告 content type と一致すること
 - thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG であること
 
-検査に通らない upload は `ready` になりません。どの検査がどの status になるかは `/api/v1/openapi.json`、error code の一覧は `src/contracts/errors.ts` が定義します。
+検査に通らない upload は `ready` になりません。どの検査がどの status と error code になるかは、route schema が定義します。
 
 D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transaction）で行います。asset は upload 行がまだ `pending` の場合だけ作ります（`INSERT ... SELECT ... WHERE status = 'pending'`。[D-023](decisions.md)）。
 
@@ -217,7 +217,7 @@ finalize は upload の期限を見ません。期限内に PUT が済んでい�
 
 reserve の `metadata.createdAt`（任意、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。
 
-失敗した upload をどこからやり直すかは Client が決めます。Server 側の契約は、finalize が冪等であることと、presigned URL が期限内に限り再利用できることです（[D-020](decisions.md)、[D-023](decisions.md)、`src/web/features/uploads/transfer.ts`）。
+失敗した upload をどこからやり直すかは Client が決めます。Server 側の契約は、finalize が冪等であることと、presigned URL が期限内に限り再利用できることです（[D-020](decisions.md)）。
 
 不変条件:
 

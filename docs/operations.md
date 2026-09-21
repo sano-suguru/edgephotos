@@ -299,7 +299,7 @@ owner 以外の identity（service token 等）では API を利用できない�
 
 ## 10. Restore
 
-外部公開前に、別の空環境へ restore できることを実測します。
+backup から別の環境へライブラリを戻します。
 
 ### 前提
 
@@ -340,10 +340,13 @@ restore が再試行でも回復せず途中で止まった場合（Access token
 
 album の作成の応答が失われた場合は、記録に無い album の名前を挙げて止まります。その album をアプリで削除してから再実行します。restore 中に reserve の応答が失われると、中断した upload が 1 件残ります（`pnpm storage cleanup` で片付く）。
 
-### 注意
+### 復元後に変わるもの
 
 - 過去の share は再有効化しません（share は export に含めません）
 - asset ID と trash に入れた日時は変わります。`createdAt` は保持します（[D-024](decisions.md)）
+
+### 所要時間と再試行
+
 - `pnpm backup` は、通信エラー・`408`・`429`・`5xx` を backoff 付きで最大 4 回まで再試行します。作成系の request である upload の予約と album の作成は、重複を避けるため再試行しません
 - 10,000 件の backup / restore は、remote で 1 時間以上かかる見積もりです（[benchmarks.md](benchmarks.md)）
 

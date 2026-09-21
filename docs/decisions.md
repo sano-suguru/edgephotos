@@ -4,7 +4,7 @@
 
 粒度は 2 種類あります。初期に構成を決めただけの判断（D-001〜D-011）は数行です。運用で学んだ判断（D-019 以降）は、却下した案と残るリスクまで書きます。長さの違いは重要度の違いではなく、決めるまでに検討した幅の違いです。
 
-D-028 以降は、背景・判断・理由・却下した案・影響と残るリスク・再検討の条件の順で書きます。当てはまらない項目は省きます。過去の判断は書き直しません。
+D-028 以降は、背景・判断・理由・守ること・却下した案・影響と残るリスク・再検討の条件の順で書きます。「守ること」は、この判断のあとに実装者が破ってはいけない境界です（D-023、D-026、D-027 と同じ位置づけ）。当てはまらない項目は省きます。過去の判断は書き直しません。
 
 現在の構造は [architecture.md](architecture.md)、開発時のルールは [development.md](development.md) と [AGENTS.md](../AGENTS.md) にあります。
 
@@ -296,6 +296,8 @@ Client が PUT 前に APP1 / APP13 を取り除きます（`src/web/lib/jpeg-met
 
 `412` は保存済みとして扱います。key は reserve ごとに固有で、`If-None-Match: *` で署名しているため、`412` になるのは同じ upload の以前の試行が R2 に届き、応答だけが失われた場合に限られます。finalize は引き続き size と、original については R2 が検証した SHA-256 を確認します。実 R2 の `412` が CORS 越しに status として読めることは、remote-test で確認済みです（[verification.md](verification.md)）。
 
+**どこからやり直すかを決める。** PUT の再試行で回復しなかった upload は、前の試行の reservation の finalize からやり直します。`409 UPLOAD_OBJECT_MISSING` で presigned URL が期限内なら、欠けた object だけを PUT し直します。期限切れ・`404`・`410`・`422` なら新しい reservation から始めます（`src/web/features/uploads/transfer.ts`）。`410` と `404` は storage cleanup が片付けたあとの upload です（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。
+
 **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らず、未完了のまま完了表示になっていました。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削ります（`src/web/features/uploads/upload-list.ts`）。
 
 **前処理の並列数は 2 のままにする。** 2 が最適だと示したわけではありません。desktop の Browser の測定では、変えるだけの根拠が得られませんでした。
@@ -385,9 +387,7 @@ D1 と R2 は 1 transaction にできません（[architecture.md](architecture.
 - `uploads.status` に `abandoned` を足す: `uploads` の CHECK を変えるには table の作り直しが要り、baseline の無名 UNIQUE の扱いが難しい（development.md §7）。`duplicate` + `duplicate_of = NULL` で「asset を作らずに終わった upload」を表す（`src/worker/db/schema.ts` に注記）
 - R2 lifecycle rule で `originals/` を期限切れにする: 写真の original まで消える
 
-影響: 中断した upload を後から finalize すると、cleanup の前なら従来どおり完了し、cleanup の後なら `410`（片付け途中）または `404`（行が消えた）になります。
-
-Web の再試行は、前の試行の reservation の finalize からやり直します。`409 UPLOAD_OBJECT_MISSING` で presigned URL が期限内なら、欠けた object だけを PUT し直します。期限切れ・`404`・`410`・`422` なら新しい reservation から始めます（`src/web/features/uploads/transfer.ts`）。
+影響: 中断した upload を後から finalize すると、cleanup の前なら従来どおり完了し、cleanup の後なら `410`（片付け途中）または `404`（行が消えた）になります。Web の再試行は、どちらでも新しい reservation からやり直します（[D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する)）。
 
 ## D-024: Export をページに分け、backup / restore を差分・再開できるようにする
 
