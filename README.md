@@ -27,7 +27,7 @@ Node.js 22.18 以上と pnpm が必要です。
 ```bash
 pnpm install
 pnpm db:migrate:local
-pnpm dev              # http://localhost:5173 （Access を模擬した owner として動作）
+pnpm dev              # http://localhost:5173 （Access を模擬した household member として動作）
 ```
 
 ```bash
@@ -57,7 +57,7 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 - HEIC / HEIF の直接対応
 - 顔認識・AI 検索
 - バックグラウンド自動同期
-- 複数オーナー
+- 利用者ごとに分かれたライブラリ
 - 任意クラウドへの抽象化
 - 課金
 

@@ -7,7 +7,11 @@ import type { Env } from '../src/worker/env'
 import { createLocalSigner, LOCAL_BLOB_PREFIX, localBlobRoutes } from '../src/worker/storage/local-blobs'
 
 export const APP_ORIGIN = 'https://photos.example.test'
-export const OWNER = 'owner@example.test'
+// Two equal members of one household library. MEMBER_A is the default identity for every helper.
+export const MEMBER_A = 'member-a@example.test'
+export const MEMBER_B = 'member-b@example.test'
+export const HOUSEHOLD = `${MEMBER_A},${MEMBER_B}`
+export const OUTSIDER = 'someone-else@example.test'
 export const TEAM = 'example-team.cloudflareaccess.com'
 export const AUD = 'test-audience-tag'
 const BLOB_SECRET = 'test-only-local-blob-secret'
@@ -35,11 +39,12 @@ export async function assertion(
 ): Promise<string> {
   const signingKey = key ?? (await accessKeys()).privateKey
   const payload: Record<string, unknown> = {}
-  if (claims.email !== null) payload.email = claims.email ?? OWNER
+  const email = claims.email ?? MEMBER_A
+  if (claims.email !== null) payload.email = email
   const now = Math.floor(Date.now() / 1000)
   return new SignJWT(payload)
     .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
-    .setSubject(claims.sub ?? 'owner-subject')
+    .setSubject(claims.sub ?? `${email.split('@')[0]}-subject`)
     .setIssuer(claims.iss ?? `https://${TEAM}`)
     .setAudience(claims.aud ?? AUD)
     .setIssuedAt(now - 10)
@@ -53,12 +58,17 @@ export function testEnv(overrides: Partial<Env> = {}, which: 'primary' | 'restor
   return {
     DB: which === 'primary' ? env.DB : env.RESTORE_DB,
     BUCKET: which === 'primary' ? env.BUCKET : env.RESTORE_BUCKET,
-    OWNER_EMAIL: OWNER,
+    HOUSEHOLD_EMAILS: HOUSEHOLD,
     APP_ORIGIN,
     ACCESS_TEAM_DOMAIN: TEAM,
     ACCESS_AUD: AUD,
     ...overrides,
   }
+}
+
+// An Access assertion for one household member. `call(..., { token: await memberToken(MEMBER_B) })`.
+export function memberToken(email: string): Promise<string> {
+  return assertion({ email })
 }
 
 export type Clock = { now: () => Date; advance: (ms: number) => void }

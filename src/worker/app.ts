@@ -72,7 +72,10 @@ type AppEnv = { Variables: Vars }
 const errorResponses = {
   400: { description: 'Invalid request', content: { 'application/json': { schema: ErrorSchema } } },
   401: { description: 'Not authenticated', content: { 'application/json': { schema: ErrorSchema } } },
-  403: { description: 'Not the owner or origin not allowed', content: { 'application/json': { schema: ErrorSchema } } },
+  403: {
+    description: 'Not a household member or origin not allowed',
+    content: { 'application/json': { schema: ErrorSchema } },
+  },
   404: { description: 'Not found', content: { 'application/json': { schema: ErrorSchema } } },
   503: { description: 'Server misconfigured', content: { 'application/json': { schema: ErrorSchema } } },
 } as const
@@ -147,7 +150,7 @@ export function createApp(options: AppOptions) {
     if (!config) throw misconfigured(c, env, !options.signer)
     const auth = await authenticateAccess(c.req.header('cf-access-jwt-assertion'), config.access, accessKeys)
     if (!auth.ok) {
-      if (auth.reason === 'not_owner') throw new ApiError(403, 'FORBIDDEN', 'Not allowed.')
+      if (auth.reason === 'not_member') throw new ApiError(403, 'FORBIDDEN', 'Not allowed.')
       throw new ApiError(401, 'UNAUTHENTICATED', 'Authentication required.')
     }
     checkWriteOrigin(c.req.method, c.req.raw.headers, config.appOrigin)
@@ -172,7 +175,7 @@ export function createApp(options: AppOptions) {
       responses: {
         200: json(
           z.object({ email: z.string(), subject: z.string(), authSource: z.literal('cloudflare-access') }),
-          'Current principal',
+          'Current household member',
         ),
         ...errorResponses,
       },

@@ -104,7 +104,7 @@ pnpm db:migrate:local      # local D1 (.wrangler/state) に migration を適用
 pnpm dev                   # http://localhost:5173
 ```
 
-`pnpm dev` は Access を模擬し、`DEV_OWNER_EMAIL`（既定 `owner@localhost.test`）の owner として API を呼べます（[D-016](decisions.md)）。
+`pnpm dev` は Access を模擬し、`DEV_HOUSEHOLD_EMAILS`（既定 `you@localhost.test,partner@localhost.test`）の最初の member として API を呼べます（[D-016](decisions.md)）。値の形式は production の `HOUSEHOLD_EMAILS` と同じです。member を切り替えた状態を見たい場合は、先頭を入れ替えて起動し直します。
 
 `APP_ORIGIN` は `http://localhost:5173` 固定です。`127.0.0.1` で開くと Origin check で書き込みが拒否されます。
 

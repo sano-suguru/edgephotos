@@ -1,10 +1,10 @@
 import { exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { APP_ORIGIN, assertion, call, callJson, makeApp, photo, putObject, reserve, sha256 } from '../helpers'
+import { APP_ORIGIN, assertion, call, callJson, MEMBER_A, makeApp, photo, putObject, reserve, sha256 } from '../helpers'
 
 // Critical vertical path over HTTP only (no direct DB/R2 access):
 // auth -> reserve -> object PUT -> finalize -> timeline -> album -> share -> revoke.
-describe('vertical: owner uploads, organizes and shares a photo', () => {
+describe('vertical: a household member uploads, organizes and shares a photo', () => {
   it('works end to end and fails closed at each boundary', async () => {
     const app = await makeApp()
 
@@ -13,7 +13,7 @@ describe('vertical: owner uploads, organizes and shares a photo', () => {
     expect(
       (await call(app, 'GET', '/api/v1/me', { token: await assertion({ email: 'guest@example.test' }) })).status,
     ).toBe(403)
-    expect((await callJson(app, 'GET', '/api/v1/me', { expect: 200 })).email).toBe('owner@example.test')
+    expect((await callJson(app, 'GET', '/api/v1/me', { expect: 200 })).email).toBe(MEMBER_A)
 
     // Upload reservation
     const p = await photo()

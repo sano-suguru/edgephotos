@@ -66,7 +66,7 @@ Worker が担当するのは次の範囲です。
 
 - Access assertion の検証
 - `AppPrincipal` への正規化
-- owner かどうかの確認
+- household member かどうかの確認
 - リクエストの検証
 - D1 への状態保存
 - R2 object の存在・属性確認
@@ -115,7 +115,9 @@ Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証し�
 
 `AppPrincipal` の定義は [`src/worker/auth/access.ts`](../src/worker/auth/access.ts) を正とします。
 
-v1 は 1 owner です。Access を通過した全員を owner とはみなしません。設定された owner と一致する principal だけが private API を使えます。
+EdgePhotos が想定する利用者は 1 つの household です。Access を通過しただけでは member とみなしません。`HOUSEHOLD_EMAILS` に設定した email と一致する principal だけが private API を使えます（[D-028](decisions.md)）。
+
+member は互いに対等で、1 つの library を共同利用します。`AppPrincipal` は role を持たず、asset・album・share のどの行にも「誰が作ったか」を記録しません。したがって認可の判断は「member かどうか」だけです。
 
 将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とします。Native 固有の token を Worker の中で直接解釈しない形は変えません。
 
@@ -155,7 +157,7 @@ POST   /api/v1/uploads/{uploadId}/finalize      idempotent
 GET    /api/v1/assets?cursor&limit&favorite&trashed
 GET    /api/v1/assets/{assetId}
 PATCH  /api/v1/assets/{assetId}                 { isFavorite }
-GET    /api/v1/assets/{assetId}/original        short-lived URL (owner only)
+GET    /api/v1/assets/{assetId}/original        short-lived URL (household member only)
 POST   /api/v1/assets/{assetId}/derivatives/repair      rebuild missing thumbnail/preview (D-026)
 POST   /api/v1/assets/{assetId}/trash | /restore
 DELETE /api/v1/assets/{assetId}                 permanent delete (trashed only, resumable)
@@ -213,7 +215,7 @@ original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw
 
 finalize は upload の期限を見ません。期限内に PUT が済んでいれば、background に回した tab が期限後に復帰しても finalize できます。PUT が済んでいない upload は、presigned URL が失効しているため完了できず、`pending` のまま残ります。
 
-中断した upload は、owner が実行する storage cleanup が片付けます。3 object が揃って検査を通るものは finalize して写真にし、それ以外は終端状態にしてから、その upload の key の object だけを消します。実行の条件と閾値は [D-023](decisions.md) にあります。
+中断した upload は、member が実行する storage cleanup が片付けます。3 object が揃って検査を通るものは finalize して写真にし、それ以外は終端状態にしてから、その upload の key の object だけを消します。実行の条件と閾値は [D-023](decisions.md) にあります。
 
 reserve の `metadata.createdAt`（任意、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。
 
@@ -237,7 +239,7 @@ reserve の `metadata.createdAt`（任意、未来は不可）は asset の `cre
 - 再エンコードしない
 - EXIF / GPS を改変しない
 - SHA-256 を metadata として保持
-- owner のみ取得可能
+- household member のみ取得可能
 - share では配信しない
 
 SHA-256 の出どころは 2 通りです。D-018 以降に finalize された asset では、R2 が upload 時に検証した値です。それより前の asset は申告値で、`pnpm backup verify` で照合します（[D-018](decisions.md)）。

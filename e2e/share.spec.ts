@@ -30,7 +30,7 @@ test('a guest opens a shared album and loses access after revoke', async ({ page
   const url = await sharing.getByLabel('共有リンク').inputValue()
   expect(url).toMatch(/\/share\/[A-Za-z0-9_-]{22}#[A-Za-z0-9_-]{43}$/)
 
-  // A separate context: no owner session, no shared cookies or storage.
+  // A separate context: no household member session, no shared cookies or storage.
   const guestContext = await browser.newContext()
   const guest = await guestContext.newPage()
   const shareRequests: { authorization?: string; cookie?: string }[] = []

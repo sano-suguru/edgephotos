@@ -3,7 +3,8 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import type { Plugin } from 'vite'
 
 // Local development only (`vite dev`). Emulates what Cloudflare Access does in front of the Worker:
-// it signs a short-lived RS256 assertion for DEV_OWNER_EMAIL and injects `Cf-Access-Jwt-Assertion`
+// it signs a short-lived RS256 assertion for the first DEV_HOUSEHOLD_EMAILS entry and injects
+// `Cf-Access-Jwt-Assertion`
 // on every non-/share request. The Worker still verifies signature, issuer, audience and expiry
 // against a JWKS generated here at startup. Nothing from this file is part of the production build.
 
@@ -16,7 +17,10 @@ export type DevAccess = {
   plugin: Plugin
 }
 
-export async function createDevAccess(ownerEmail: string): Promise<DevAccess> {
+// `householdEmails` is the same comma-separated list the Worker reads in production. The dev server
+// signs in as the first entry; the others exist so a local run has the same shape as a real household.
+export async function createDevAccess(householdEmails: string): Promise<DevAccess> {
+  const signedInAs = householdEmails.split(',')[0].trim()
   const { privateKey, publicKey } = await generateKeyPair('RS256')
   const jwk = { ...(await exportJWK(publicKey)), kid: 'dev', alg: 'RS256', use: 'sig' }
   let cached: { token: string; exp: number } | undefined
@@ -25,9 +29,9 @@ export async function createDevAccess(ownerEmail: string): Promise<DevAccess> {
     const now = Math.floor(Date.now() / 1000)
     if (cached && cached.exp - 60 > now) return cached.token
     const exp = now + 600
-    const signed = await new SignJWT({ email: ownerEmail })
+    const signed = await new SignJWT({ email: signedInAs })
       .setProtectedHeader({ alg: 'RS256', kid: 'dev' })
-      .setSubject('local-dev-owner')
+      .setSubject('local-dev-member')
       .setIssuer(`https://${TEAM_DOMAIN}`)
       .setAudience(AUDIENCE)
       .setIssuedAt(now)
@@ -39,7 +43,7 @@ export async function createDevAccess(ownerEmail: string): Promise<DevAccess> {
 
   return {
     vars: {
-      OWNER_EMAIL: ownerEmail,
+      HOUSEHOLD_EMAILS: householdEmails,
       APP_ORIGIN: DEV_ORIGIN,
       ACCESS_TEAM_DOMAIN: TEAM_DOMAIN,
       ACCESS_AUD: AUDIENCE,

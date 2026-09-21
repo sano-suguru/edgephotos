@@ -2,6 +2,7 @@ import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from 'jose'
 import type { AccessConfig } from '../env'
 
 // Normalized identity handed to application logic. Access-specific tokens stop at this layer.
+// Every authenticated principal is an equal member of the one household library; it carries no role.
 export type AppPrincipal = {
   subject: string
   email: string
@@ -10,7 +11,7 @@ export type AppPrincipal = {
 
 export type AuthResult =
   | { ok: true; principal: AppPrincipal }
-  | { ok: false; reason: 'missing_assertion' | 'invalid_assertion' | 'not_owner' }
+  | { ok: false; reason: 'missing_assertion' | 'invalid_assertion' | 'not_member' }
 
 export type AccessKeyResolver = (teamDomain: string) => JWTVerifyGetKey
 
@@ -51,14 +52,16 @@ export async function authenticateAccess(
   const subject = payload.sub
   const email = payload.email
   if (typeof subject !== 'string' || subject === '' || typeof email !== 'string') {
-    // Service tokens carry no email and are never the owner in v1.
-    return { ok: false, reason: 'not_owner' }
+    // Service tokens carry no email, so they can never match a configured household member.
+    return { ok: false, reason: 'not_member' }
   }
-  if (email.trim().toLowerCase() !== config.ownerEmail) {
-    return { ok: false, reason: 'not_owner' }
+  const normalized = email.trim().toLowerCase()
+  // Passing Access is not membership: the Worker checks the identity against the configured household.
+  if (!config.memberEmails.has(normalized)) {
+    return { ok: false, reason: 'not_member' }
   }
   return {
     ok: true,
-    principal: { subject, email: email.trim().toLowerCase(), authSource: 'cloudflare-access' },
+    principal: { subject, email: normalized, authSource: 'cloudflare-access' },
   }
 }

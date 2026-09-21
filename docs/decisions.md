@@ -553,3 +553,35 @@ INSERT INTO shares SELECT ... FROM shares WHERE id = ? AND revoked_at IS NULL AN
 - revoke / 完全削除の**直前**に発行済みの presigned URL は、残り TTL の間だけ有効です（share は最大 300 秒）。これは設計上の既知 risk で、この決定は変えません
 - 同じ share に対する再発行が 2 つ同時に成立すると、有効な share が 2 つできます。どちらも古い share を revoke するため、古い link は確実に死にます。owner の share 一覧に両方出るので、隠れた link にはなりません
 - export のやり直しは owner の操作です。自動では再試行しません
+
+## D-028: 許可した複数の email が 1 つの library を対等に共同利用する
+
+**状態:** 採用（2026-09-21。夫婦 2 人での共同利用が必要になったため）
+
+private API を使えるのは `OWNER_EMAIL` に一致する 1 identity だけでした。これを `HOUSEHOLD_EMAILS`（email の comma 区切り）に置き換え、そこに並ぶ identity をすべて **household member** として受け入れます。
+
+member は互いに対等です。1 つの library を共同利用し、upload・timeline・favorite・album・share・trash・restore・export に同じ権限を持ちます。
+
+**user ごとの library も、asset ごとの所有者も作りません。** D1 の `assets` / `albums` / `shares` には元から「誰が作ったか」の列がありません。この決定で足しもしません。したがって schema の migration はなく、認可の判断は「member かどうか」だけです。既存の duplicate 処理（SHA-256 の UNIQUE）も、どの member が upload したかに影響されません。
+
+**読み取れない設定は、部分的に使わずに無効にします。** 余分な comma、打ち間違い、email でない値が 1 つでもあれば設定全体を `null` にし、private API は全員に `503` を返します。「B の行だけ壊れていたので A だけ通る」という状態を作らないためです。
+
+守ること:
+
+- Access を通過しただけでは member ではない。Worker が `HOUSEHOLD_EMAILS` と照合する
+- email を持たない identity（service token）は member にならない
+- member の追加・削除は Access policy と `HOUSEHOLD_EMAILS` の両方で行う（[operations.md](operations.md#4-cloudflare-access)）
+
+却下した案:
+
+- `OWNER_EMAIL` を残して `HOUSEHOLD_EMAILS` の fallback にする: 移行のためだけに残る経路で、認証設定が 2 か所に分かれる。`secrets.required` が未設定の deploy を止めるので、移行は「deploy の前に新しい secret を入れる」だけで足りる（[operations.md](operations.md#3-利用者が設定する値)）
+- asset に `created_by` を持たせる: 現在の要求（2 人が同じ写真を見る）では誰も読まない列になる。member ごとの表示や権限を実際に必要としたときに、その時点の要求で設計する
+- role / 招待 / tenant を入れる: 解く問題は「明示的に設定した少人数が同じ library を使う」であり、これらは要求の先回りになる（[AGENTS.md](../AGENTS.md#6-将来要件を先回りしない)）
+
+残るリスク:
+
+- member はライブラリ全体を削除・export できます。member 1 人の端末やアカウントが侵害されれば、library 全体が侵害されます。member を分離したい場合、この設計では解決できません（[security.md](security.md#3-private-api-の認証と認可)）
+- Access policy と `HOUSEHOLD_EMAILS` は別々に更新します。片方だけを消すと、消したつもりの identity が残ります。`pnpm diagnose` は現在の token が通るかどうかしか見ないため、この食い違いは検出しません
+- `HOUSEHOLD_EMAILS` は Access identity の email です。Access 側で email が変わったら、この設定も更新しないと締め出されます
+
+D-023 など、これより前の決定に出てくる「owner」は household member と読み替えます。過去の判断は書き直しません。

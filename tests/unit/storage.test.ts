@@ -115,13 +115,16 @@ describe('config and request guards', () => {
     const base = {
       DB: {} as D1Database,
       BUCKET: {} as R2Bucket,
-      OWNER_EMAIL: 'Owner@Example.test',
+      HOUSEHOLD_EMAILS: 'A@Example.test, b@example.test',
       APP_ORIGIN: 'https://a.example',
       ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com',
       ACCESS_AUD: 'aud',
     }
-    expect(readAppConfig(base)?.access.ownerEmail).toBe('owner@example.test')
-    expect(readAppConfig({ ...base, OWNER_EMAIL: 'not-an-email' })).toBeNull()
+    expect([...(readAppConfig(base)?.access.memberEmails ?? [])]).toEqual(['a@example.test', 'b@example.test'])
+    expect(readAppConfig({ ...base, HOUSEHOLD_EMAILS: 'not-an-email' })).toBeNull()
+    // A list the Worker cannot read in full is unusable, not partially usable.
+    expect(readAppConfig({ ...base, HOUSEHOLD_EMAILS: 'a@example.test,' })).toBeNull()
+    expect(readAppConfig({ ...base, HOUSEHOLD_EMAILS: '' })).toBeNull()
     expect(readAppConfig({ ...base, ACCESS_AUD: ' ' })).toBeNull()
   })
 
