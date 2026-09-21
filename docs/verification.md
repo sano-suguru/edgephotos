@@ -445,7 +445,22 @@ attempt 1 は遅い runner に当たり、interrupted restore が 5975ms かか�
 
 `imageOrientation` を指定しない場合と、Blob の type を空にした場合も同じ結果だった。
 
-exifr は HEIC から `DateTimeOriginal`（`2019:07:14 09:30:05`）と Orientation を読めた。`sips` の変換では GPS タグは引き継がれなかったため、HEIC の GPS 抽出そのものは確認していない。
+exifr は HEIC から `DateTimeOriginal`（`2019:07:14 09:30:05`）と Orientation を読めた。Node と、bundle した Web app の両方で確認している（e2e が `takenAt` を照合する）。`sips` の変換では GPS タグは引き継がれなかったため、HEIC の GPS 抽出そのものは確認していない。
+
+fixture の orientation は EXIF の `Orientation` で持っている。実機の HEIC が使う `irot` / `imir` item property は、生成できる道具が手元になく未確認。
+
+### 壊れた HEIC の decode
+
+`still.heic` を壊した 4 種類を `createImageBitmap` に通した。
+
+| 壊し方 | WebKit | Chromium |
+| --- | --- | --- |
+| 先頭 40 byte（`ftyp` だけ残す） | `InvalidStateError` | `InvalidStateError` |
+| `ftyp` の後をすべて 0 で埋める | `InvalidStateError` | `InvalidStateError` |
+| 半分で切る | **32x64 で成功** | `InvalidStateError` |
+| 末尾付近の 1 byte を反転 | 32x64 で成功 | `InvalidStateError` |
+
+途中で切れた HEIC が WebKit で成功するのは、途中で切れた JPEG と同じ挙動（上の「Browser での取り込み」）。この場合、EdgePhotos は decode できた画像から derivative を作り、asset として登録する。original の byte 列は受け取ったままなので、後から別の環境で開き直せる。
 
 ### 自動テストで確認したこと
 
@@ -456,7 +471,8 @@ exifr は HEIC から `DateTimeOriginal`（`2019:07:14 09:30:05`）と Orientati
 - backup → restore で HEIC の original bytes と checksum が維持され、manifest が v2 で `image/heic` を持つ。`verifyLibrary` も通る
 - share では derivative しか出ず、応答に `originals/`・filename・`image/heic`・SHA-256 のいずれも現れない。preview は `derivatives/v1/{id}/preview.jpg` の JPEG
 - v1 manifest は今も読め、v1 で `image/heic` を名乗る manifest は `contentType` を名指しして拒否される
-- e2e: WebKit は HEIC を追加し、記録された形式が `image/heic`、寸法が 32x64（EXIF Orientation 6 が反映された値）。timeline の thumbnail も 32x64 で、derivative 自体が正しい向きになっている。Chromium は「このブラウザでは HEIC を処理できません」と表示し、reserve へ進まない
+- e2e: WebKit は HEIC を追加し、記録された形式が `image/heic`、寸法が 32x64（EXIF Orientation 6 が反映された値）、`takenAt` が `2019-07-14T09:30:05`。timeline の thumbnail も 32x64 で、derivative 自体が正しい向きになっている。Chromium は「このブラウザでは HEIC を処理できません」と表示し、reserve へ進まない
+- e2e: `ftyp` だけ残して中身を落とした HEIC は、WebKit では「HEIC を読み取れませんでした」、Chromium では「このブラウザでは HEIC を処理できません」になり、どちらでも asset にならない。ブラウザの制約とファイルの破損を分けて伝えられている
 
 ### 観測した不安定な失敗
 
@@ -473,6 +489,7 @@ iPhone Safari:
 - 48MP の HEIC を複数選択する。iOS Safari の memory 上限（jetsam）と 48MP 以上の decode を見る。落ちる場合は前処理の並列数 1 を試す（[D-020](decisions.md)）
 - 写真ピッカーが実際に何を渡すかを確かめる。`accept` に `image/heic` と `image/heif` を含めた状態で、HEIC を選んだときに原本の HEIC が届くか、JPEG に変換されるか。EdgePhotos が記録する形式が、届いた bytes と一致していること（[D-030](decisions.md)）
 - JPEG を選んだときに HEIC へ transcode されないこと。WebKit で報告され修正された挙動が、利用中の Safari に残っていないかを見る
+- 実機の HEIC（向きを EXIF ではなく `irot` / `imir` で持つもの）で、thumbnail / preview の向きが合うこと
 - iCloud にしかない写真を選ぶ
 - 100〜200 枚を選ぶ
 - upload 中に画面をロックする、Safari を background へ移す、Wi-Fi とモバイル回線を切り替える

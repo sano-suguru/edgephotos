@@ -676,5 +676,7 @@ Chrome / Firefox のために libheif（WASM）や Cloudflare Images を入れ�
 - HEIC の decode は JPEG より重くなります。12.2MP で decode が約 1.7 倍、decode 後の derivative 生成は同じです（[benchmarks.md](benchmarks.md)）。bitmap の memory は JPEG と同じで、並列数 2 の制限（[D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する)）がそのまま効きます
 - bundle は probe 用 fixture の 684 byte（gzip 495 byte）だけ増えます
 - HEIC の decoder は OS / browser のものです。EdgePhotos が足す parser は `ftyp` の読み取りだけで、Worker は decode しません
+- 途中で切れた HEIC は、WebKit では decode に成功します（途中で切れた JPEG と同じ既知の挙動）。その場合は decode できた画像から derivative を作って登録します。original の byte 列は受け取ったままなので、後から別の環境で開き直せます。`ftyp` しか残っていないものなど、decode できないものは登録しません（[verification.md](verification.md)）
+- fixture の orientation は EXIF で持っています。実機の HEIC が使う `irot` / `imir` は未確認です
 
 再検討する条件は、cross-browser の HEIC upload が実際の要求になったとき、または native client を作るときです。その場合も、まず original を変えずに derivative を作る経路を探します。
