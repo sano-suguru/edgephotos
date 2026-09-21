@@ -28,33 +28,10 @@
 
 この 5 段階の完了をもって、外部 alpha の前提が揃いました。
 
-### Feature 1: Upload + Timeline
+- **Feature 1 — Upload + Timeline:** owner が写真を upload し、完了後に timeline へ表示されるようにしました。original / thumbnail / preview は想定した経路で保存・取得され、refresh 後も状態が一貫します
+- **Feature 2 — Favorite + Albums:** favorite の切り替えと、album の作成・変更・削除、asset の追加・削除を実装しました
+- **Feature 3 — Sharing:** album の共有リンクを発行し、expiry・revoke・regenerate を機能させました。guest が見られるのは許可された thumbnail / preview だけです
+- **Feature 4 — Delete + Restore:** trash への移動と復元、明示操作としての完全削除、中断した purge の再開を実装しました
+- **Feature 5 — Export + Restore:** metadata と original manifest を export し、別の空環境へ restore できるようにしました。restore 後に asset 数、hash、album 関係を検証できます
 
-- ✅ owner が写真を upload できる
-- ✅ upload 完了後に timeline へ表示される
-- ✅ original / thumbnail / preview が想定した経路で保存・取得できる（実 R2 で確認済み。PUT / GET とも Browser から R2 へ直行し、Worker は本体を中継しない）
-- ✅ refresh 後も状態が一貫する
-
-### Feature 2: Favorite + Albums
-
-- ✅ favorite を切り替えられる
-- ✅ album を作成・変更・削除できる
-- ✅ asset を album へ追加・削除できる
-
-### Feature 3: Sharing
-
-- ✅ album の共有リンクを発行できる
-- ✅ expiry、revoke、regenerate が機能する
-- ✅ guest は許可された thumbnail / preview のみ閲覧できる
-
-### Feature 4: Delete + Restore
-
-- ✅ asset を trash へ移動・復元できる
-- ✅ permanent delete を明示操作として実行できる
-- ✅ 中断した purge を再開できる
-
-### Feature 5: Export + Restore
-
-- ✅ metadata と original manifest を export できる
-- ✅ 別の空環境へ restore できる（local の別 D1 / R2 で自動テスト済み、実環境でも `edgephotos-restore-test` へ実測済み）
-- ✅ restore 後に asset 数、hash、album 関係を検証できる
+確認した内容は [verification.md](verification.md) にあります。
