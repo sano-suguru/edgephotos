@@ -1,6 +1,6 @@
 # 変更の記録
 
-この文書は、完了した実装段階を新しい順に索引します。1 段階あたり数行で、詳細は持ちません。
+この文書は、完了した実装段階を新しい順に索引します。判断・検証・測定の詳細は持ちませんが、その段階固有の完了条件は残します。
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
