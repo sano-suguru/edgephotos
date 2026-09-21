@@ -12,7 +12,9 @@ summary は batch の終わりに、追加した枚数・登録済みだった�
 
 同じ file では変わらない失敗（100MB 超、途中で切れた file、decode できない HEIC、server が original そのものを拒否した場合）は再試行の対象から外し、理由を出します。duplicate は失敗ではなく通常の結果のままです。
 
-storage が前の reservation の PUT を拒否したときは、新しい reservation から始めます。端末の時計が進んでいると、失効した presigned URL を期限内と読み続けて、同じ拒否を繰り返していました。
+再試行は file に触れる前に server へ聞きます。転送も登録も終わっていて応答だけ失った写真は、1 往復で確定します。decode や derivative の作り直しは行いません。前処理でしか起きない失敗（memory 不足、decode 失敗）が、すでに保存済みの写真を失敗として見せることがなくなりました。
+
+storage が前の reservation の PUT を拒否したときは、新しい reservation から始めます。端末の時計が遅れていると、失効した presigned URL をまだ期限内と読み続けて、同じ拒否を繰り返していました。
 
 batch の state machine は `src/web/features/uploads/batch.ts` に分けて、Browser なしで自動テストできるようにしました。
 

@@ -80,30 +80,38 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
   }
 
   async function runOne(item: UploadItem, file: File) {
-    let stage: UploadState = 'preparing'
+    let stage: UploadState = 'queued'
     const setStage = (next: UploadState) => {
       stage = next
       update(item.id, { state: next })
     }
+    // Reading the file, hashing it and rendering its derivatives happens once, and only if this attempt
+    // finds it has bytes to send. A retry of a photo the server already registered asks the server first
+    // and never gets here, so a file that would no longer decode cannot turn a stored photo into a failure.
+    let photo: PreparedUpload | null = null
+    const prepared = async () => {
+      if (!photo) {
+        setStage('preparing')
+        photo = await deps.prepare(file)
+      }
+      return photo
+    }
     try {
-      setStage('preparing')
-      const photo = await deps.prepare(file)
       const transferDeps: TransferDeps = {
-        reserve: () => deps.reserve(file, photo),
+        reserve: async () => deps.reserve(file, await prepared()),
         put: deps.put,
         finalize: deps.finalize,
         remember: (r) => (r ? reservations.set(item.id, r) : reservations.delete(item.id)),
         now: deps.now,
         wait: deps.wait,
       }
+      const bodies = async () => {
+        const ready = await prepared()
+        return { original: file, thumbnail: ready.thumbnail, preview: ready.preview }
+      }
       let result: Awaited<ReturnType<typeof transferPhoto>>
       try {
-        result = await transferPhoto(
-          transferDeps,
-          { original: file, thumbnail: photo.thumbnail, preview: photo.preview },
-          reservations.get(item.id) ?? null,
-          setStage,
-        )
+        result = await transferPhoto(transferDeps, bodies, reservations.get(item.id) ?? null, setStage)
       } catch (err) {
         // The library already holds these bytes: a normal outcome, and nothing left to retry.
         if (err instanceof ApiRequestError && err.code === 'DUPLICATE_ASSET') {

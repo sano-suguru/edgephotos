@@ -4,11 +4,16 @@ import { StorageUploadError } from '../../lib/storage-put'
 
 // Pure orchestration of reserve -> PUT -> finalize for one photo (no DOM), so retries can be unit-tested.
 //
-// A retry first tries to finish the reservation of the earlier attempt: when only finalize failed (a server
-// error, a lost response), the photo is registered without sending its bytes again, and no second
-// reservation is left behind for storage cleanup. Objects the server reports missing are sent again while
-// the signed URLs are still valid; if storage refuses one of those PUTs, or the URLs have lapsed, the photo
-// starts over with a new reservation.
+// A retry asks the server before it touches the file. It first tries to finish the reservation of the
+// earlier attempt: when only finalize failed (a server error, a lost response), the photo is registered
+// without sending its bytes again, and no second reservation is left behind for storage cleanup. Objects
+// the server reports missing are sent again while the signed URLs are still valid; if storage refuses one
+// of those PUTs, or the URLs have lapsed, the photo starts over with a new reservation.
+//
+// `bodies` is a promise for the parts to send, not the parts themselves: reading the file, hashing it and
+// rendering its derivatives is work this never asks for until it knows bytes have to travel. A photo the
+// server already stored is finished by one request, and a retry can never turn a stored photo into a
+// failed row because its file would not decode a second time.
 
 export type Variant = 'original' | 'thumbnail' | 'preview'
 
@@ -28,7 +33,7 @@ const URL_MARGIN_MS = 30_000
 
 export async function transferPhoto(
   deps: TransferDeps,
-  bodies: Record<Variant, Blob>,
+  bodies: () => Promise<Record<Variant, Blob>>,
   previous: UploadReservation | null,
   onStage: (stage: 'uploading' | 'finalizing') => void,
 ): Promise<UploadFinalizeResult> {
@@ -43,14 +48,15 @@ export async function transferPhoto(
     }
     const usable = Date.parse(previous.upload.expiresAt) - deps.now() > URL_MARGIN_MS
     if (missing && usable) {
-      // `usable` compares a server timestamp with this device's clock. A clock that runs fast keeps
-      // calling lapsed URLs usable, and storage answers those with 403, so storage refusing the PUT
+      // `usable` compares a server timestamp with this device's clock. A clock that runs behind reads a
+      // lapsed URL as having time left, and storage answers those with 403, so storage refusing the PUT
       // settles that the reservation is finished whatever its stated expiry says. Starting over here is
       // what stops a retry repeating the same refused PUT forever; the objects the reservation left
       // behind are storage cleanup's (docs/decisions.md D-023).
       try {
+        const ready = await bodies()
         onStage('uploading')
-        await Promise.all(missing.map((v) => deps.put(previous.targets[v], bodies[v])))
+        await Promise.all(missing.map((v) => deps.put(previous.targets[v], ready[v])))
         onStage('finalizing')
         return done(deps, await finalizeWithRetry(deps, previous.upload.id))
       } catch (err) {
@@ -65,7 +71,8 @@ export async function transferPhoto(
   const reservation = await deps.reserve()
   deps.remember(reservation)
   onStage('uploading')
-  await Promise.all(VARIANTS.map((v) => deps.put(reservation.targets[v], bodies[v])))
+  const ready = await bodies()
+  await Promise.all(VARIANTS.map((v) => deps.put(reservation.targets[v], ready[v])))
   onStage('finalizing')
   return done(deps, await finalizeWithRetry(deps, reservation.upload.id))
 }

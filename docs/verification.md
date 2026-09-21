@@ -510,7 +510,8 @@ batch の state machine を、upload protocol の代役に対して動かした�
 | 80 行 / 60 枚（20 枚は二重選択）、5 回に 1 回の転送失敗 | 1 回目で失敗した行が残り、成功と duplicate は確定。再試行後は失敗 0、asset は 60 |
 | 100 枚をまとめて選択 | 同時に前処理した枚数の最大は 2（`createTaskLimiter(2)`、[D-020](decisions.md)）。全件 done、asset は 100 |
 | 1 枚だけ転送失敗、他は成功 | 失敗 1・完了 4。asset は 4。再試行では失敗した行の file だけを前処理し直し、asset は 5 になる |
-| 転送済みで finalize の応答だけ失った | 再試行は前の reservation の finalize だけを送る（reserve 0 回、PUT 0 回）。asset は 1 |
+| 転送済みで finalize の応答だけ失った | 再試行は前の reservation の finalize だけを送る（prepare 0 回、reserve 0 回、PUT 0 回）。asset は 1 |
+| 同上で、再試行時に file が decode できない | 完了する。server へ先に聞くため前処理に入らない。asset は 1 |
 | storage が PUT を拒否し続ける | 再試行のたびに新しい reservation から始める（2 回の再試行で reserve 3 回）。拒否された reservation へ送り直し続けない |
 | 到達できない network | reservation を保持したまま（2 回の試行で reserve 1 回） |
 | 100MB 超・途中で切れた file・HEIC を decode できない Browser・decode 失敗 | 再試行の対象にしない。file を手放すので、ボタンからも拾われない |

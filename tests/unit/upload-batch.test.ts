@@ -218,20 +218,44 @@ describe('retrying a batch', () => {
     expect(h.batch.items.value[0].message).toContain('再試行すると、転送をやり直さずに登録します')
 
     lost = false
-    h.calls.reserve.length = 0
-    h.calls.put.length = 0
+    for (const c of Object.values(h.calls)) c.length = 0
     await h.batch.retry()
     expect(h.batch.items.value[0].state).toBe('done')
-    // The reservation from the first attempt finished: no second reservation, and no bytes sent twice.
+    // The reservation from the first attempt finished with one request. Nothing was reserved, nothing was
+    // sent, and the file was not read or decoded again: the retry asked the server before touching it.
+    expect(h.calls.prepare).toEqual([])
     expect(h.calls.reserve).toEqual([])
     expect(h.calls.put).toEqual([])
+    expect(h.calls.finalize).toEqual(['upload-1'])
+    expect(h.server.assets.size).toBe(1)
+  })
+
+  it('finishes a photo the server already stored even when its file would no longer prepare', async () => {
+    // The worst shape of a lost finalize: the objects are in storage and the server registered the photo,
+    // but the answer never arrived. If the retry prepared the file first — a HEIC this browser can no
+    // longer decode, a file the phone dropped under memory pressure — the row would read as a failure
+    // although the photo is in the library.
+    let attempt = 0
+    const h = harness(({ phase }) => {
+      if (phase === 'finalize' && attempt === 1) return serverError()
+      if (phase === 'prepare' && attempt === 2) return new ImageDecodeError('undecodable', 'image/heic')
+      return undefined
+    })
+    attempt = 1
+    await h.batch.enqueue([photo('a')])
+    expect(h.batch.items.value[0]).toMatchObject({ state: 'error', retryable: true })
+
+    attempt = 2
+    await h.batch.retry()
+    expect(h.batch.items.value[0].state).toBe('done')
+    expect(h.calls.prepare).toEqual(['a.jpg'])
     expect(h.server.assets.size).toBe(1)
   })
 
   it('starts over when storage refuses the objects of the earlier reservation', async () => {
     // The first attempt never reaches storage, so its reservation is kept. By the time the retry sends the
-    // bytes, the signed URLs have lapsed; this device's clock still calls them valid, and storage answers
-    // 403. Only a fresh reservation can finish this photo.
+    // bytes, the signed URLs have lapsed; this device's clock runs behind, so it still reads time left on
+    // them, and storage answers 403. Only a fresh reservation can finish this photo.
     let attempt = 0
     const h = harness(({ phase, url }) => {
       if (phase !== 'put' || !url?.startsWith('upload-1/')) return undefined
@@ -249,7 +273,7 @@ describe('retrying a batch', () => {
     expect(h.calls.reserve).toHaveLength(2)
   })
 
-  it('does not repeat a refused PUT forever when the device clock keeps lapsed URLs looking valid', async () => {
+  it('does not repeat a refused PUT forever when a slow device clock keeps lapsed URLs looking valid', async () => {
     // Storage refuses every PUT. Each retry must start from a new reservation; leaving the refused one in
     // place would send the same photo to the same refused URLs on every press of the button.
     const h = harness(({ phase }) => (phase === 'put' ? new StorageUploadError(403) : undefined))
@@ -265,9 +289,12 @@ describe('retrying a batch', () => {
   it('keeps the reservation when the network is simply unreachable', async () => {
     const h = harness(({ phase }) => (phase === 'finalize' ? offline() : undefined))
     await h.batch.enqueue([photo('a')])
+    h.calls.prepare.length = 0
     await h.batch.retry()
-    // One reservation across both attempts: an unreachable server says nothing about it.
+    // One reservation across both attempts: an unreachable server says nothing about it. And the retry
+    // stopped at the first request, so the file was not read again either.
     expect(h.calls.reserve).toHaveLength(1)
+    expect(h.calls.prepare).toEqual([])
   })
 })
 

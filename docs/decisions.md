@@ -296,7 +296,11 @@ Client が PUT 前に APP1 / APP13 を取り除きます（`src/web/lib/jpeg-met
 
 **Web の再試行をどこから始めるか決める。** 前の試行の reservation の finalize から始めます。`409 UPLOAD_OBJECT_MISSING` で presigned URL が期限内なら、欠けた object だけを PUT し直します。期限切れ・`404`・`410`・`422` なら新しい reservation から始めます（`src/web/features/uploads/transfer.ts`）。`410` と `404` は storage cleanup が片付けたあとの upload です（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。
 
-期限内かどうかは、server が返した `expiresAt` をこの端末の時計と比べて決めています。時計が進んでいる端末では、失効した URL をいつまでも期限内と読みます。そのため、欠けた object の PUT を storage が拒否した場合も、その reservation は終わったものとして新しい reservation から始めます。届かなかっただけ（network）のときは、reservation を保持したままにします。残った object は storage cleanup が片付けます（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。
+再試行は、file に触れる前に server へ聞きます。前の試行の reservation があるなら、まず finalize を送ります。ここで ready か duplicate が返れば、file の読み取り・SHA-256・decode・metadata 読み取り・derivative 生成はどれも行いません。bytes を送ると決まってから前処理します（`src/web/features/uploads/batch.ts`）。
+
+順番が逆だと、転送も finalize も server 側では成功していて応答だけ失った写真が、再試行の前処理で失敗したときに失敗として表示されます。実際には library に入っているので、「保存されたか分からない」を作ってしまいます。前処理の結果を保持し続ける案は採りません。memory を使い、1 枚あたりの derivative を抱えたまま待つことになるためです。
+
+期限内かどうかは、server が返した `expiresAt` をこの端末の時計と比べて決めています。時計が遅れている端末では、残り時間を実際より長く見積もるため、失効した URL をいつまでも期限内と読みます。そのため、欠けた object の PUT を storage が拒否した場合も、その reservation は終わったものとして新しい reservation から始めます。届かなかっただけ（network）のときは、reservation を保持したままにします。残った object は storage cleanup が片付けます（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。
 
 **同じ file では変わらない失敗に再試行を出さない。** 転送の失敗（network、5xx、期限切れ）と、file そのものへの拒否は別に扱います。finalize が `422 UPLOAD_OBJECT_INVALID` で original について `incomplete_file` / `structure_unverified` / `content_type_mismatch` だけを報告した場合と、reserve が `400 VALIDATION_FAILED` を返した場合は、同じ file を送り直しても同じ答えになるため、その行を再試行の対象から外して理由を出します（`src/web/features/uploads/batch.ts`）。size や checksum、derivative についての拒否は転送の問題なので、これまでどおり再試行できます。
 
