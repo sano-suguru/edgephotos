@@ -27,6 +27,14 @@ test('uploads a photo with browser-made derivatives, and takes HEIC where it can
   // finalize only succeeds if the canvas JPEGs carry no EXIF/XMP/IPTC segment (WebKit adds them, D-020).
   expect(rows.get(name)).toContain('完了')
 
+  // The month navigation reads the real library through the same API (D-031). A canvas JPEG has no capture
+  // time, so the photo just uploaded belongs to this month in UTC.
+  await page.getByRole('button', { name: '年月で移動' }).click()
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  await expect(page.getByRole('dialog').locator(`button[data-month="${thisMonth}"]`)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toBeHidden()
+
   // Whether the HEIC is taken is a decode-capability question. An engine without a decoder says so before
   // anything is reserved or stored.
   if (heicDecodes) {

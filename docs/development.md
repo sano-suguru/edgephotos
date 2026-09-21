@@ -241,7 +241,7 @@ workerd の test では見えない、Browser 固有の部分だけを対象に�
 
 | spec | 確認すること | project |
 | --- | --- | --- |
-| `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC は実際に probe して decode できた環境で形式・向き・撮影日時まで確認し、できない環境では拒否の文言を確認する（decode の可否は engine ではなく実行環境で決まり、CI の Linux runner の WebKit は decode できない）。HEIC を名乗る壊れた bytes はどちらでも拒否される。presigned URL の期限切れ後に画像が回復すること。全件完了したアップロード表示だけが数秒後に消えること（実行中・失敗ありでは残る） | chromium, mobile-webkit |
+| `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC は実際に probe して decode できた環境で形式・向き・撮影日時まで確認し、できない環境では拒否の文言を確認する（decode の可否は engine ではなく実行環境で決まり、CI の Linux runner の WebKit は decode できない）。HEIC を名乗る壊れた bytes はどちらでも拒否される。presigned URL の期限切れ後に画像が回復すること。全件完了したアップロード表示だけが数秒後に消えること（実行中・失敗ありでは残る）。年月 navigation が実 library の月を出すこと | chromium, mobile-webkit |
 | `share.spec.ts` | album 作成 → viewer の menu から追加 → 共有リンク → 別 context の guest が閲覧（secret は Authorization header だけ、Cookie なし。thumbnail URL の期限切れから回復）→ 拡大表示の focus（閉じるボタンへ移り、Tab でも dialog 内に留まり、閉じると元の写真へ戻る）→ 再発行・無効化の確認 dialog（キャンセル・Escape では何も変わらない）→ 旧リンクと無効化したリンクは無効表示 | chromium |
 | `keyboard.spec.ts` | Base UI の Dialog / Menu の keyboard 操作と focus。viewer の ←/→ での移動（Menu 内では写真が変わらない）と、閉じたあとに最後の写真へ focus が戻ること | chromium |
 | `timeline.spec.ts` | 年月 navigation。数千枚・数年分の library は test 側が答えるので、確認するのは Browser 側だけ: 月を選ぶと URL に残りその月から表示されること、back / forward と reload で戻れること、上へ読んでも重複・欠けが出ないこと、月の見出しが scroll 中も上端に残ること、写真のある月だけが件数付きで並ぶこと | chromium, mobile-webkit |
