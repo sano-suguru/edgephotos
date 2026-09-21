@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi'
-import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION } from './export-manifest.ts'
+import { EXPORT_FORMAT } from './export-manifest.ts'
 
 // API schemas shared by the Worker (runtime validation + OpenAPI) and clients (types only).
 // Nothing here may reference server secrets or storage credentials.
@@ -272,16 +272,40 @@ export const ExportAlbumSchema = z
   })
   .openapi('ExportAlbum')
 
-export const ExportManifestSchema = z
-  .object({
-    format: z.literal(EXPORT_FORMAT),
-    formatVersion: z.literal(EXPORT_FORMAT_VERSION),
-    // When the last export page was read. Identifies the backup while a restore resumes.
-    exportedAt: InstantSchema,
+// v1 manifests were written before HEIC/HEIF were accepted as originals. Keeping the old enum on the v1
+// branch means a v1 backup is read under exactly the contract it was written under.
+export const EXPORT_V1_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
+
+const ExportManifestBase = z.object({
+  format: z.literal(EXPORT_FORMAT),
+  // When the last export page was read. Identifies the backup while a restore resumes.
+  exportedAt: InstantSchema,
+  albums: z.array(ExportAlbumSchema),
+})
+
+// The version selects the contract; there is no migration step between them. A reader that does not know
+// a version refuses the whole manifest rather than reading part of it (D-025).
+export const ExportManifestSchema = z.discriminatedUnion('formatVersion', [
+  ExportManifestBase.extend({
+    formatVersion: z.literal(1),
+    // Checked per asset rather than with a narrower enum, so every version parses to the same asset type
+    // and a reader does not have to branch on the version to use what it read.
+    assets: z.array(ExportAssetSchema).superRefine((assets, ctx) => {
+      assets.forEach((a, index) => {
+        if ((EXPORT_V1_CONTENT_TYPES as readonly string[]).includes(a.contentType)) return
+        ctx.addIssue({
+          code: 'custom',
+          path: [index, 'contentType'],
+          message: `formatVersion 1 has no ${a.contentType} originals`,
+        })
+      })
+    }),
+  }),
+  ExportManifestBase.extend({
+    formatVersion: z.literal(2),
     assets: z.array(ExportAssetSchema),
-    albums: z.array(ExportAlbumSchema),
-  })
-  .openapi('ExportManifest')
+  }),
+])
 
 // ---- Storage audit / cleanup (docs/decisions.md D-023) ----
 

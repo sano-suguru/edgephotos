@@ -485,7 +485,7 @@ describe('HEIC originals', () => {
   const put = async (
     app: Awaited<ReturnType<typeof makeApp>>,
     r: Awaited<ReturnType<typeof reserve>>,
-    p: Awaited<ReturnType<typeof heicPhoto>>,
+    p: Record<'original' | 'thumbnail' | 'preview', Uint8Array>,
   ) => {
     for (const v of ['original', 'thumbnail', 'preview'] as const) {
       const res = await putObject(app, r.targets[v], p[v])

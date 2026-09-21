@@ -6,7 +6,7 @@ import { z } from '@hono/zod-openapi'
 import {
   collectExportManifest,
   EXPORT_FORMAT,
-  EXPORT_FORMAT_VERSION,
+  EXPORT_FORMAT_VERSIONS_READ,
   manifestIntegrityIssues,
 } from '../../src/contracts/export-manifest.ts'
 import {
@@ -129,7 +129,7 @@ function fieldPath(path: readonly PropertyKey[]): string {
   return out || '(root)'
 }
 
-// Rejects anything that is not a v1 manifest before a caller can act on it. Split in two on purpose:
+// Rejects anything that is not a manifest this build can read, before a caller can act on it. Split in two on purpose:
 // the schema decides whether every value is well formed, manifestIntegrityIssues whether the whole is
 // consistent. Unknown keys are ignored, so a later v1 may add optional fields (D-025).
 export function validateManifest(value: unknown, source: string): ExportManifest {
@@ -143,16 +143,16 @@ export function validateManifest(value: unknown, source: string): ExportManifest
       `${source} is not an EdgePhotos export manifest: format is ${JSON.stringify(header.format)}, expected "${EXPORT_FORMAT}"`,
     )
   }
-  if (header.formatVersion !== EXPORT_FORMAT_VERSION) {
+  if (!EXPORT_FORMAT_VERSIONS_READ.some((v) => v === header.formatVersion)) {
     throw new BackupError(
-      `${source} has formatVersion ${JSON.stringify(header.formatVersion)}; this version reads ${EXPORT_FORMAT_VERSION}. ` +
+      `${source} has formatVersion ${JSON.stringify(header.formatVersion)}; this version reads ${EXPORT_FORMAT_VERSIONS_READ.join(' and ')}. ` +
         'Use the EdgePhotos release that wrote this backup.',
     )
   }
   const parsed = ExportManifestSchema.safeParse(value)
   if (!parsed.success) {
     throw issueList(
-      `${source} does not match the v1 export manifest contract`,
+      `${source} does not match the export manifest contract`,
       parsed.error.issues.map((issue) => `${fieldPath(issue.path)}: ${issue.message}`),
     )
   }
