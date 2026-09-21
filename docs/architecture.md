@@ -246,11 +246,15 @@ SHA-256 の出どころは 2 通りです。D-018 以降に finalize された a
 
 Browser の JPEG encoder が付ける APP1 / APP13 は、Client が PUT 前に取り除きます。WebKit は Exif の色空間・画素数と空の IPTC を書き出します。finalize は引き続き APP1 / APP13 を含む derivative を拒否します（[D-020](decisions.md)）。
 
-original の形式は JPEG / PNG / WebP です。HEIC / HEIF は Client が明示的に拒否します。
+original の形式は JPEG / PNG / WebP / HEIC / HEIF です。判定は Client と Worker が共有する 1 つの sniff が bytes から行います。HEIC / HEIF では `ftyp` box の major brand と compatible brands の両方を読み、still image の brand だけを受け入れます。image sequence と AVIF は拒否します（[D-030](decisions.md)）。
 
-iPhone の通常経路では、Safari の写真ピッカーが HEIC を JPEG に変換して渡す、現在報告されている挙動に任せます。これは Web 標準の保証ではありません。HEIC がそのまま渡された場合は、明示的なエラーになります（[D-019](decisions.md)）。
+`<input accept>` は選択 UI への hint です。どの形式を保存するかの根拠にはしません。filename と `File.type` も使いません。Client はファイルの先頭 1024 byte を読んで形式を決め、そのあとで全体を読みます。
 
-Web 版が保存する original は「Browser から受け取った byte 列」です。iOS が選択時に JPEG へ変換した場合、カメラロールの HEIC そのものは保存されません。
+HEIC / HEIF では、top-level box を歩いて、ファイル自身が宣言する box の長さと受け取った byte 数が整合するかも確認します。decoder は後半が失われた HEIC からでも画像を返すため、「表示できた」を原本が揃っている証拠にしません。Client と Worker の両方で確認し、整合しないものと判定しきれなかったものは asset にしません（[D-030](decisions.md)）。
+
+HEIC は decode できる環境でのみ受け付けます。判定は UA ではなく、埋め込んだ小さな HEIC を `createImageBitmap` に通す capability probe です。decode できない環境では、reserve と R2 PUT の前に拒否します。`image/heif` は HEVC 以外の codec を含められるため、この probe の対象にせず、そのファイル自身の decode 結果で判断します。
+
+Web 版が保存する original は「Browser から受け取った byte 列」です。写真ピッカーが選択時に別の形式へ変換した場合、保存されるのは変換後の byte 列で、その形式を sniff の結果として記録します。EdgePhotos が受け取っていない byte 列を保存したとは表示しません。
 
 ### 撮影日時（takenAt）
 
@@ -356,14 +360,14 @@ Client は `src/contracts/export-manifest.ts` で manifest に組み立てます
 
 original 本体を含む backup（差分）、backup ディレクトリの検査、空環境への restore（再開可能）、整合性検証は、`pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)、[D-024](decisions.md)）。
 
-### backup manifest v1
+### backup manifest v2
 
 `manifest.json`（backup ディレクトリ）と、ライブラリ画面からダウンロードする JSON は同じ contract です。shape は `ExportManifestSchema`（`src/contracts/schemas.ts`）、整合性の規則は `manifestIntegrityIssues`（`src/contracts/export-manifest.ts`）が定義します（[D-025](decisions.md)）。
 
 ```jsonc
 {
   "format": "edgephotos-export",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "exportedAt": "2026-09-18T04:05:06.789Z",
   "assets": [ /* ... */ ],
   "albums": [ /* ... */ ]
@@ -401,8 +405,9 @@ shape とは別に、次を満たさない manifest は拒否します。
 versioning:
 
 - reader は知らない `formatVersion` を部分的に読まずに拒否します
-- reader は知らない key を無視します。したがって v1 に足してよいのは、**その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field だけ**です。10 年後に古い CLI がこの backup を読む可能性を前提にします
+- reader は知らない key を無視します。したがって既存の version に足してよいのは、**その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field だけ**です。10 年後に古い CLI がこの backup を読む可能性を前提にします
 - 上の条件を満たさない追加、および既存 field の意味・書式・必須性の変更では `formatVersion` を上げます
+- 現在の reader は v1 と v2 を読みます。新規 export は v2 です。version ごとの契約の違いは、v2 が HEIC / HEIF の original を持てることだけです（[D-030](decisions.md)）
 - 未公開の旧形式への fallback は持ちません
 
 paged export は、ライブラリが変化しうる間に 1 ページずつ読みます。asset ページに無い写真への membership は組み立て時に落とすので、manifest が知らない写真を指すことはありません。

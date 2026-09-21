@@ -446,10 +446,10 @@ export function AssetViewer(props: {
             <dt class="text-white/50">追加日時</dt>
             <dd>{formatDateTime(captureParts({ takenAt: null, createdAt: asset.createdAt }))}</dd>
           </dl>
-          {/* D-019: the stored file is what the browser handed over, not necessarily the camera's file. */}
+          {/* The stored file is what the browser handed over, not necessarily the camera's file. */}
           <p class="mt-3 text-xs text-white/50">
             サイズと形式は、アップロード時にブラウザから受け取ったファイルのものです。このファイルは変更せずに保存しています。iPhone
-            では、写真を選んだ時点で HEIC が JPEG に変換されていることがあります。
+            では、写真を選んだ時点で別の形式に変換されていることがあります。
           </p>
         </aside>
       )}

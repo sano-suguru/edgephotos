@@ -1,4 +1,33 @@
+import { readFileSync } from 'node:fs'
 import { expect, type Locator, type Page } from '@playwright/test'
+
+// The same committed HEIC the worker tests use (tests/fixtures/README.md). Synthetic, 64x32 with EXIF
+// Orientation 6, so a browser that honours orientation reports 32x64.
+export const heicFixture = () => readFileSync('tests/fixtures/still.heic')
+
+// The same bytes plus a `free` box, which is legal ISO BMFF padding: still a whole HEIC, with a SHA-256 of
+// its own. A run that stores this file can be retried without the second attempt reporting a duplicate.
+export function uniqueHeic(): Buffer {
+  const seed = Buffer.alloc(4)
+  seed.writeUInt32BE(Math.floor(Math.random() * 0xffffffff))
+  return Buffer.concat([heicFixture(), Buffer.from([0, 0, 0, 12, 0x66, 0x72, 0x65, 0x65]), seed])
+}
+
+// Whether this engine, on this machine, has a HEVC/HEIC decoder. It is not a property of the engine name:
+// WebKit decodes HEIC on macOS and not on the Linux runners CI uses, which is why the app asks the same
+// question at runtime instead of looking at the user agent (docs/decisions.md D-030).
+export async function canDecodeHeic(page: Page): Promise<boolean> {
+  return page.evaluate(async (base64) => {
+    try {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/heic' }))
+      bitmap.close()
+      return true
+    } catch {
+      return false
+    }
+  }, heicFixture().toString('base64'))
+}
 
 // Synthetic photos drawn in the browser under test: decodable, random (so every run has a new
 // SHA-256 and never hits DUPLICATE_ASSET), and free of real people or places.

@@ -1,14 +1,21 @@
 import exifr from 'exifr'
+import { type ContentType, SNIFF_HEAD_BYTES, scanIsoBmffBoxes } from '../../contracts/image-type'
 import { exifDateToIso } from './exif-date'
+import { canDecodeHeic } from './heic-probe'
+import {
+  FileTooLargeError,
+  HeicNotDecodableHereError,
+  ImageDecodeError,
+  IncompleteFileError,
+  UnsupportedFileError,
+} from './image-errors'
 import { stripJpegMetadata } from './jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from './original-limit'
 import { originalTypeOf } from './original-type'
+import { SUPPORTED_TYPES, type SupportedType } from './supported-types'
 
 // Client-side preprocessing. The original File is uploaded untouched; derivatives are re-rendered
 // through a canvas, so they never carry the original's EXIF/GPS (encoder-added segments are stripped).
-
-export const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
-export type SupportedType = (typeof SUPPORTED_TYPES)[number]
 
 export const THUMBNAIL_MAX_EDGE = 512
 export const PREVIEW_MAX_EDGE = 2048
@@ -26,13 +33,13 @@ export type PreparedPhoto = {
   preview: Blob
 }
 
-export class UnsupportedFileError extends Error {}
-export class FileTooLargeError extends UnsupportedFileError {}
-
-// HEIC/HEIF is not accepted in v1 (docs/decisions.md D-019). Desktop browsers may report an empty type,
-// so the extension is checked too.
-export function isHeic(file: File): boolean {
-  return /^image\/hei[cf](-sequence)?$/.test(file.type) || /\.(heic|heif|hif)$/i.test(file.name)
+export {
+  FileTooLargeError,
+  HeicNotDecodableHereError,
+  ImageDecodeError,
+  SUPPORTED_TYPES,
+  type SupportedType,
+  UnsupportedFileError,
 }
 
 export async function sha256Hex(data: ArrayBuffer): Promise<string> {
@@ -92,11 +99,32 @@ async function renderAll(bitmap: ImageBitmap, variants: readonly DerivativeVaria
   return out
 }
 
-async function decode(source: Blob): Promise<ImageBitmap> {
+// `imageOrientation: 'from-image'` also covers HEIC, whose orientation lives in the file rather than in a
+// JPEG APP1 segment: a decoded bitmap is already the right way up.
+async function decode(source: Blob, contentType: ContentType | null): Promise<ImageBitmap> {
   try {
     return await createImageBitmap(source, { imageOrientation: 'from-image' })
   } catch {
-    throw new UnsupportedFileError('The image could not be decoded')
+    throw new ImageDecodeError('The image could not be decoded', contentType)
+  }
+}
+
+// Refuses a HEIC in a browser with no HEVC decoder, before anything is read, reserved or stored. Only
+// image/heic is asked about: the probe answers for HEVC, and a generic image/heif may hold another codec,
+// so that file's own decode is what decides for it.
+async function refuseIfHeicIsUndecodableHere(contentType: ContentType | null) {
+  if (contentType === 'image/heic' && !(await canDecodeHeic())) {
+    throw new HeicNotDecodableHereError('This browser cannot decode HEIC', contentType)
+  }
+}
+
+// A HEIC missing its second half still decodes in some browsers, so the picture on screen is no evidence
+// that the file is whole. Its boxes say how long it should be; a photo library keeps the original, so a
+// file that is not all here is refused rather than stored (docs/decisions.md D-030).
+function refuseIfIncomplete(contentType: ContentType, bytes: Uint8Array) {
+  if (contentType !== 'image/heic' && contentType !== 'image/heif') return
+  if (scanIsoBmffBoxes(bytes, bytes.byteLength) !== 'complete') {
+    throw new IncompleteFileError('The file is shorter than the boxes inside it declare')
   }
 }
 
@@ -107,7 +135,10 @@ export async function renderDerivatives(
   source: Blob,
   variants: readonly DerivativeVariant[],
 ): Promise<Partial<Record<DerivativeVariant, Blob>>> {
-  const bitmap = await decode(source)
+  // The repair download sets the Blob type from the asset's recorded content type.
+  const contentType = (SUPPORTED_TYPES as readonly string[]).includes(source.type) ? (source.type as ContentType) : null
+  await refuseIfHeicIsUndecodableHere(contentType)
+  const bitmap = await decode(source, contentType)
   try {
     return await renderAll(bitmap, variants)
   } finally {
@@ -116,17 +147,23 @@ export async function renderDerivatives(
 }
 
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
-  // Cheap refusals before reading: HEIC by name or type, non-images by the browser's type, oversized files.
-  if (isHeic(file) || (file.type !== '' && !file.type.startsWith('image/'))) {
-    throw new UnsupportedFileError(`Unsupported file type: ${file.type || 'unknown'}`)
-  }
   if (file.size > ORIGINAL_MAX_BYTES) throw new FileTooLargeError(`File is larger than ${ORIGINAL_MAX_BYTES} bytes`)
-  const buffer = await file.arrayBuffer()
-  const contentType = originalTypeOf(buffer)
+  // The format comes from the bytes, never from the name or the type the picker guessed: a camera file
+  // handed over as application/octet-stream is still that camera file. Reading the head first also means a
+  // file this browser will refuse never costs a full read.
+  const contentType = originalTypeOf(await file.slice(0, SNIFF_HEAD_BYTES).arrayBuffer())
   if (!contentType) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
-  const [sha256, takenAt] = await Promise.all([sha256Hex(buffer), readTakenAt(buffer)])
-  const bitmap = await decode(file)
+  // Before the reservation and before any PUT: a photo this browser cannot turn into derivatives must not
+  // reach storage half-done.
+  await refuseIfHeicIsUndecodableHere(contentType)
+  const buffer = await file.arrayBuffer()
+  refuseIfIncomplete(contentType, new Uint8Array(buffer))
+  const sha256 = await sha256Hex(buffer)
+  const bitmap = await decode(file, contentType)
   try {
+    // Only now, on a file a real decoder accepted: the metadata reader is the least defensive thing we run
+    // over an untrusted file, so it is the last to see one (docs/decisions.md D-030).
+    const takenAt = await readTakenAt(buffer)
     const { thumbnail, preview } = await renderAll(bitmap, ['thumbnail', 'preview'])
     return {
       file,

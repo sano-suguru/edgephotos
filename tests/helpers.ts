@@ -186,6 +186,15 @@ export function syntheticWebp(seed = ++counter): Uint8Array {
   return concat(riff, new Uint8Array(40).fill(seed & 0xff))
 }
 
+function fixtureBytes(base64: string): Uint8Array {
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+}
+
+// Real HEIC bytes (tests/fixtures/README.md). Unlike the synthetic JPEG/PNG/WebP helpers these are a
+// decodable file: the sniff must accept the brand layout a real encoder writes, not one we invented.
+export const heicFixture = () => fixtureBytes(env.TEST_HEIC_STILL)
+export const heicProbeFixture = () => fixtureBytes(env.TEST_HEIC_PROBE)
+
 export async function sha256(bytes: Uint8Array): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -224,9 +233,14 @@ export async function putObject(app: App, target: UploadReservation['targets']['
   return app.request(target.url, { method: 'PUT', headers: target.headers, body: bytes as Uint8Array<ArrayBuffer> })
 }
 
-export async function uploadPhoto(app: App, p?: PhotoFixture, metadata: Record<string, unknown> = {}) {
+export async function uploadPhoto(
+  app: App,
+  p?: PhotoFixture,
+  metadata: Record<string, unknown> = {},
+  contentType = 'image/jpeg',
+) {
   const fixture = p ?? (await photo())
-  const r = await reserve(app, fixture, metadata)
+  const r = await reserve(app, fixture, metadata, contentType)
   for (const v of ['original', 'thumbnail', 'preview'] as const) {
     const res = await putObject(app, r.targets[v], fixture[v])
     if (!res.ok) throw new Error(`PUT ${v} failed: ${res.status}`)

@@ -1,6 +1,6 @@
 // Byte-level checks run at finalize. The Worker never decodes or re-encodes images.
 
-export { type ContentType, sniffImageType } from '../../contracts/image-type'
+export { type ContentType, scanIsoBmffBoxes, sniffImageType } from '../../contracts/image-type'
 
 import { sniffImageType } from '../../contracts/image-type'
 

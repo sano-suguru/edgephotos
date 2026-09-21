@@ -1,16 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { LIMITS } from '../../src/contracts/schemas'
+import { SNIFF_HEAD_BYTES, scanIsoBmffBoxes } from '../../src/contracts/image-type'
+import { LIMITS, ORIGINAL_CONTENT_TYPES } from '../../src/contracts/schemas'
 import { resumePurges } from '../../src/web/features/settings/resume-purges'
 import { canAutoDismissUploads, mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
+import { unsupportedFileMessage } from '../../src/web/features/uploads/upload-message'
 import { captureParts, formatDate, monthKey } from '../../src/web/lib/dates'
 import { exifDateToIso } from '../../src/web/lib/exif-date'
+import {
+  FileTooLargeError,
+  HeicNotDecodableHereError,
+  ImageDecodeError,
+  IncompleteFileError,
+  UnsupportedFileError,
+} from '../../src/web/lib/image-errors'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
 import { originalTypeOf } from '../../src/web/lib/original-type'
 import { putOutcome } from '../../src/web/lib/storage-put'
+import { SUPPORTED_TYPES } from '../../src/web/lib/supported-types'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
 import { scanJpegForMetadata, sniffImageType } from '../../src/worker/storage/inspect'
-import { syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
+import { heicFixture, syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
 
 describe('capture date for grouping', () => {
   it('uses the camera wall-clock digits whether or not takenAt has an offset', () => {
@@ -214,7 +224,7 @@ describe('original format detection', () => {
     for (const bytes of [syntheticJpeg(), syntheticPng(), syntheticWebp()]) {
       expect(originalTypeOf(buf(bytes))).toBe(sniffImageType(bytes))
     }
-    // HEIC (ftyp box), GIF, empty and short files are not accepted.
+    // A truncated ftyp box, GIF, empty and short files are not accepted.
     const heic = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63, 0, 0, 0, 0])
     for (const bytes of [heic, new TextEncoder().encode('GIF89a......'), new Uint8Array(0), new Uint8Array([0xff])]) {
       expect(originalTypeOf(buf(bytes))).toBeNull()
@@ -254,5 +264,164 @@ describe('resuming unfinished deletes', () => {
       }),
     ).rejects.toBe(failure)
     expect(called).toEqual(['a', 'b'])
+  })
+})
+
+describe('ISOBMFF brand detection', () => {
+  // size(4) + 'ftyp' + major + minor + compatible brands. `size` defaults to the real length.
+  const ftyp = (major: string, compatible: string[] = [], size?: number, tail = 0) => {
+    const brands = [major, '\0\0\0\0', ...compatible].join('')
+    const body = new TextEncoder().encode(`ftyp${brands}`)
+    const out = new Uint8Array(4 + body.length + tail)
+    const declared = size ?? 4 + body.length
+    out.set([declared >>> 24, (declared >>> 16) & 0xff, (declared >>> 8) & 0xff, declared & 0xff])
+    out.set(body, 4)
+    return out
+  }
+
+  it('accepts HEIC still brands', () => {
+    for (const major of ['heic', 'heix', 'heim', 'heis']) {
+      expect(sniffImageType(ftyp(major, ['mif1']))).toBe('image/heic')
+    }
+  })
+
+  it('accepts a real HEIC file', () => {
+    expect(sniffImageType(heicFixture())).toBe('image/heic')
+  })
+
+  it('reads generic HEIF as image/heif, but prefers image/heic when the compatible brands say so', () => {
+    expect(sniffImageType(ftyp('mif1', ['mif1']))).toBe('image/heif')
+    expect(sniffImageType(ftyp('mif1', ['mif1', 'heic']))).toBe('image/heic')
+    expect(sniffImageType(ftyp('mif1', ['heis']))).toBe('image/heic')
+  })
+
+  it('refuses sequences and AVIF wherever the brand is declared', () => {
+    for (const major of ['hevc', 'hevx', 'hevm', 'hevs', 'msf1', 'avif', 'avis']) {
+      expect(sniffImageType(ftyp(major, ['mif1']))).toBeNull()
+    }
+    // A file that declares a still brand and a sequence/AVIF brand is ambiguous: refuse, do not guess.
+    expect(sniffImageType(ftyp('mif1', ['avif']))).toBeNull()
+    expect(sniffImageType(ftyp('heic', ['hevc']))).toBeNull()
+  })
+
+  it('refuses malformed ftyp boxes', () => {
+    expect(sniffImageType(ftyp('heic', [], 12))).toBeNull() // size below the minimum
+    expect(sniffImageType(ftyp('heic', ['mif1'], 0))).toBeNull() // "extends to end of file"
+    expect(sniffImageType(ftyp('heic', ['mif1'], 1))).toBeNull() // 64-bit largesize
+    expect(sniffImageType(ftyp('heic', ['mif1'], 4096, 4096))).toBeNull() // above the sniff limit
+    expect(sniffImageType(ftyp('heic', ['mif1'], 64))).toBeNull() // declared past the data we have
+    expect(sniffImageType(ftyp('heic', ['mif1'], 18, 2))).toBeNull() // compatible brands not 4-byte units
+    expect(sniffImageType(new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]))).toBeNull() // truncated
+    expect(sniffImageType(ftyp('mp42', ['isom']))).toBeNull() // a real ftyp we do not accept
+  })
+
+  it('keeps reading the same window the client passes', () => {
+    const buf = (bytes: Uint8Array) => bytes.slice().buffer as ArrayBuffer
+    expect(originalTypeOf(buf(heicFixture()))).toBe('image/heic')
+    expect(SNIFF_HEAD_BYTES).toBeGreaterThanOrEqual(1024)
+  })
+})
+
+describe('HEIC fixture', () => {
+  it('is a real, small HEIC still', () => {
+    const bytes = heicFixture()
+    expect(bytes.byteLength).toBeLessThan(2048)
+    expect(String.fromCharCode(...bytes.subarray(4, 8))).toBe('ftyp')
+    expect(String.fromCharCode(...bytes.subarray(8, 12))).toBe('heic')
+  })
+})
+
+describe('upload failure messages', () => {
+  it('tells a browser limitation apart from a broken file', () => {
+    expect(unsupportedFileMessage(new HeicNotDecodableHereError('no decoder', 'image/heic'))).toMatch(
+      /このブラウザでは HEIC/,
+    )
+    expect(unsupportedFileMessage(new ImageDecodeError('failed', 'image/heic'))).toMatch(/HEIC を読み取れませんでした/)
+    // Never a browser-wide claim for generic HEIF: one HEIC probe cannot speak for other codecs.
+    const heif = unsupportedFileMessage(new ImageDecodeError('failed', 'image/heif'))
+    expect(heif).toMatch(/HEIF を読み取れませんでした/)
+    expect(heif).not.toMatch(/このブラウザでは HEIF/)
+    // A file that decodes but is not all there gets its own answer: nothing about the browser.
+    const incomplete = unsupportedFileMessage(new IncompleteFileError('short'))
+    expect(incomplete).toMatch(/最後まで揃っていません/)
+    expect(incomplete).not.toMatch(/ブラウザ/)
+    expect(unsupportedFileMessage(new FileTooLargeError('too big'))).toMatch(/100MB/)
+    expect(unsupportedFileMessage(new UnsupportedFileError('nope'))).toMatch(/対応していない形式/)
+  })
+
+  it('offers the picker exactly the formats the server accepts', () => {
+    expect([...SUPPORTED_TYPES]).toEqual([...ORIGINAL_CONTENT_TYPES])
+  })
+})
+
+describe('ISO BMFF completeness', () => {
+  // size(4) + type(4) + payload. `declared` overrides the size field without changing the payload.
+  const box = (type: string, payload: number, declared?: number) => {
+    const out = new Uint8Array(8 + payload)
+    const size = declared ?? 8 + payload
+    out.set([size >>> 24, (size >>> 16) & 0xff, (size >>> 8) & 0xff, size & 0xff])
+    out.set(new TextEncoder().encode(type), 4)
+    return out
+  }
+  const join = (...parts: Uint8Array[]) => {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0))
+    let at = 0
+    for (const p of parts) {
+      out.set(p, at)
+      at += p.byteLength
+    }
+    return out
+  }
+  const scan = (bytes: Uint8Array) => scanIsoBmffBoxes(bytes, bytes.byteLength)
+
+  it('accepts a file whose boxes tile it exactly', () => {
+    expect(scan(join(box('ftyp', 28), box('meta', 100), box('mdat', 200)))).toBe('complete')
+    expect(scanIsoBmffBoxes(heicFixture(), heicFixture().byteLength)).toBe('complete')
+  })
+
+  it('catches the truncation a decoder is willing to overlook', () => {
+    // The real case: ftyp and meta survive, mdat claims more bytes than the file has. WebKit decodes this
+    // to a picture; the declared structure still says the file is not all here.
+    const full = heicFixture()
+    expect(scanIsoBmffBoxes(full.subarray(0, full.byteLength >> 1), full.byteLength >> 1)).toBe('incomplete')
+    expect(scan(join(box('ftyp', 28), box('mdat', 10, 4000)))).toBe('incomplete')
+  })
+
+  it('accepts the legal ways a box states its size', () => {
+    // size 0 = "to the end of the file", allowed for the last box.
+    expect(scan(join(box('ftyp', 28), box('mdat', 40, 0)))).toBe('complete')
+    // size 1 = 64-bit largesize in the 8 bytes after the type.
+    const large = new Uint8Array(24)
+    large.set([0, 0, 0, 1])
+    large.set(new TextEncoder().encode('mdat'), 4)
+    large.set([0, 0, 0, 0, 0, 0, 0, 24], 8)
+    expect(scan(join(box('ftyp', 28), large))).toBe('complete')
+    // free/skip and unknown boxes are walked like any other.
+    expect(scan(join(box('ftyp', 28), box('free', 16), box('xxxx', 8), box('mdat', 40)))).toBe('complete')
+  })
+
+  it('refuses sizes that cannot be walked', () => {
+    expect(scan(join(box('ftyp', 28), box('mdat', 40, 4)))).toBe('incomplete') // below the header
+    const badLarge = new Uint8Array(24)
+    badLarge.set([0, 0, 0, 1])
+    badLarge.set(new TextEncoder().encode('mdat'), 4)
+    badLarge.set([0, 0, 0, 0, 0, 0, 0, 8], 8) // largesize below its own 16-byte header
+    expect(scan(join(box('ftyp', 28), badLarge))).toBe('incomplete')
+    // Bytes left over that cannot hold another header belong to no box.
+    expect(scan(join(box('ftyp', 28), box('mdat', 40), new Uint8Array(3)))).toBe('incomplete')
+    // Padding is not a box, whatever its size field claims. exifr never returns from a file like this,
+    // so it must not reach the metadata reader (docs/verification.md).
+    const fixture = heicFixture()
+    const hollow = join(fixture.subarray(0, 36), new Uint8Array(fixture.byteLength - 36))
+    expect(scan(hollow)).toBe('incomplete')
+  })
+
+  it('says so when the head it was given stops before the boxes do', () => {
+    // How the Worker sees a large original: every header is in the first 256KB, so it still concludes.
+    const file = join(box('ftyp', 28), box('meta', 100), box('mdat', 1_000_000))
+    expect(scanIsoBmffBoxes(file.subarray(0, 4096), file.byteLength)).toBe('complete')
+    // A file whose headers run past the head cannot be judged from it.
+    const many = join(...Array.from({ length: 40 }, () => box('free', 92)), box('mdat', 40))
+    expect(scanIsoBmffBoxes(many.subarray(0, 300), many.byteLength)).toBe('unverified')
   })
 })

@@ -5,7 +5,11 @@ import type { ExportAlbumList, ExportAssetPage, ExportManifest, ExportMembership
 // (src/web/lib/original-limit.ts explains why); the shape itself is ExportManifestSchema in ./schemas.ts.
 
 export const EXPORT_FORMAT = 'edgephotos-export'
-export const EXPORT_FORMAT_VERSION = 1
+// What a new export writes. v2 added the HEIC/HEIF original content types; nothing else differs from v1.
+export const EXPORT_FORMAT_VERSION = 2
+// The versions this build can restore from. A backup is read years after it was written, so v1 stays
+// readable: only the contract each version was written under decides what its values may be.
+export const EXPORT_FORMAT_VERSIONS_READ = [1, 2] as const
 
 // A library that changed under a paged export in a way the manifest cannot express. The pages themselves
 // were all valid; assembled, they describe a library that never existed. Nothing is wrong with the library

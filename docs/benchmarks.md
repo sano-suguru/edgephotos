@@ -184,6 +184,23 @@ decode 後の bitmap（幅 × 高さ × 4 byte）が支配的で、original の 
 
 判断は [D-020](decisions.md)。
 
+## HEIC の decode（2026-09-22）
+
+Playwright の WebKit 26.5、macOS。同じ合成画像（3024x4032、12.2MP）を `sips` で JPEG と HEIC に変換し、`createImageBitmap` を 5 回ずつ呼んだ。
+
+| 形式 | ファイル | decode（5 回、ms） | decode 後に thumbnail + preview を作る時間 |
+| --- | --- | --- | --- |
+| HEIC | 2.2MB | 136 / 115 / 114 / 117 / 102 | 48ms |
+| JPEG | 3.6MB | 72 / 73 / 62 / 68 / 60 | 42ms |
+
+decode は JPEG の約 1.7 倍。decode 後は同じ bitmap を描き直すだけなので差は出ない。memory も decode 後の bitmap（幅 × 高さ × 4 byte）が支配的という点は変わらないため、上の「Browser の取り込み memory」がそのまま当てはまる。
+
+Chromium は HEIC を decode できない（`InvalidStateError`）ので測っていない。
+
+bundle: probe 用の HEIC fixture を埋め込んだ分だけ `app.js` が増えた。282,136 → 282,820 byte（gzip 96,895 → 97,390）。差は 684 byte（gzip 495 byte）。
+
+判断は [D-030](decisions.md)。
+
 ## 判断
 
 ### 変更したもの

@@ -5,7 +5,7 @@ import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
 import { toHex } from '../lib/crypto'
-import { INSPECT_HEAD_BYTES, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
+import { INSPECT_HEAD_BYTES, scanIsoBmffBoxes, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
 import { assetObjectKeys } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import { getAssetRow, purgeAsset, sortAtFor } from './assets'
@@ -78,6 +78,10 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
 
 type ObjectProblem = { object: 'original' | 'thumbnail' | 'preview'; problem: string }
 
+function isIsoBmff(contentType: string): boolean {
+  return contentType === 'image/heic' || contentType === 'image/heif'
+}
+
 async function readHead(bucket: R2Bucket, key: string, size: number): Promise<Uint8Array | null> {
   const obj = await bucket.get(key, { range: { offset: 0, length: Math.min(size, INSPECT_HEAD_BYTES) } })
   if (!obj) return null
@@ -125,6 +129,21 @@ async function verifyObjects(ctx: ServiceContext, upload: UploadRow) {
     ])
     if (!originalHead || sniffImageType(originalHead) !== upload.original_content_type) {
       problems.push({ object: 'original', problem: 'content_type_mismatch' })
+    } else if (isIsoBmff(upload.original_content_type)) {
+      // A HEIC that lost its second half still decodes in some browsers, so the client having made a
+      // thumbnail from it proves nothing. Each box states its own length, and their headers sit at the
+      // front of the file, so the head finalize already read settles whether the declared lengths and the
+      // stored size agree (docs/decisions.md D-030).
+      const scan = scanIsoBmffBoxes(originalHead, upload.original_size)
+      // 'unverified' is not agreement: the headers ran past the head, so this check never saw the end of
+      // the file. Nothing observed writes an original like that, and an unchecked original is not one to
+      // store. If a real camera file ever lands here, read the next header from R2 rather than relax this.
+      if (scan !== 'complete') {
+        problems.push({
+          object: 'original',
+          problem: scan === 'incomplete' ? 'incomplete_file' : 'structure_unverified',
+        })
+      }
     }
     for (const [name, head] of [
       ['thumbnail', thumbnailHead],

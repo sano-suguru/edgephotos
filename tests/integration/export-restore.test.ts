@@ -9,7 +9,30 @@ import {
   restoreLibrary,
   verifyLibrary,
 } from '../../scripts/lib/backup'
-import { apiClient, call, callJson, makeApp, photo, putObject, reserve, syntheticPng, uploadPhoto } from '../helpers'
+import {
+  apiClient,
+  call,
+  callJson,
+  heicFixture,
+  makeApp,
+  photo,
+  putObject,
+  reserve,
+  sha256,
+  syntheticJpeg,
+  syntheticPng,
+  uploadPhoto,
+} from '../helpers'
+
+async function emptyRestoreEnvironment() {
+  await env.RESTORE_DB.batch(
+    ['album_assets', 'albums', 'shares', 'uploads', 'assets', 'settings'].map((t) =>
+      env.RESTORE_DB.prepare(`DELETE FROM ${t}`),
+    ),
+  )
+  const listed = await env.RESTORE_BUCKET.list()
+  if (listed.objects.length > 0) await env.RESTORE_BUCKET.delete(listed.objects.map((o) => o.key))
+}
 
 function memoryStore(): BlobStore & { files: Map<string, Uint8Array> } {
   const files = new Map<string, Uint8Array>()
@@ -105,15 +128,42 @@ describe('export and restore to an empty environment', () => {
     await expect(restoreLibrary(apiClient(target), store)).rejects.toThrow(/not empty/)
   })
 
+  it('keeps HEIC original bytes and checksum across export and restore', async () => {
+    await emptyRestoreEnvironment()
+    const source = await makeApp({ which: 'primary' })
+    const original = heicFixture()
+    const fixture = {
+      original,
+      thumbnail: syntheticJpeg(),
+      preview: syntheticJpeg({ padding: 64 }),
+      sha256: await sha256(original),
+    }
+    const r = await reserve(source, fixture, { filename: 'camera.heic' }, 'image/heic')
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(source, r.targets[v], fixture[v])
+    await callJson(source, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
+
+    const store = memoryStore()
+    await backupLibrary(apiClient(source), store)
+    const manifest = await readManifest(store)
+    expect(manifest.formatVersion).toBe(2)
+    expect(manifest.assets.find((a) => a.sha256 === fixture.sha256)?.contentType).toBe('image/heic')
+    // The backup holds the original bytes themselves, not a re-encoding of them.
+    expect(store.files.get(`originals/${fixture.sha256}`)).toEqual(original)
+
+    const target = await makeApp({ which: 'restore' })
+    await restoreLibrary(apiClient(target), store)
+    const restored = (await callJson(target, 'GET', '/api/v1/assets?limit=200')).items.find(
+      (i: { sha256: string }) => i.sha256 === fixture.sha256,
+    )
+    expect(restored.contentType).toBe('image/heic')
+    const stored = await env.RESTORE_BUCKET.get(`originals/${restored.id}`)
+    expect(new Uint8Array(await stored!.arrayBuffer())).toEqual(original)
+    expect(await verifyLibrary(apiClient(target), manifest)).toMatchObject({ ok: true, problems: [] })
+  })
+
   it('backup and restore survive transient failures and lost responses', async () => {
     // Start from an empty restore target again.
-    await env.RESTORE_DB.batch(
-      ['album_assets', 'albums', 'shares', 'uploads', 'assets', 'settings'].map((t) =>
-        env.RESTORE_DB.prepare(`DELETE FROM ${t}`),
-      ),
-    )
-    const listed = await env.RESTORE_BUCKET.list()
-    if (listed.objects.length > 0) await env.RESTORE_BUCKET.delete(listed.objects.map((o) => o.key))
+    await emptyRestoreEnvironment()
 
     const flaky = (app: Awaited<ReturnType<typeof makeApp>>) => {
       const inner = apiClient(app)

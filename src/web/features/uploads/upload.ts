@@ -2,11 +2,12 @@ import { computed, signal } from '@preact/signals'
 import type { UploadReservation } from '../../../contracts/schemas'
 import { ApiRequestError, api } from '../../lib/api/client'
 import { userMessage } from '../../lib/errors'
-import { FileTooLargeError, isHeic, preparePhoto, UnsupportedFileError } from '../../lib/image'
+import { FileTooLargeError, preparePhoto, UnsupportedFileError } from '../../lib/image'
 import { putSigned, StorageUploadError } from '../../lib/storage-transfer'
 import { createTaskLimiter } from '../../lib/task-limit'
 import { type TransferDeps, transferPhoto } from './transfer'
 import { isActiveUpload, mergeUploadList, type UploadState } from './upload-list'
+import { unsupportedFileMessage } from './upload-message'
 
 export type UploadItem = {
   id: string
@@ -87,13 +88,7 @@ async function uploadOne(item: UploadItem, file: File) {
   } catch (err) {
     if (err instanceof FileTooLargeError || err instanceof UnsupportedFileError) {
       files.delete(item.id)
-      const message =
-        err instanceof FileTooLargeError
-          ? '100MB を超えるファイルは未対応です'
-          : isHeic(file)
-            ? 'HEIC は未対応です（JPEG で書き出してから選んでください）'
-            : '対応していない形式です'
-      update(item.id, { state: 'error', message, retryable: false })
+      update(item.id, { state: 'error', message: unsupportedFileMessage(err), retryable: false })
       return
     }
     update(item.id, { state: 'error', message: failureMessage(err, stage), retryable: true })

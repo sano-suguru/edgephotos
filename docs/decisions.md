@@ -116,7 +116,7 @@ finalize では Worker が R2 binding で次を確認してから asset を `rea
 
 - reserve した 3 object がすべて存在する
 - 各 object の size が reserve 時の申告値と一致する
-- original の先頭 byte が申告 content type（JPEG / PNG / WebP）と一致する
+- original の先頭 byte が申告 content type と一致する（HEIC / HEIF は `ftyp` の brand まで見る。[D-030](#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）
 - thumbnail / preview が JPEG で、APP1（EXIF / XMP）・APP13（IPTC）segment を含まない
 
 original の SHA-256 は Client が reserve 時に申告し、重複判定の索引として使います。Worker は finalize 時に original 全体を hash しません。Workers の CPU 上限内で大きな original を毎回 hash するのは現実的でないためです。
@@ -242,7 +242,7 @@ finalize 側の根拠は、R2 が put 時に指定された checksum を object 
 
 ## D-019: v1 は HEIC / HEIF を受け付けず、iPhone は Safari の JPEG 変換に任せる
 
-**状態:** 採用
+**状態:** [D-030](#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める) で置き換え（2026-09-22）
 
 v1 の original は JPEG / PNG / WebP のままとします。HEIC / HEIF は Client が明示的に拒否し、「HEIC は未対応です（JPEG で書き出してから選んでください）」と表示します。
 
@@ -616,3 +616,92 @@ GitHub Actions の同一 commit・同一コードで、最も重い test は 8.9
 
 - 本当に hang した test の検出が 5 秒から 120 秒へ遅くなります。suite 全体が通常 30 秒なので、CI の待ち時間としては許容します
 - test が徐々に遅くなっても、120 秒までは気付きません。速さの退行は `pnpm bench` で見ます
+
+## D-030: HEIC / HEIF の original を受け付け、derivative を作れる環境かは probe で決める
+
+**状態:** 採用（2026-09-22。[D-019](#d-019-v1-は-heic--heif-を受け付けずiphone-は-safari-の-jpeg-変換に任せる) を置き換える）
+
+D-019 は「iPhone の Safari が HEIC を JPEG に変換して渡す」報告に任せ、HEIC / HEIF を Client が拒否していました。これは「カメラが記録した byte 列を残す」ことを諦める判断で、D-019 自身が再検討の条件として「カメラの HEIC byte 列を残したいという要求が出たとき」を挙げていました。その要求が出たため、D-019 の案 2（HEIC を original として保存し、derivative は既存経路で作る）を採用します。
+
+**original は受け取った byte 列のまま保存します。** HEIC を JPEG へ変換して original と呼ぶことはしません。derivative は既存の canvas 経路で作る JPEG のままで、APP1 / APP13 の除去も finalize の検査も変わりません。
+
+### 受け入れる形式
+
+`ftyp` box の major brand と compatible brands の両方を読んで決めます。major brand だけでは足りません。generic な `mif1` は codec を名乗らないからです。
+
+| 分類 | brand | 扱い |
+| --- | --- | --- |
+| HEIC still | `heic` `heix` `heim` `heis` | `image/heic` |
+| generic HEIF still | `mif1` | `image/heif`。ただし compatible に HEIC still brand があれば、より具体的な `image/heic` |
+| HEIC sequence | `hevc` `hevx` `hevm` `hevs` | 拒否 |
+| generic HEIF sequence | `msf1` | 拒否 |
+| AVIF / AVIF sequence | `avif` `avis` | 拒否 |
+
+宣言された brand のどこかに拒否対象があれば、still brand も名乗っていても拒否します。矛盾した宣言を、都合のよい方に読まないためです。
+
+image sequence を拒否するのは、今回のスコープが still image だからです。Live Photo に対応するかどうかとは別の話で、HEIF image sequence は Live Photo とも別物です。
+
+`ftyp` は untrusted input として読みます。宣言された box size を検査し、16 byte 未満・1024 byte 超・手元の bytes を超える・compatible brands が 4 byte 単位でない・size が 0（EOF まで）や 1（64bit）のものは拒否します。読むのは先頭 1024 byte までです。
+
+### 「decode できた」を原本が健全な証拠にしない
+
+WebKit は、後半が失われた HEIC からでも画像を返します（途中で切れた JPEG と同じ挙動）。thumbnail が出ることは、original が全部揃っていることの証拠になりません。写真庫が預かるのは original なので、ここは decoder の寛容さに任せません。
+
+ISO BMFF の box は自分の長さを持つので、**top-level box を歩いて、ファイル自身が宣言する box の長さと、受け取った byte 数が整合するか**だけを確かめます。確認するのはこの整合性だけで、original が完全であることの証明ではありません。box の中身は読まず、中で壊れているものや、size 0 の box で長さを言い切っていないものは分かりません。
+
+- 宣言が EOF を越える box があれば拒否する（途中で切れたファイル）
+- box header より小さい size、box に属さない余り byte も拒否する
+- size 0（EOF まで）と size 1（64bit largesize）は仕様どおり受け入れる。free / skip / 未知の box も同じように歩く
+- top-level の box type は印字可能な 4 文字であることを要求する。padding は box ではない
+- header がこちらの持つ byte 列を越える場合は判定しない（unverified）。実ファイルでは起きない
+
+Client はファイル全体を持っているので必ず判定できます。Worker は finalize で既に読んでいる先頭 256KB だけで判定します。box header は先頭に集まるため、100MB の original でも追加の読み出しは要りません。
+
+Worker も fail-closed です。整合しないものは `incomplete_file`、window の内側で判定しきれなかったもの（`unverified`）は `structure_unverified` として `422` で拒否し、どちらも asset を作りません。検査できなかった original を保存しないためです。実機の HEIC で `structure_unverified` が出るようなら、そのときに次の box header だけを R2 から range read して続きを読みます。先回りしては作りません。
+
+この検査が言うのは「宣言された box の長さと受け取った byte 数が合っている」ことだけです。image data が壊れていないことも、original が完全であることも保証しません。JPEG / PNG / WebP には同じ検査を入れていません（今回の範囲外です。途中で切れた JPEG の扱いは [D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する) のままです）。
+
+### metadata の読み取りは decode のあとに置く
+
+`exifr` は、box が zero padding になっている HEIC で返ってこなくなります（実測。[verification.md](verification.md)）。上の box type の規則でこの形は先に弾けますが、untrusted なファイルに対して最も無防備なのは metadata parser なので、順番も変えます。
+
+`preparePhoto` は、head を sniff → probe → 全体を読む → 構造を確認 → SHA-256 → decode → **decode に成功してから** metadata を読む、の順で進みます。decoder が受け付けなかったファイルは exifr に渡りません。
+
+### decode できるかは capability probe で決める
+
+埋め込んだ 513 byte の HEIC を `createImageBitmap` に 1 度だけ通し、結果を cache します。UA も `navigator` も見ません。probe が失敗する環境では、reserve と R2 PUT の前に「このブラウザでは HEIC を処理できません」と伝えて止めます。probe は通るがそのファイルだけ失敗した場合は「壊れているか未対応の形式です」と伝えます。この 2 つを分けることが、ブラウザの制約と壊れたファイルを推測なしに区別する方法です。
+
+**この probe は HEVC / HEIC に対してのみ答えます。** `image/heif` は他の codec を含められるため、probe の結果から HEIF 全体の対応可否を推定しません。`image/heif` はそのファイル自身の decode 結果だけで判断し、失敗時も browser 全体の対応可否を断定しません。
+
+実測（Playwright、2026-09-22）: macOS の WebKit は HEIC を decode でき、EXIF Orientation 6 の 64x32 が 32x64 になりました。Chromium は `InvalidStateError` です。同じ WebKit でも CI の Linux runner では decode できません。**decode の可否は engine ではなく実行環境で決まります。** probe が UA 判定より正しいことが、ここでも確かめられました。数値は [benchmarks.md](benchmarks.md)、経過は [verification.md](verification.md) にあります。
+
+Chrome / Firefox のために libheif（WASM）や Cloudflare Images を入れることはしません。D-019 の案 3・案 4 に対する評価は変わっていません。bundle と更新追従、mobile Safari の memory、finalize に増える外部依存と失敗経路、非同期化に必要な Queues（[D-009](#d-009-client-specific-bff-と-background-infrastructure-を先回りして置かない)）の費用に対して、現在の要求は「iPhone で撮った原本を残す」ことだけです。
+
+### `accept` は hint でしかない
+
+`<input accept>` は `image/jpeg,image/png,image/webp,image/heic,image/heif` の明示列挙にします。対応形式を個別に並べるのは、WebKit で `image/*` と HEIC を混ぜた指定により JPEG / PNG が HEIC へ transcode される挙動が報告されており、WebKit 側では bug として修正されているものの、利用中の Safari への反映時期に依存したくないからです。
+
+`accept` は正しさの根拠にしません。EdgePhotos は受け取った bytes を必ず sniff し、実際の形式を記録します。ピッカーが JPEG → HEIC、HEIC → JPEG のどちらに変換して渡しても、保存するのは受け取った byte 列で、表示もその形式になります。
+
+**`accept` に HEIC を足しても、原本が渡される保証はありません。** ピッカーが変換したかどうかを Web アプリから知る方法はなく、EdgePhotos が取得していない byte 列を「保存した」とは記録も表示もしません。実機での挙動は未確認です（[verification.md](verification.md)）。
+
+### export manifest を v2 へ上げる
+
+`contentType` の enum を広げた manifest は、v1 しか知らない reader では読めません。同じ `formatVersion: 1` のまま意味を変えるのは [D-025](#d-025-backup-manifest-を-v1-として確定し読み込み時に検証する) の「知らない version は部分的に読まずに拒否する」に反するので、v2 へ上げます。
+
+- 新規 export は v2 を書く
+- reader は v1 と v2 の両方を読む。v1 の manifest は v1 の契約（JPEG / PNG / WebP のみ）で検証する
+- version と契約の対応は schema の discriminated union 1 つで表す。migration の仕組みは作らない
+
+### 影響と残るリスク
+
+- HEIC を decode できない環境（Chrome / Firefox）では HEIC を追加できません。JPEG / PNG / WebP は変わりません
+- 既に保存した HEIC の derivative を、decode できない環境で作り直すことはできません。repair はその枚数を別に数え、「このブラウザでは読み取れない形式でした」と伝えます
+- HEIC の decode は JPEG より重くなります。12.2MP で decode が約 1.7 倍、decode 後の derivative 生成は同じです（[benchmarks.md](benchmarks.md)）。bitmap の memory は JPEG と同じで、並列数 2 の制限（[D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する)）がそのまま効きます
+- bundle は probe 用 fixture の 684 byte（gzip 495 byte）だけ増えます
+- HEIC の decoder は OS / browser のものです。EdgePhotos が足す parser は `ftyp` の読み取りだけで、Worker は decode しません
+- 構造の検査は HEIC / HEIF だけに入れました。JPEG / PNG / WebP は今までどおりで、途中で切れた JPEG は WebKit では登録されます
+- WebKit は mdat を 0xff で埋めた HEIC も decode します。構造が揃っているファイルを decode 失敗として拒否する経路は、e2e では再現できていません（unit test のみ）
+- fixture の orientation は EXIF で持っています。実機の HEIC が使う `irot` / `imir` は未確認です
+
+再検討する条件は、cross-browser の HEIC upload が実際の要求になったとき、または native client を作るときです。その場合も、まず original を変えずに derivative を作る経路を探します。

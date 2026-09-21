@@ -123,7 +123,7 @@ v1 の完成条件には含めません。
 - Android client
 - Managed OAuth integration for Native client
 - background sync
-- HEIC
+- HEIC を decode できない Browser（Chrome / Firefox）からの HEIC upload（[D-030](decisions.md)）
 - video
 - user ごとに分かれた library を持つ multi-user（1 household の共同利用は実装済み。[D-028](decisions.md)）
 - advanced search

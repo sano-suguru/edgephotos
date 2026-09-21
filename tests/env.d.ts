@@ -8,6 +8,8 @@ declare global {
       RESTORE_DB: D1Database
       RESTORE_BUCKET: R2Bucket
       TEST_MIGRATIONS: D1Migration[]
+      TEST_HEIC_STILL: string
+      TEST_HEIC_PROBE: string
       BENCH_SIZES?: string
       BENCH_BACKUP_MAX?: string
       BENCH_BIG_ALBUM?: string

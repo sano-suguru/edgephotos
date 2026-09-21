@@ -8,7 +8,7 @@ import {
 } from '../../src/contracts/export-manifest'
 import type { ExportAsset, ExportManifest } from '../../src/contracts/schemas'
 
-// The v1 backup manifest contract, checked where it is enforced: everything `check`, `restore` and
+// The backup manifest contract, checked where it is enforced: everything `check`, `restore` and
 // `verify` read goes through readManifest, so a manifest that survives this has already been rejected
 // or accepted before any request reaches a library.
 
@@ -38,7 +38,10 @@ function asset(overrides: Partial<ExportAsset> = {}): ExportAsset {
   }
 }
 
-function manifest(overrides: Partial<ExportManifest> = {}): ExportManifest {
+// The current format. v1 manifests are built from this one in the version tests below.
+type CurrentManifest = Extract<ExportManifest, { formatVersion: typeof EXPORT_FORMAT_VERSION }>
+
+function manifest(overrides: Partial<CurrentManifest> = {}): CurrentManifest {
   return {
     format: EXPORT_FORMAT,
     formatVersion: EXPORT_FORMAT_VERSION,
@@ -83,7 +86,7 @@ const restoreState = {
 }
 const rejects = (value: unknown, pattern: RegExp) => expect(read(value)).rejects.toThrow(pattern)
 
-describe('v1 export manifest contract', () => {
+describe('export manifest contract', () => {
   it('accepts what the export writes, and keeps every field', async () => {
     expect(await read(manifest())).toEqual(manifest())
   })
@@ -102,6 +105,30 @@ describe('v1 export manifest contract', () => {
     expect(await read(withExtra)).toEqual(manifest())
   })
 
+  describe('format versions', () => {
+    it('writes v2', () => {
+      expect(EXPORT_FORMAT_VERSION).toBe(2)
+    })
+
+    it('still reads a v1 manifest, under the contract v1 was written with', async () => {
+      const v1 = { ...manifest(), formatVersion: 1 }
+      expect(await read(v1)).toMatchObject({ formatVersion: 1 })
+      // HEIC was not an original type when v1 was the format, so a v1 manifest claiming one is wrong.
+      await rejects({ ...v1, assets: [asset({ contentType: 'image/heic' })] }, /contentType/)
+    })
+
+    it('reads HEIC and HEIF in a v2 manifest', async () => {
+      for (const contentType of ['image/heic', 'image/heif'] as const) {
+        expect(await read(manifest({ assets: [asset({ contentType })] }))).toMatchObject({
+          assets: [{ contentType }],
+        })
+      }
+    })
+
+    it('refuses a version it does not know instead of reading part of it', () =>
+      rejects({ ...manifest(), formatVersion: 3 }, /formatVersion/))
+  })
+
   describe('rejects a file that is not a v1 manifest', () => {
     it('missing', () => expect(readManifest(store({}))).rejects.toThrow(/not an EdgePhotos backup/))
 
@@ -114,8 +141,8 @@ describe('v1 export manifest contract', () => {
 
     it('a newer formatVersion', () =>
       rejects(
-        manifest({ formatVersion: 2 as never }),
-        /formatVersion 2; this version reads 1\. Use the EdgePhotos release that wrote this backup/,
+        manifest({ formatVersion: 3 as never }),
+        /formatVersion 3; this version reads 1 and 2\. Use the EdgePhotos release that wrote this backup/,
       ))
   })
 
