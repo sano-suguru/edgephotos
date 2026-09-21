@@ -39,6 +39,11 @@ test('uploads a photo with browser-made derivatives, and takes HEIC where it can
     // size is the displayed one.
     expect(stored.contentType).toBe('image/heic')
     expect([stored.width, stored.height]).toEqual([32, 64])
+    // And the derivative itself is the right way up, not only the recorded size: a 64x32 original with
+    // EXIF Orientation 6 makes a portrait thumbnail (below the 512 limit, so it is never upscaled).
+    const heicThumbnail = tile(page, 'camera.heic').locator('img')
+    await expectImageLoaded(heicThumbnail)
+    expect(await naturalSize(heicThumbnail)).toEqual({ width: 32, height: 64 })
   } else {
     // A failure keeps the summary (and its rows) until dismissed.
     await expect(uploadRow(page, 'camera.heic')).toContainText('このブラウザでは HEIC を処理できません')

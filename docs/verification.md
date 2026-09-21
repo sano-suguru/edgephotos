@@ -456,7 +456,7 @@ exifr は HEIC から `DateTimeOriginal`（`2019:07:14 09:30:05`）と Orientati
 - backup → restore で HEIC の original bytes と checksum が維持され、manifest が v2 で `image/heic` を持つ。`verifyLibrary` も通る
 - share では derivative しか出ず、応答に `originals/`・filename・`image/heic`・SHA-256 のいずれも現れない。preview は `derivatives/v1/{id}/preview.jpg` の JPEG
 - v1 manifest は今も読め、v1 で `image/heic` を名乗る manifest は `contentType` を名指しして拒否される
-- e2e: WebKit は HEIC を追加し、記録された形式が `image/heic`、寸法が 32x64（EXIF Orientation 6 が反映された値）。Chromium は「このブラウザでは HEIC を処理できません」と表示し、reserve へ進まない
+- e2e: WebKit は HEIC を追加し、記録された形式が `image/heic`、寸法が 32x64（EXIF Orientation 6 が反映された値）。timeline の thumbnail も 32x64 で、derivative 自体が正しい向きになっている。Chromium は「このブラウザでは HEIC を処理できません」と表示し、reserve へ進まない
 
 ### 観測した不安定な失敗
 
