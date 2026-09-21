@@ -296,6 +296,10 @@ Client が PUT 前に APP1 / APP13 を取り除きます（`src/web/lib/jpeg-met
 
 **Web の再試行をどこから始めるか決める。** 前の試行の reservation の finalize から始めます。`409 UPLOAD_OBJECT_MISSING` で presigned URL が期限内なら、欠けた object だけを PUT し直します。期限切れ・`404`・`410`・`422` なら新しい reservation から始めます（`src/web/features/uploads/transfer.ts`）。`410` と `404` は storage cleanup が片付けたあとの upload です（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。
 
+期限内かどうかは、server が返した `expiresAt` をこの端末の時計と比べて決めています。時計が進んでいる端末では、失効した URL をいつまでも期限内と読みます。そのため、欠けた object の PUT を storage が拒否した場合も、その reservation は終わったものとして新しい reservation から始めます。届かなかっただけ（network）のときは、reservation を保持したままにします。残った object は storage cleanup が片付けます（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。
+
+**同じ file では変わらない失敗に再試行を出さない。** 転送の失敗（network、5xx、期限切れ）と、file そのものへの拒否は別に扱います。finalize が `422 UPLOAD_OBJECT_INVALID` で original について `incomplete_file` / `structure_unverified` / `content_type_mismatch` だけを報告した場合と、reserve が `400 VALIDATION_FAILED` を返した場合は、同じ file を送り直しても同じ答えになるため、その行を再試行の対象から外して理由を出します（`src/web/features/uploads/batch.ts`）。size や checksum、derivative についての拒否は転送の問題なので、これまでどおり再試行できます。
+
 **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らず、未完了のまま完了表示になっていました。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削ります（`src/web/features/uploads/upload-list.ts`）。
 
 **前処理の並列数は 2 のままにする。** 2 が最適だと示したわけではありません。desktop の Browser の測定では、変えるだけの根拠が得られませんでした。

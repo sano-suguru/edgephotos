@@ -1,5 +1,6 @@
 import { ExportSnapshotError } from '../../contracts/export-manifest'
-import { ApiRequestError } from './api/client'
+// From ./api/error, not ./api/client: this module is used by code that must stay free of `fetch`.
+import { ApiRequestError } from './api/error'
 
 // The API returns machine-readable codes with English messages for developers (contracts/errors.ts).
 // Screens show these Japanese sentences instead; the raw error goes to the console for debugging.

@@ -8,6 +8,15 @@
 // verified on write) before the asset becomes ready.
 export type PutOutcome = 'stored' | 'retry' | 'fail'
 
+// A presigned PUT that did not store the bytes. Defined here, not next to `putSigned`, so code that only
+// classifies the failure (the upload batch, the retry) stays free of `fetch` and can be unit-tested
+// outside a browser. `status` is the last answer: 'network' means the request never got one.
+export class StorageUploadError extends Error {
+  constructor(readonly status: number | 'network') {
+    super(status === 'network' ? 'Storage upload failed (network)' : `Storage upload failed (${status})`)
+  }
+}
+
 export function putOutcome(status: number | 'network'): PutOutcome {
   if (status === 'network') return 'retry'
   if ((status >= 200 && status < 300) || status === 412) return 'stored'
