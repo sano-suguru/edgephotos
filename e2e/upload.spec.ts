@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test'
 import {
+  canDecodeHeic,
   expectImageLoaded,
-  heicFixture,
   makeJpeg,
   naturalSize,
   openApp,
   tile,
+  uniqueHeic,
   uniqueName,
   uploadFiles,
   uploadPanel,
@@ -13,68 +14,70 @@ import {
   uploadRow,
 } from './fixtures'
 
-test('uploads a photo with browser-made derivatives, and takes HEIC where it can decode it', async ({
-  page,
-  browserName,
-}) => {
+test('uploads a photo with browser-made derivatives, and takes HEIC where it can decode it', async ({ page }) => {
   await openApp(page)
+  // The same question the app asks: some engines decode HEIC on one platform and not on another.
+  const heicDecodes = await canDecodeHeic(page)
   const name = `${uniqueName('large')}.jpg`
+  const heicName = `${uniqueName('camera')}.heic`
   const rows = await uploadFiles(page, [
     { name, mimeType: 'image/jpeg', buffer: await makeJpeg(page, 3000, 2000) },
-    { name: 'camera.heic', mimeType: 'image/heic', buffer: heicFixture() },
+    { name: heicName, mimeType: 'image/heic', buffer: uniqueHeic() },
   ])
   // finalize only succeeds if the canvas JPEGs carry no EXIF/XMP/IPTC segment (WebKit adds them, D-020).
   expect(rows.get(name)).toContain('完了')
 
-  // Whether the HEIC is taken is a decode-capability question, answered by a probe, not by the engine name.
-  // WebKit decodes HEVC-coded HEIC; Chromium does not, and says so before anything is reserved or stored.
-  if (browserName === 'webkit') {
-    expect(rows.get('camera.heic')).toContain('完了')
-    const stored = await page.evaluate(async () => {
+  // Whether the HEIC is taken is a decode-capability question. An engine without a decoder says so before
+  // anything is reserved or stored.
+  if (heicDecodes) {
+    expect(rows.get(heicName)).toContain('完了')
+    const stored = await page.evaluate(async (filename) => {
       const res = await fetch('/api/v1/assets?limit=200')
       const body = await res.json()
-      return body.items.find((i: { filename: string }) => i.filename === 'camera.heic')
-    })
+      return body.items.find((i: { filename: string }) => i.filename === filename)
+    }, heicName)
     // The bytes are stored as they arrived, and EXIF Orientation 6 on a 64x32 original means the recorded
     // size is the displayed one.
     expect(stored.contentType).toBe('image/heic')
     expect([stored.width, stored.height]).toEqual([32, 64])
     // And the derivative itself is the right way up, not only the recorded size: a 64x32 original with
     // EXIF Orientation 6 makes a portrait thumbnail (below the 512 limit, so it is never upscaled).
-    const heicThumbnail = tile(page, 'camera.heic').locator('img')
+    // Its EXIF puts it in 2019, so it sits at the bottom of the timeline; thumbnails there load lazily.
+    await tile(page, heicName).scrollIntoViewIfNeeded()
+    const heicThumbnail = tile(page, heicName).locator('img')
     await expectImageLoaded(heicThumbnail)
     expect(await naturalSize(heicThumbnail)).toEqual({ width: 32, height: 64 })
     // The capture time comes from the HEIC's own EXIF, so the timeline can order it by when it was taken.
     expect(stored.takenAt).toBe('2019-07-14T09:30:05')
 
-    // The picker does not always say what it handed over. The same bytes under a type that claims nothing
-    // are the same photo: a `free` box makes them a different file without changing what they are.
-    const relabelled = Buffer.concat([heicFixture(), Buffer.from([0, 0, 0, 12, 0x66, 0x72, 0x65, 0x65, 1, 2, 3, 4])])
+    // The picker does not always say what it handed over. HEIC bytes under a type that claims nothing are
+    // still that photo.
+    const opaqueName = `${uniqueName('unlabelled')}.heic`
     const opaque = await uploadFiles(page, [
-      { name: 'unlabelled.heic', mimeType: 'application/octet-stream', buffer: relabelled },
+      { name: opaqueName, mimeType: 'application/octet-stream', buffer: uniqueHeic() },
     ])
-    expect(opaque.get('unlabelled.heic')).toContain('完了')
-    const byBytes = await page.evaluate(async () => {
+    expect(opaque.get(opaqueName)).toContain('完了')
+    const byBytes = await page.evaluate(async (filename) => {
       const res = await fetch('/api/v1/assets?limit=200')
-      return (await res.json()).items.find((i: { filename: string }) => i.filename === 'unlabelled.heic')
-    })
+      return (await res.json()).items.find((i: { filename: string }) => i.filename === filename)
+    }, opaqueName)
     expect(byBytes.contentType).toBe('image/heic')
   } else {
     // A failure keeps the summary (and its rows) until dismissed.
-    await expect(uploadRow(page, 'camera.heic')).toContainText('このブラウザでは HEIC を処理できません')
+    await expect(uploadRow(page, heicName)).toContainText('このブラウザでは HEIC を処理できません')
   }
 
   // Two files a HEIC decoder is happy to overlook, and one rule: nothing half-there is stored.
-  const full = heicFixture()
+  const full = uniqueHeic()
   // Half the file. WebKit decodes this to a picture; the boxes still say the second half never arrived.
   const half = { name: 'half.heic', mimeType: 'image/heic', buffer: full.subarray(0, full.length >> 1) }
   // Header kept, everything after it padding. Nothing here is a box, and exifr never returns from it.
   const hollow = Buffer.concat([full.subarray(0, 36), Buffer.alloc(full.length - 36)])
   const rejected = await uploadFiles(page, [half, { name: 'hollow.heic', mimeType: 'image/heic', buffer: hollow }])
   for (const name of ['half.heic', 'hollow.heic']) {
-    // On an engine with no HEIC decoder the refusal comes earlier, before the file is even read.
+    // Without a decoder the refusal comes earlier, before the file is even read.
     expect(rejected.get(name)).toContain(
-      browserName === 'webkit' ? '最後まで揃っていません' : 'このブラウザでは HEIC を処理できません',
+      heicDecodes ? '最後まで揃っていません' : 'このブラウザでは HEIC を処理できません',
     )
   }
   const stored = await page.evaluate(() => fetch('/api/v1/assets?limit=200').then((r) => r.json()))
@@ -124,8 +127,14 @@ test('a clean upload summary clears itself, but not while another upload runs or
   release()
   await expect(uploadRow(page, second)).toContainText('完了')
   await expect(uploadPanel(page)).toBeVisible()
-  await page.clock.fastForward('00:06')
-  await expect(uploadPanel(page)).toBeHidden()
+  // The dismissal is scheduled by an effect that runs after the row shows 完了, so advancing the clock once
+  // can land before the timer exists and then never fire it. Keep advancing until the summary goes.
+  await expect
+    .poll(async () => {
+      await page.clock.fastForward('00:06')
+      return uploadPanel(page).isVisible()
+    })
+    .toBe(false)
 
   // Bytes that claim to be HEIC but are not: refused from the bytes, in every engine.
   await uploadFiles(page, [{ name: 'broken.heic', mimeType: 'image/heic', buffer: Buffer.from('not a real HEIC') }])

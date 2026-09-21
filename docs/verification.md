@@ -440,8 +440,13 @@ attempt 1 は遅い runner に当たり、interrupted restore が 5975ms かか�
 
 | engine | `still.heic`（64x32、EXIF Orientation 6） | `probe.heic`（2x2） |
 | --- | --- | --- |
-| WebKit 26.5 | 32x64 で decode（向きが反映される） | 2x2 で decode |
+| WebKit 26.5（macOS） | 32x64 で decode（向きが反映される） | 2x2 で decode |
+| WebKit（CI の Linux runner） | decode できない | decode できない |
 | Chromium | `InvalidStateError` | `InvalidStateError` |
+
+**decode できるかは engine ではなく実行環境で決まる。** 同じ Playwright WebKit でも、macOS では decode でき、CI の Linux runner ではできない。engine 名で分岐すると、この差で判断を誤る。e2e も UA ではなく実際の probe 結果で分岐する。
+
+この差のため、CI で実際に通るのは HEIC を拒否する経路だけである。HEIC を保存して表示するところまでは macOS の手元実行でしか通っていない。
 
 `imageOrientation` を指定しない場合と、Blob の type を空にした場合も同じ結果だった。
 

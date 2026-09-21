@@ -673,7 +673,7 @@ Worker も fail-closed です。整合しないものは `incomplete_file`、win
 
 **この probe は HEVC / HEIC に対してのみ答えます。** `image/heif` は他の codec を含められるため、probe の結果から HEIF 全体の対応可否を推定しません。`image/heif` はそのファイル自身の decode 結果だけで判断し、失敗時も browser 全体の対応可否を断定しません。
 
-実測（Playwright、2026-09-22）: WebKit は HEIC を decode でき、EXIF Orientation 6 の 64x32 が 32x64 になりました。Chromium は `InvalidStateError` です。数値は [benchmarks.md](benchmarks.md)、経過は [verification.md](verification.md) にあります。
+実測（Playwright、2026-09-22）: macOS の WebKit は HEIC を decode でき、EXIF Orientation 6 の 64x32 が 32x64 になりました。Chromium は `InvalidStateError` です。同じ WebKit でも CI の Linux runner では decode できません。**decode の可否は engine ではなく実行環境で決まります。** probe が UA 判定より正しいことが、ここでも確かめられました。数値は [benchmarks.md](benchmarks.md)、経過は [verification.md](verification.md) にあります。
 
 Chrome / Firefox のために libheif（WASM）や Cloudflare Images を入れることはしません。D-019 の案 3・案 4 に対する評価は変わっていません。bundle と更新追従、mobile Safari の memory、finalize に増える外部依存と失敗経路、非同期化に必要な Queues（[D-009](#d-009-client-specific-bff-と-background-infrastructure-を先回りして置かない)）の費用に対して、現在の要求は「iPhone で撮った原本を残す」ことだけです。
 
