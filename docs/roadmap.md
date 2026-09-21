@@ -100,7 +100,15 @@ Chromium は拒否し、WebKit は読めた部分から derivative を作って 
 ## Release polish
 
 - **実 R2 で `If-Match` 付き presigned PUT を 1 度踏む。** 作り直しの競合安全性がこれに依存します。公式ドキュメントが PutObject の対応を明記していることと、EdgePhotos の SigV4 署名が正しいことは別の問題なので、自分たちが発行した URL と header で確かめます。Browser から壊れた写真を実際に作り直す往復と合わせて、有効な ETag で `200`、古い ETag で `412`、先に保存された bytes が残ることを見ます（[D-026](decisions.md)、[verification.md](verification.md)）
-- **2 人目の member が実 Access で入れることを 1 度確かめる。** Worker 側の household 判定は test で担保していますが（`tests/integration/household.test.ts`）、Access policy の Allow 一覧と `HOUSEHOLD_EMAILS` が揃っているかは実環境でしか分かりません。2 人目が login して timeline を開き、1 人目の写真が見えることと、許可していない identity が `403` になることを見ます（[D-028](decisions.md)、[operations.md](operations.md#4-cloudflare-access)）
+- **2 人が実環境の端末で 1 つの library を使う。** Worker 側の household 判定は test で担保しています（`tests/integration/household.test.ts`）。実環境でしか分からないのは、Access policy の Allow 一覧と `HOUSEHOLD_EMAILS` が揃っているか、そして 2 人が日常の操作で困らないかです。remote-test に 2 アカウントを設定し、実機 2 台で次を踏みます（[D-028](decisions.md)、[operations.md](operations.md#4-cloudflare-access)）
+  - 1 人目が写真を 5 枚 upload し、2 人目が login してその 5 枚を見る
+  - 2 人目が別の 5 枚を upload し、1 人目の timeline に出る
+  - 同じ写真を双方から upload したとき、duplicate の表示で迷わない
+  - 2 人目が album を作り、1 人目がそこへ写真を追加する
+  - original を双方から開く
+  - 片方が trash し、もう片方が restore する
+  - logout / login しても続きから使える
+  - 許可していない 3 つ目のアカウントは入れない
 - Deploy to Cloudflare
 - setup guide
 - update / uninstall procedure

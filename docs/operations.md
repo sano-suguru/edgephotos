@@ -97,7 +97,16 @@ pnpm wrangler secret put HOUSEHOLD_EMAILS [--env <env>]
 
 member の追加・削除は、**Access policy と `HOUSEHOLD_EMAILS` の両方**を更新します。片方だけだと、Access で止まる（追加漏れ）か Worker が `403` にする（設定漏れ）かのどちらかになります。削除では両方から消さないと、消したつもりの identity が残ります。
 
-追加の順序は Access policy → `HOUSEHOLD_EMAILS`、削除の順序はその逆です。どちらも「まだ入れない」側を先に動かすので、途中の状態で権限が広がりません。
+順序は `HOUSEHOLD_EMAILS` を基準に決めます。Worker のこの設定が最終的な判断だからです。権限を広げるときは最後に、狭めるときは最初に動かします。
+
+| 操作 | 順序 |
+| --- | --- |
+| 追加 | Access policy → `HOUSEHOLD_EMAILS` |
+| 削除 | `HOUSEHOLD_EMAILS` → Access policy |
+
+削除でこの順にするのは、Access policy から外しても、発行済みの assertion や session がいつ切れるかは Access の設定次第だからです。`HOUSEHOLD_EMAILS` から先に消せば、まだ有効な token を持つ相手も次の request から `403` になります。
+
+急いで締め出す場合も同じです。`HOUSEHOLD_EMAILS` の更新だけで Worker 側は塞がります。Access policy の削除はそのあとで構いません。
 
 member を削除しても、その人が upload した写真は library に残ります。asset に「誰が作ったか」は記録していないためです（[D-028](decisions.md)）。
 

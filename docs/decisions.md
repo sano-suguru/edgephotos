@@ -562,6 +562,8 @@ private API を使えるのは `OWNER_EMAIL` に一致する 1 identity だけ�
 
 member は互いに対等です。1 つの library を共同利用し、upload・timeline・favorite・album・share・trash・restore・export に同じ権限を持ちます。
 
+favorite・album・trash は library の状態で、member ごとには分かれません。片方が付けた favorite は両方の favorite で、片方が trash した写真は両方から消えます。member ごとの state が要ると分かった時点で、その時の要求で設計します。
+
 **user ごとの library も、asset ごとの所有者も作りません。** D1 の `assets` / `albums` / `shares` には元から「誰が作ったか」の列がありません。この決定で足しもしません。したがって schema の migration はなく、認可の判断は「member かどうか」だけです。既存の duplicate 処理（SHA-256 の UNIQUE）も、どの member が upload したかに影響されません。
 
 **読み取れない設定は、部分的に使わずに無効にします。** 余分な comma、打ち間違い、email でない値が 1 つでもあれば設定全体を `null` にし、private API は全員に `503` を返します。「B の行だけ壊れていたので A だけ通る」という状態を作らないためです。
