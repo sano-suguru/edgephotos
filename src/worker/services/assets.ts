@@ -68,6 +68,9 @@ export function decodeCursor(value: string | undefined): Cursor | null {
 export type TimelineQuery = {
   limit: number
   cursor?: string
+  // 'older' (the default) reads down the timeline from the cursor; 'newer' reads back up it. Both return
+  // the page newest first.
+  direction?: 'older' | 'newer'
   favorite?: boolean
   trashed?: boolean
   albumId?: string
@@ -86,19 +89,59 @@ export async function listAssets(ctx: ServiceContext, query: TimelineQuery) {
     // Literal, not a bound value, so SQLite can pick the assets_favorites partial index.
     where.push(query.favorite ? sql`a.is_favorite = 1` : sql`a.is_favorite = 0`)
   }
+  const newer = query.direction === 'newer'
   const cursor = decodeCursor(query.cursor)
   if (cursor) {
     // Row-value form so D1 seeks assets_timeline. With bound values the equivalent OR form scanned the index
-    // from the start, so rows read grew with page depth (docs/benchmarks.md).
-    where.push(sql`(a.sort_at, a.id) < (${cursor.s}, ${cursor.i})`)
+    // from the start, so rows read grew with page depth (docs/benchmarks.md). 'newer' walks the same index
+    // the other way.
+    where.push(
+      newer ? sql`(a.sort_at, a.id) > (${cursor.s}, ${cursor.i})` : sql`(a.sort_at, a.id) < (${cursor.s}, ${cursor.i})`,
+    )
   }
   const results = await ctx.db.all<AssetRow>(
     sql`SELECT a.* FROM ${from} WHERE ${sql.join(where, sql` AND `)}
-        ORDER BY a.sort_at DESC, a.id DESC LIMIT ${query.limit + 1}`,
+        ORDER BY ${newer ? sql`a.sort_at ASC, a.id ASC` : sql`a.sort_at DESC, a.id DESC`} LIMIT ${query.limit + 1}`,
   )
+  const more = results.length > query.limit
   const page = results.slice(0, query.limit)
-  const nextCursor = results.length > query.limit ? encodeCursor(page[page.length - 1]) : null
-  return { rows: page, nextCursor }
+  // The response is newest first whichever way the page was read.
+  const rows = newer ? page.reverse() : page
+  const newest = rows[0]
+  const oldest = rows[rows.length - 1]
+  return {
+    rows,
+    // Beyond the newest row of this page there is another page when 'newer' stopped early, and possibly one
+    // when the caller came from there. Only a read that reached the end reports null.
+    prevCursor: newer ? (more && newest ? encodeCursor(newest) : null) : cursor && newest ? encodeCursor(newest) : null,
+    nextCursor: newer ? (oldest ? encodeCursor(oldest) : (query.cursor ?? null)) : more ? encodeCursor(oldest) : null,
+  }
+}
+
+// Months that have a photo in the library timeline, newest first, with the cursor that starts a page at each
+// month's newest photo.
+//
+// The month is the capture time as it is recorded: the leading digits of `taken_at`, or the UTC upload time
+// when there is none. `taken_at` keeps the camera's wall clock, so this is the month the grid heads the photo
+// with (src/web/lib/dates.ts); `sort_at` cannot be used for it, because it converts a capture time that
+// carries an offset to UTC. A photo without a capture time is the one case where the two can differ: the
+// month here is UTC, the heading is the reader's time zone (docs/architecture.md §6).
+//
+// One row per month, so the response is bounded by the range of the library, not by its size.
+export async function listMonths(ctx: ServiceContext) {
+  const rows = await ctx.db.all<{ month: string; count: number; max_sort: number }>(
+    sql`SELECT substr(COALESCE(a.taken_at, a.created_at), 1, 7) AS month, COUNT(*) AS count, MAX(a.sort_at) AS max_sort
+        FROM assets a WHERE a.status = 'ready' AND a.trashed_at IS NULL
+        GROUP BY month ORDER BY month DESC`,
+  )
+  return rows.map((row) => ({
+    month: row.month,
+    count: row.count,
+    // One millisecond past the month's newest photo: `(sort_at, id) < (max + 1, '')` keeps every photo of
+    // that instant, whatever its id, and no id sorts below '' at the next millisecond. So the page starts
+    // exactly at the month's newest photo without a second cursor form.
+    cursor: encodeCursor({ sort_at: row.max_sort + 1, id: '' }),
+  }))
 }
 
 export async function getAssetRow(db: Db, id: string): Promise<AssetRow | null> {

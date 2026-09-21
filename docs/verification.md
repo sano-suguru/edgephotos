@@ -536,6 +536,45 @@ CI の Linux runner でも同じ経路を通る（HEIC の decode 可否に依�
 
 CI は Linux runner の WebKit で HEIC を decode できないため、この assertion のある分岐（`if (heicDecodes)`）に入らない。CI が緑でもこの経路は通っていない。
 
+## timeline の年月 navigation（2026-09-22）
+
+年月の一覧・jump・前後の pagination の確認（[D-031](decisions.md)）。合成データだけを使い、実写真は使っていない。
+
+### Worker（`tests/integration/timeline-months.test.ts`、workerd）
+
+各 test は空の library から始める。件数が library 全体の値だからである。
+
+| 確認したこと | 結果 |
+| --- | --- |
+| 複数年・複数月（2022-12 / 2024-03 / 2024-05） | 写真のある月だけが新しい順に、件数付きで並ぶ。間の空の月は行が無い |
+| offset 付きの撮影時刻（`2024-05-01T08:00:00+09:00`、UTC では 2024-04-30） | 2024-05。grid の見出しと同じ月になる |
+| 撮影時刻の無い写真（`createdAt` 2024-04-30T23:30Z） | 2024-04（UTC の upload 月）。並び順の fallback は変わらない |
+| 指定の月へ jump | その月の最も新しい写真から page が始まる |
+| jump した位置から上下へ全部読む | 上と下を合わせると timeline 全体と一致し、重複も欠けも無い |
+| 同じ撮影時刻の写真が 3 枚 | 3 枚とも jump した page に入る。id による取りこぼしが無い |
+| upload の直後 | 新しい月が現れ、既存の月の件数が増える |
+| trash と restore | trash の間はその月が消え、restore で件数ごと戻る。timeline と一致する |
+| household の 2 人目の member | 同じ年月構成が返る |
+| 5,000 枚・25 か月 | months は 25 行。合計は 5,000。trash だけの月は出ない。月からの 1 ページは 60 件で、続きの cursor がある |
+| cursor 無しの `direction=newer` | `400 VALIDATION_FAILED` |
+| timeline の先頭 | `prevCursor` は null。2 ページ目からは上へ戻れて、戻ると null になる |
+
+### Browser（Playwright、`e2e/timeline.spec.ts`、chromium と mobile-webkit）
+
+5,000 枚・25 か月の library は test 側が答える。server の挙動は上の integration test が固定しているため、ここでは Browser 側だけを見る（[D-021](decisions.md)）。
+
+- 月を選ぶと `?m=YYYY-MM` が URL に残り、その月の見出しから表示される。読み込む tile は library 全体ではなく数ページ
+- browser の戻る / 進むで、最新の先頭とその月を往復できる。`?m=` 付きで開き直しても同じ月から始まる
+- 「これより新しい写真」を押すと 1 ページ上を読む。重複は無く、library の並び順のまま連続している
+- 月の見出しは scroll 中も上端に残る（desktop は header の下、phone は画面上端）
+- dialog には写真のある月だけが件数付きで並ぶ。「最新の写真へ」で先頭に戻る
+
+**scroll 位置を保つ方法は採れなかった。** 上に page を足したあと、読んでいた写真の位置を復元しようとすると、Chromium で約 1,200px ずれた。section が `content-visibility: auto` なので、render されるまで高さは `contain-intrinsic-size` の見積もり（40rem）のままで、その section が render された時点で残りの高さの分だけ下へ動く。`scrollHeight` でも、写真を anchor にした相対位置でも同じだった。押した結果として新しい写真を見せる（先頭へ移動する）方式にした。
+
+### DOM と memory
+
+5,000 枚を末尾まで読み込むと Chromium で 15,128 node、年月から開くと 419 node。数値と条件は [benchmarks.md](benchmarks.md) にある。thumbnail を 1x1 に差し替えた測定なので、decode 済み画像の memory は含まない。
+
 ## 未検証
 
 ### iPhone / Android 実機での取り込み

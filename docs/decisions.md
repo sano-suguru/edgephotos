@@ -713,3 +713,72 @@ Chrome / Firefox のために libheif（WASM）や Cloudflare Images を入れ�
 - fixture の orientation は EXIF で持っています。実機の HEIC が使う `irot` / `imir` は未確認です
 
 再検討する条件は、cross-browser の HEIC upload が実際の要求になったとき、または native client を作るときです。その場合も、まず original を変えずに derivative を作る経路を探します。
+
+## D-031: 年月の一覧を別の endpoint で返し、jump は既存の cursor で行う
+
+**状態:** 採用（2026-09-22）
+
+数千枚の library では、古い写真へ辿り着くために timeline を延々と読み進めることになります。解くのは「目的の時期へ直接移動できること」だけで、検索基盤は作りません。
+
+### 年月の一覧は 1 行 1 月で返す
+
+`GET /api/v1/assets/months` が、写真のある年月を新しい順に、件数と cursor を付けて返します。
+
+```sql
+SELECT substr(COALESCE(taken_at, created_at), 1, 7) AS month, COUNT(*), MAX(sort_at)
+FROM assets WHERE status = 'ready' AND trashed_at IS NULL GROUP BY month ORDER BY month DESC
+```
+
+response の行数は library の枚数ではなく、写真のある月数で決まります。写真が 0 枚の月は行がありません。navigation を作るために全 asset を client へ渡すことはしません。
+
+D1 側は ready かつ trash でない行の走査です。`assets_timeline` は `(sort_at, id)` なので、この GROUP BY には使えません。10,000 件で 19,500 行・4 ms です（[benchmarks.md](benchmarks.md)）。
+
+式 index（`substr(COALESCE(taken_at, created_at), 1, 7)` の部分 index）は測ったうえで入れていません。20,000 件で rows_read は 39,000 → 19,000、7 → 2 ms になりますが、どちらも枚数に比例します。現在の library では index 無しで 1〜4 ms で、対価は migration と、drizzle-kit の snapshot が式 index を持ち続けることです。rows_read が運用上の問題になった時点で入れます。
+
+月ごとの件数を別 table に持って維持する案は採りません。upload・trash・restore・完全削除・restore 済み backup のすべてに整合性の責任が増え、D1 と R2 が単一 transaction ではない前提（[AGENTS.md](../AGENTS.md)）で「count だけずれた library」を作れてしまいます。取り込むのは、実測した month query の rows_read が運用上の問題になったときです。
+
+### 月の定義は「記録した撮影時刻の digits」
+
+`takenAt` があればその先頭 7 文字、無ければ `createdAt`（UTC）です。`sort_at` は使いません。`sort_at` は offset 付きの撮影時刻を UTC の瞬間へ直すので、`2024-05-01T08:00:00+09:00` の写真が 2024-04 になります。grid の見出しは撮影時刻の digits をそのまま出すため（[architecture.md](architecture.md#6-保存する画像の契約)）、`sort_at` を月にすると見出しと navigation が食い違います。
+
+`takenAt` の無い写真だけは、navigation が UTC の月、見出しが閲覧端末の timezone の月です。月境界の数時間で違う月に見えることがあります。並び順の fallback（`sort_at` = upload 時刻）は変えていません。端末の timezone を server に送って月を計算し直す案は、household の 2 人が別の timezone にいると「同じ library に別の年月構成」が見えるため採りません。
+
+### jump は既存 cursor の値で行う
+
+各行の cursor は `(MAX(sort_at) + 1, '')` です。既存の `(sort_at, id) < (cursor.s, cursor.i)` にそのまま渡せて、その月の最も新しい写真から page が始まります。同じ `sort_at` の写真が何枚あっても、id によらず全部が入ります。次の 1 ミリ秒に `''` より小さい id は無いので、その先の写真は入りません。
+
+cursor の形式も pagination 契約も変えていません。「指定月へ行く」ために offset pagination へ変えることもしていません。
+
+### jump の後も上下に読めるようにする
+
+jump した位置より新しい写真を読む方法が必要です。`AssetSummary` は `sort_at` を持たないので、client 側では作れません。`GET /api/v1/assets` に `direction=newer` と `prevCursor` を足しました。`direction=newer` は `(sort_at, id) > cursor` を `ASC` で読み、返す items は常に新しい順です。`assets_timeline` を逆向きに辿るだけで、新しい index は要りません。
+
+cursor が null のときだけ「その方向に写真が無い」を意味します。request が来た側の cursor は、その先を読んでいないので null にしません。渡すと空の page が返ることがあります。これを厳密にするには、page ごとにもう 1 回 query することになるため、意味の方を弱く定義しています。
+
+上方向は IntersectionObserver ではなく button です。上へ足すと、読んでいた写真の位置がずれます。押したときだけ動く方が分かりやすく、押した結果として新しい写真が画面に出ます。
+
+読んでいた位置を保つ案は採りません。足した分の高さが要りますが、section は `content-visibility: auto` なので、render されるまで高さは `contain-intrinsic-size` の見積もりです。実測では、押した直後に合わせても、その section が render された時点で約 1,200px ずれました（Chromium）。Safari には `overflow-anchor` も無いため、どちらの方法でも browser 任せにはできません。
+
+### client の状態
+
+`createPageList` は、list を組み立てた request の並び（jump の cursor、下への append、上への prepend）を覚えます。presigned URL の期限切れで読み直すとき、同じ範囲を同じ順で読み直すためです。先頭から読み直すと、jump した list が先頭の月に置き換わります。
+
+年月は `?m=YYYY-MM` として URL に残します。back / forward と reload で同じ月へ戻れます。SPA router も scroll 復元の仕組みも足していません。pixel 単位の位置は戻しません。選んだ月の先頭に戻ります。
+
+写真が 1 枚も無くなった月が URL に残っている場合は、param を落として最新から表示します。エラーにはしません。
+
+### virtualization は入れない
+
+grid は `content-visibility: auto` で画面外の section を render しません。Chromium の実測では、年月から開いた画面は 120 tile・419 node です。末尾まで読み込めば 5,000 tile・15,128 node になりますが、年月へ直接移動できるようになったので、古い写真を見るために末尾まで読む必要はありません（[benchmarks.md](benchmarks.md)）。
+
+この測定の thumbnail は 1x1 の画像なので、decode 済み画像の memory は含みません。実機の memory は [roadmap.md](roadmap.md) の Post-merge verification で見ます。そこで問題が出たときに virtualization を候補に入れます。
+
+### 範囲外
+
+full text search、AI / semantic search、tag、場所、uploader での絞り込み、member ごとの timeline は作りません。navigation は library 全体に対するもので、household の 2 人には同じ年月構成が見えます（[D-028](#d-028-許可した複数の-email-が-1-つの-library-を対等に共同利用する)）。
+
+### 再検討する条件
+
+- month query の rows_read または時間が、実測で運用上の問題になったとき（式 index、あるいは維持する集計 table を候補に入れる）
+- 実測した DOM node 数・memory が問題になったとき（virtualization を候補に入れる）
+- `takenAt` の無い写真の月が、実際の利用で分かりにくいと分かったとき

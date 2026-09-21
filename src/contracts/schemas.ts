@@ -68,9 +68,31 @@ export const AssetSummarySchema = z
 
 export const AssetSchema = AssetSummarySchema.extend({ previewUrl: z.url() }).openapi('Asset')
 
+// `nextCursor` / `prevCursor` are the positions just past this page: pass one back as `cursor`, with
+// `direction=older` (the default) or `direction=newer`. null means nothing lies in that direction. A
+// non-null cursor on the side the request came from may still return an empty page: the rows there were
+// not read, so the server only reports that it did not see the end of the list.
 export const AssetPageSchema = z
-  .object({ items: z.array(AssetSummarySchema), nextCursor: z.string().nullable() })
+  .object({
+    items: z.array(AssetSummarySchema),
+    nextCursor: z.string().nullable(),
+    prevCursor: z.string().nullable(),
+  })
   .openapi('AssetPage')
+
+// Timeline months, newest first. One row per month that has a photo, so an empty month is absent instead
+// of being listed with a count of 0. The month is the capture time as EdgePhotos recorded it: the
+// wall-clock digits of `takenAt`, or the UTC upload time when the photo has none (docs/architecture.md §6).
+export const AssetMonthSchema = z
+  .object({
+    month: z.string().regex(/^\d{4}-\d{2}$/),
+    count: z.number().int().positive(),
+    // Pass as `cursor` to GET /assets to start the timeline at this month's newest photo.
+    cursor: z.string(),
+  })
+  .openapi('AssetMonth')
+
+export const AssetMonthsSchema = z.object({ items: z.array(AssetMonthSchema) }).openapi('AssetMonths')
 
 export const AssetPatchSchema = z.object({ isFavorite: z.boolean() }).openapi('AssetPatch')
 
@@ -453,6 +475,7 @@ export type ExportMembershipPage = z.infer<typeof ExportMembershipPageSchema>
 export type AssetSummary = z.infer<typeof AssetSummarySchema>
 export type Asset = z.infer<typeof AssetSchema>
 export type AssetPage = z.infer<typeof AssetPageSchema>
+export type AssetMonth = z.infer<typeof AssetMonthSchema>
 export type UploadReserve = z.input<typeof UploadReserveSchema>
 export type UploadReservation = z.infer<typeof UploadReservationSchema>
 export type UploadFinalizeResult = z.infer<typeof UploadFinalizeResultSchema>

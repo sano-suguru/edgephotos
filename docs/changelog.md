@@ -4,6 +4,20 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## timeline の年月 navigation（2026-09-22）
+
+写真が数千枚あっても、目的の時期へ直接移動できるようにしました。検索基盤は作っていません。
+
+`GET /api/v1/assets/months` が、写真のある年月を新しい順に、件数と「その月から始める cursor」付きで返します。行は月ごとに 1 つなので、response は library の枚数では増えません。写真が 0 枚の月は行がありません。
+
+月を選ぶと、既存の cursor pagination のまま、その月の最も新しい写真から表示します。cursor の形式は変えていません。jump したあとは上へも下へも読めます（`direction=newer` と `prevCursor`）。同じ写真が二重に出ることも、間を飛ばすこともありません。
+
+月の見出しは sticky にしました。scroll 中も、見ている写真がどの年月かが分かります。
+
+選んだ年月は `?m=YYYY-MM` として URL に残ります。back / forward と reload で同じ月へ戻れます。SPA router も scroll 復元の仕組みも足していません。
+
+月の決め方は「記録した撮影時刻の digits、無ければ upload 時刻（UTC）」です。並び順の fallback は変えていません（[D-031](decisions.md)）。
+
 ## 大量 upload の partial failure（2026-09-22）
 
 数十〜数百枚を選んだ upload で、一部が失敗しても成功した写真をそのまま残し、失敗した行だけを再試行できるようにしました。新しい upload manager や background upload は作っていません。

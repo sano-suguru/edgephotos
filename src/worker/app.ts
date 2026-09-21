@@ -4,6 +4,7 @@ import {
   AlbumInputSchema,
   AlbumListSchema,
   AlbumSchema,
+  AssetMonthsSchema,
   AssetPageSchema,
   AssetPatchSchema,
   AssetSchema,
@@ -100,7 +101,20 @@ function misconfigured(c: Context, env: Env, withSigner: boolean) {
 const PageQuery = z.object({
   limit: z.coerce.number().int().min(1).max(LIMITS.pageMax).default(60),
   cursor: z.string().max(512).optional(),
+  // 'newer' reads the page above the cursor. Without a cursor there is nothing above the newest photo,
+  // so the combination is rejected rather than silently read as the first page.
+  direction: z.enum(['older', 'newer']).optional(),
 })
+
+// Without a cursor there is nothing above the newest photo, so the combination is refused instead of being
+// read as the first page. Checked here rather than with `.refine`, which would leave the query schema no
+// longer an object for OpenAPI and `.extend`.
+function checkedPageQuery<T extends { cursor?: string; direction?: 'older' | 'newer' }>(q: T): T {
+  if (q.direction === 'newer' && q.cursor === undefined) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'direction=newer needs a cursor.')
+  }
+  return q
+}
 
 const boolQuery = z
   .enum(['true', 'false'])
@@ -231,11 +245,21 @@ export function createApp(options: AppOptions) {
       responses: { 200: json(AssetPageSchema, 'Timeline page, newest first'), ...errorResponses },
     }),
     async (c) => {
-      const q = c.req.valid('query')
+      const q = checkedPageQuery(c.req.valid('query'))
       const page = await assets.listAssets(svc(c), q)
       const items = await Promise.all(page.rows.map((r) => assets.toAssetSummary(svc(c), r)))
-      return c.json({ items, nextCursor: page.nextCursor }, 200)
+      return c.json({ items, nextCursor: page.nextCursor, prevCursor: page.prevCursor }, 200)
     },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/api/v1/assets/months',
+      tags: tag('assets'),
+      responses: { 200: json(AssetMonthsSchema, 'Months that have a photo, newest first'), ...errorResponses },
+    }),
+    async (c) => c.json({ items: await assets.listMonths(svc(c)) }, 200),
   )
 
   const AssetParams = z.object({ assetId: IdSchema })
@@ -417,9 +441,9 @@ export function createApp(options: AppOptions) {
     async (c) => {
       const { albumId } = c.req.valid('param')
       await albums.requireAlbumId(svc(c).db, albumId)
-      const page = await assets.listAssets(svc(c), { ...c.req.valid('query'), albumId })
+      const page = await assets.listAssets(svc(c), { ...checkedPageQuery(c.req.valid('query')), albumId })
       const items = await Promise.all(page.rows.map((r) => assets.toAssetSummary(svc(c), r)))
-      return c.json({ items, nextCursor: page.nextCursor }, 200)
+      return c.json({ items, nextCursor: page.nextCursor, prevCursor: page.prevCursor }, 200)
     },
   )
 
