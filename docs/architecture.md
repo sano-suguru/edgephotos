@@ -217,7 +217,7 @@ finalize は upload の期限を見ません。期限内に PUT が済んでい�
 
 reserve の `metadata.createdAt`（任意、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。
 
-失敗した upload をどこからやり直すかは Client が決めます。Server 側の契約は、finalize が冪等であることと、presigned URL が期限内に限り再利用できることだけです（[D-020](decisions.md)、[D-023](decisions.md)、`src/web/features/uploads/transfer.ts`）。
+失敗した upload をどこからやり直すかは Client が決めます。Server 側の契約は、finalize が冪等であることと、presigned URL が期限内に限り再利用できることです（[D-020](decisions.md)、[D-023](decisions.md)、`src/web/features/uploads/transfer.ts`）。
 
 不変条件:
 

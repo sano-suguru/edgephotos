@@ -383,7 +383,9 @@ D1 と R2 は 1 transaction にできません（[architecture.md](architecture.
 - `uploads.status` に `abandoned` を足す: `uploads` の CHECK を変えるには table の作り直しが要り、baseline の無名 UNIQUE の扱いが難しい（development.md §7）。`duplicate` + `duplicate_of = NULL` で「asset を作らずに終わった upload」を表す（`src/worker/db/schema.ts` に注記）
 - R2 lifecycle rule で `originals/` を期限切れにする: 写真の original まで消える
 
-影響: 中断した upload を後から finalize すると、cleanup の前なら従来どおり完了し、cleanup の後なら `410`（片付け途中）または `404`（行が消えた）になります。Web の再試行は、どちらでも新しい reservation からやり直します。
+影響: 中断した upload を後から finalize すると、cleanup の前なら従来どおり完了し、cleanup の後なら `410`（片付け途中）または `404`（行が消えた）になります。
+
+Web の再試行は、前の試行の reservation の finalize からやり直します。`409 UPLOAD_OBJECT_MISSING` で presigned URL が期限内なら、欠けた object だけを PUT し直します。期限切れ・`404`・`410`・`422` なら新しい reservation から始めます（`src/web/features/uploads/transfer.ts`）。
 
 ## D-024: Export をページに分け、backup / restore を差分・再開できるようにする
 
