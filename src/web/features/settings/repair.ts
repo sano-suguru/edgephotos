@@ -1,5 +1,6 @@
 import type { DerivativeRepair, DerivativeVariant } from '../../../contracts/schemas'
 import { ApiRequestError } from '../../lib/api/error'
+import { ImageDecodeError } from '../../lib/image-errors'
 
 // Pure orchestration of the derivative repair (no DOM), so the retry and race behaviour can be unit-tested.
 // Protocol and invariants: docs/decisions.md D-026.
@@ -54,7 +55,14 @@ export async function repairAsset(deps: RepairDeps, assetId: string): Promise<Re
   throw new RepairIncompleteError('the rebuilt derivatives were not accepted')
 }
 
-export type RepairTotals = { repaired: number; alreadyOk: number; gone: number; damaged: number; failed: number }
+export type RepairTotals = {
+  repaired: number
+  alreadyOk: number
+  gone: number
+  damaged: number
+  undecodable: number
+  failed: number
+}
 
 // Repairs a list of photos one at a time, and never lets one photo stop the rest. A photo that was deleted
 // meanwhile, or whose original is itself damaged, is counted and skipped: neither is repairable here, and
@@ -64,7 +72,7 @@ export async function repairAssets(
   assetIds: readonly string[],
   onProgress: (done: number) => void,
 ): Promise<RepairTotals> {
-  const totals: RepairTotals = { repaired: 0, alreadyOk: 0, gone: 0, damaged: 0, failed: 0 }
+  const totals: RepairTotals = { repaired: 0, alreadyOk: 0, gone: 0, damaged: 0, undecodable: 0, failed: 0 }
   for (const [i, id] of assetIds.entries()) {
     try {
       const outcome = await repairAsset(deps, id)
@@ -73,6 +81,9 @@ export async function repairAssets(
     } catch (err) {
       if (err instanceof ApiRequestError && err.code === 'ASSET_NOT_FOUND') totals.gone++
       else if (err instanceof ApiRequestError && err.code === 'REPAIR_SOURCE_UNUSABLE') totals.damaged++
+      // The download was compared with the digest R2 recorded, so the original is intact: it is this
+      // browser that has no decoder for it. Retrying here will not help; another browser will.
+      else if (err instanceof ImageDecodeError) totals.undecodable++
       else totals.failed++
     }
     onProgress(i + 1)
@@ -87,6 +98,9 @@ export function repairMessage(t: RepairTotals): string {
   if (t.gone > 0) parts.push(`${t.gone} 枚は削除済みでした`)
   if (t.damaged > 0) {
     parts.push(`${t.damaged} 枚は元ファイル自体が壊れているため作り直せません（backup から復元してください）`)
+  }
+  if (t.undecodable > 0) {
+    parts.push(`${t.undecodable} 枚はこのブラウザでは読み取れない形式でした（Safari で開くと作り直せる場合があります）`)
   }
   if (t.failed > 0) parts.push(`${t.failed} 枚は作り直せませんでした。時間をおいて再実行してください`)
   if (parts.length === 0) parts.push('作り直す写真はありませんでした')

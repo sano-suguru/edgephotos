@@ -8,6 +8,7 @@ import {
   repairMessage,
 } from '../../src/web/features/settings/repair'
 import { ApiRequestError } from '../../src/web/lib/api/error'
+import { HeicNotDecodableHereError } from '../../src/web/lib/image-errors'
 
 // The client half of the repair protocol (docs/decisions.md D-026). The rule being pinned down: only the
 // server's `status: 'ok'` means finished. A PUT that reports "stored" proves nothing, because a concurrent
@@ -149,22 +150,40 @@ describe('repairAssets', () => {
     const progress = vi.fn()
     const totals = await repairAssets(d, ['fixed', 'gone', 'damaged', 'flaky'], progress)
 
-    expect(totals).toEqual({ repaired: 0, alreadyOk: 1, gone: 1, damaged: 1, failed: 1 })
+    expect(totals).toEqual({ repaired: 0, alreadyOk: 1, gone: 1, damaged: 1, undecodable: 0, failed: 1 })
     expect(seen).toEqual(['fixed', 'gone', 'damaged', 'flaky'])
     expect(progress).toHaveBeenLastCalledWith(4)
   })
 })
 
+describe('repairAssets and this browser', () => {
+  it('counts photos this browser cannot decode apart from real failures', async () => {
+    const d: RepairDeps = {
+      repair: async () => state(['thumbnail']),
+      fetchOriginal: async () => new Blob(['x'], { type: 'image/heic' }),
+      render: async () => {
+        throw new HeicNotDecodableHereError('no decoder', 'image/heic')
+      },
+      put: async () => {},
+    }
+    const totals = await repairAssets(d, ['a'], () => {})
+    expect(totals).toMatchObject({ undecodable: 1, failed: 0, repaired: 0 })
+    // Retrying here would fail the same way; another browser is what helps.
+    expect(repairMessage(totals)).toMatch(/このブラウザでは/)
+    expect(repairMessage(totals)).not.toMatch(/時間をおいて/)
+  })
+})
+
 describe('repairMessage', () => {
   it('always says the originals were left alone', () => {
-    const msg = repairMessage({ repaired: 2, alreadyOk: 0, gone: 0, damaged: 1, failed: 0 })
+    const msg = repairMessage({ repaired: 2, alreadyOk: 0, gone: 0, damaged: 1, undecodable: 0, failed: 0 })
     expect(msg).toContain('2 枚')
     expect(msg).toContain('backup')
     expect(msg).toContain('元ファイルには触れていません')
   })
 
   it('reports an empty run without claiming anything was fixed', () => {
-    expect(repairMessage({ repaired: 0, alreadyOk: 0, gone: 0, damaged: 0, failed: 0 })).toContain(
+    expect(repairMessage({ repaired: 0, alreadyOk: 0, gone: 0, damaged: 0, undecodable: 0, failed: 0 })).toContain(
       '作り直す写真はありませんでした',
     )
   })
