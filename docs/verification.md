@@ -10,7 +10,7 @@
 
 ## 現在の状況
 
-- 最終確認: 2026-09-18
+- 最終確認: 2026-09-21
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`
 - 未確認: production 環境の作成と deploy、iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
@@ -363,6 +363,61 @@ restore の入口: 壊れた manifest と壊れた `restore-state.json` は、�
 - 別 origin（`https://evil.example`）からの同じ preflight は `403` で、CORS header を返さない（「`APP_ORIGIN` に限定する」。セキュリティの [presigned URL](security.md#6-presigned-url)）
 
 **Browser から実際に壊れた写真を作り直す往復は未実施**（下の「未検証」）。
+
+## CI の時間制限（2026-09-21）
+
+GitHub Actions で `Test timed out in 5000ms` が断続的に出ていました。落ちるのは `tests/integration/export-restore.test.ts` の 1 件です。
+
+> interrupted restore > continues where it stopped, at any point, and ends identical to the backup
+
+判断は [D-029](decisions.md) にあります。
+
+### CI で測った値
+
+GitHub Actions `ubuntu-latest`、`pnpm test`。run 35576409905 の 2 回の attempt は同じ commit（62e9047、ドキュメントのみ）です。
+
+| run | tests 合計 | storage audit の 8001 key test | interrupted restore |
+| --- | --- | --- | --- |
+| 35576409905 attempt 1（失敗） | 77.90s | 28880ms | 7197ms（5000ms で打ち切り） |
+| 35579077350 | 34.93s | 15194ms | 2068ms |
+| 35575268896 | 27.97s | 13275ms | 1981ms |
+| 35576409905 attempt 2 | 20.39s | 8915ms | 1659ms |
+
+同じコードで最も重い test が 8.9 秒から 28.9 秒まで 3.2 倍ぶれます。run の中では全部が同じ比率で伸びます（tests 合計 ÷ 8001 key test = 2.1〜2.7）。失敗した run は、この test だけが遅かったのではなく、run 全体が遅い側の端でした。
+
+### 同じ原因で落ちうるもの
+
+最遅 run（35576409905 attempt 1）で 5000ms に近かった test です。local は macOS / 8 core での `pnpm test`。
+
+| test | local | 最遅 CI | 5000ms までの余裕 |
+| --- | --- | --- | --- |
+| storage audit: says an id was not fully checked | 5765ms | 28880ms | 既に `60_000` を個別指定していた |
+| export/restore: continues where it stopped | 1002ms | 7197ms | 超過 |
+| storage audit: classifies every inconsistency | 362ms | 3403ms | 1.5 倍 |
+| export/restore: round-trips assets | 450ms | 2394ms | 2.1 倍 |
+| storage audit: does not write anything | 763ms | 2102ms | 2.4 倍 |
+| albums: adds and removes assets idempotently | — | 2083ms | 2.4 倍 |
+| export/restore: verification detects missing assets | 138ms | 1763ms | 2.8 倍 |
+| uploads: unique constraint race | — | 1718ms | 2.9 倍 |
+
+CI と local の比は test ごとに 2.8〜12.8 倍と一定しません。
+
+`storage.test.ts` の `beforeEach(resetStorage)` も同じ位置にあります。8001 key を作る test の直後の 1 回だけ 768ms（他の回は 0〜5ms）で、既定の `hookTimeout` 10 秒に対する余裕は 3 倍ほどです。
+
+### 失敗した test の中身
+
+local で 12 周（okCalls 3〜14）の内訳を測りました。合計 690〜712ms で、突出した処理はありません。
+
+- API 呼び出し 292 回: Worker 内 345ms
+- storage 呼び出し 102 回: 85ms
+- test 側の RS256 署名 292 回: 179ms（1 回 0.6ms。認証込みの GET 1 件が 1.0ms）
+- D1 / R2 の初期化 12 回: 34ms
+
+test file 単独では 725ms、suite 全体では 960〜1085ms です。`storage.test.ts` を外しても 989〜1133ms で変わらないので、local では重い 1 file が他を押し出しているのではありません。
+
+### 直したあと
+
+`vitest.config.ts` に `testTimeout` / `hookTimeout` = 120 秒を置き、`storage.test.ts` の個別指定を消しました。test の中身と assertion は変えていません。
 
 ## 未検証
 

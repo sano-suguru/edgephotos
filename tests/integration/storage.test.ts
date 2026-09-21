@@ -203,7 +203,7 @@ describe('storage audit', () => {
     // The audit still moves on and checks the next photos.
     expect(about(after)).toEqual([])
     expect(issues.filter((i) => i.kind === 'unexpected_key').length).toBeGreaterThan(0)
-  }, 60_000)
+  })
 
   it('does not write anything', async () => {
     const app = await makeApp()
