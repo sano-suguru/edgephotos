@@ -201,7 +201,7 @@ finalize での確認内容（[D-012](decisions.md)）:
 - original の magic bytes が申告 content type と一致すること
 - thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG であること
 
-検査に通らない upload は `ready` になりません。どの検査がどの status と error code になるかは、route schema が定義します。
+検査に通らない upload は `ready` になりません。どの検査がどの status になるかは、route schema が定義します。
 
 D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transaction）で行います。asset は upload 行がまだ `pending` の場合だけ作ります（`INSERT ... SELECT ... WHERE status = 'pending'`。[D-023](decisions.md)）。
 

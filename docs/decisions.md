@@ -296,7 +296,7 @@ Client が PUT 前に APP1 / APP13 を取り除きます（`src/web/lib/jpeg-met
 
 `412` は保存済みとして扱います。key は reserve ごとに固有で、`If-None-Match: *` で署名しているため、`412` になるのは同じ upload の以前の試行が R2 に届き、応答だけが失われた場合に限られます。finalize は引き続き size と、original については R2 が検証した SHA-256 を確認します。実 R2 の `412` が CORS 越しに status として読めることは、remote-test で確認済みです（[verification.md](verification.md)）。
 
-**どこからやり直すかを決める。** PUT の再試行で回復しなかった upload は、前の試行の reservation の finalize からやり直します。`409 UPLOAD_OBJECT_MISSING` で presigned URL が期限内なら、欠けた object だけを PUT し直します。期限切れ・`404`・`410`・`422` なら新しい reservation から始めます（`src/web/features/uploads/transfer.ts`）。`410` と `404` は storage cleanup が片付けたあとの upload です（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。
+**どこからやり直すかを決める。** Web の再試行は、前の試行の reservation の finalize から始めます。`409 UPLOAD_OBJECT_MISSING` で presigned URL が期限内なら、欠けた object だけを PUT し直します。期限切れ・`404`・`410`・`422` なら新しい reservation から始めます（`src/web/features/uploads/transfer.ts`）。`410` と `404` は storage cleanup が片付けたあとの upload です（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。
 
 **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らず、未完了のまま完了表示になっていました。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削ります（`src/web/features/uploads/upload-list.ts`）。
 

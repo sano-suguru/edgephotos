@@ -28,7 +28,7 @@
 
 この 5 段階の完了をもって、外部 alpha の前提が揃いました。
 
-- **Feature 1 — Upload + Timeline:** owner が写真を upload し、完了後に timeline へ表示されるようにしました。original / thumbnail / preview は想定した経路で保存・取得します
+- **Feature 1 — Upload + Timeline:** owner が写真を upload し、完了後に timeline へ表示されるようにしました。original / thumbnail / preview は想定した経路で保存・取得され、refresh 後も状態が一貫します
 - **Feature 2 — Favorite + Albums:** favorite の切り替えと、album の作成・変更・削除、asset の追加・削除を実装しました
 - **Feature 3 — Sharing:** album の共有リンクを発行し、expiry・revoke・regenerate を機能させました。guest が見られるのは許可された thumbnail / preview だけです
 - **Feature 4 — Delete + Restore:** trash への移動と復元、明示操作としての完全削除、中断した purge の再開を実装しました
