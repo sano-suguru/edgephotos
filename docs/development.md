@@ -271,6 +271,16 @@ pnpm bench                                                        # 1,000 / 10,0
 BENCH_SIZES=100000 BENCH_BACKUP_MAX=0 BENCH_BIG_ALBUM=50000 pnpm bench   # 10 万件（seed だけで約 5 分）
 ```
 
+### 時間制限
+
+test の時間制限は `vitest.config.ts` の `testTimeout` / `hookTimeout` で一括して決めます（現在 120 秒）。test ごとの上書きは書きません。
+
+この制限は、止まってしまった test を打ち切るためのものです。速さを固定するためのものではありません。性能は `pnpm bench` で測り、[benchmarks.md](benchmarks.md) に記録します。時間制限を性能の assert として使うと、CI の速度差が「コードの欠陥ではない赤」になります（[D-029](decisions.md)）。
+
+値は、CI で観測した最遅の test の約 4 倍に取っています。CI runner の速度は同じコードでも run ごとに 3 倍以上ぶれます（[verification.md](verification.md#ci-の時間制限2026-09-21)）。
+
+test が制限に掛かったら、まず「本当に止まっているのか、CI が遅いだけなのか」を測ってから直します。遅い test を速くする必要が出たときは、制限を上げるのではなく test の作り方を変えます。
+
 ### 実行
 
 ```bash

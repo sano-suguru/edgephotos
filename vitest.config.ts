@@ -16,5 +16,9 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     setupFiles: ['tests/setup.ts'],
+    // Time limits are a hang guard, not a performance assertion (docs/development.md#8-テスト方針).
+    // Performance is measured by `pnpm bench` and recorded in docs/benchmarks.md.
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
   },
 })

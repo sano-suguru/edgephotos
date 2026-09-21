@@ -587,3 +587,32 @@ favorite・album・trash は library の状態で、member ごとには分かれ
 - `HOUSEHOLD_EMAILS` は Access identity の email です。Access 側で email が変わったら、この設定も更新しないと締め出されます
 
 D-023 など、これより前の決定に出てくる「owner」は household member と読み替えます。過去の判断は書き直しません。
+
+## D-029: test の時間制限は hang を打ち切るためだけに使い、config で一括して決める
+
+**状態:** 採用（2026-09-21。CI が code の欠陥ではない理由で赤くなったため）
+
+vitest の既定の 5 秒をそのまま使っていました。これを `vitest.config.ts` の `testTimeout` / `hookTimeout` = 120 秒に置き換え、test ごとの上書きをなくします。
+
+**時間制限は hang を打ち切るためのものです。** 速さの assert には使いません。速さを見るのは `pnpm bench` と [benchmarks.md](benchmarks.md) で、そちらは合成データの規模を決めて測ります。test の wall clock は、同じコードでも CI runner の混み具合で決まります。
+
+GitHub Actions の同一 commit・同一コードで、最も重い test は 8.9 秒から 28.9 秒まで 3.2 倍ぶれました。run 全体の test 時間も 20.4 秒から 77.9 秒まで動きます。5 秒の制限は、通常 2 秒で終わる test に 2.5 倍の余裕しか与えません。観測したぶれの方が大きいので、遅い run に当たった test から順に落ちます。測定は [verification.md](verification.md#ci-の時間制限2026-09-21) にあります。
+
+120 秒は、CI で観測した最遅の test（28.9 秒）の約 4 倍です。hang したときに CI が 2 分で止まる長さでもあります。
+
+守ること:
+
+- 時間制限は `vitest.config.ts` だけに書く。`it(..., 60_000)` のような test ごとの上書きを足さない
+- test が制限に掛かったら、上げる前にどの処理で何ミリ秒かかるかを測る
+- 遅い test を速くしたいときは、制限ではなく test の作り方を変える
+
+却下した案:
+
+- 落ちた test だけ個別に延ばす: 同じ原因で落ちうる test が他にもある（CI 最遅 run で 2.1〜3.4 秒の test が 5 件）。1 件ずつ後追いすることになり、`storage.test.ts` の `60_000` が既にその 1 件目だった。今回この上書きも消す
+- retry で通す: 赤の原因が消えず、本当に壊れたときも緑になる
+- CI の並列度を下げる: 遅い run で全体が遅くなることは測れたが、並列実行が原因だという測定はない。suite 全体が遅くなる代わりに、ぶれの原因は残る（[AGENTS.md](../AGENTS.md#6-将来要件を先回りしない)）
+
+残るリスク:
+
+- 本当に hang した test の検出が 5 秒から 120 秒へ遅くなります。suite 全体が通常 30 秒なので、CI の待ち時間としては許容します
+- test が徐々に遅くなっても、120 秒までは気付きません。速さの退行は `pnpm bench` で見ます
