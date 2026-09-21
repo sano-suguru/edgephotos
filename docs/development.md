@@ -241,7 +241,7 @@ workerd の test では見えない、Browser 固有の部分だけを対象に�
 
 | spec | 確認すること | project |
 | --- | --- | --- |
-| `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC の拒否表示。presigned URL の期限切れ後に画像が回復すること。全件完了したアップロード表示だけが数秒後に消えること（実行中・失敗ありでは残る） | chromium, mobile-webkit |
+| `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC は decode できる engine（WebKit）で形式と向きまで確認し、できない engine（Chromium）では拒否の文言を確認する。HEIC を名乗る壊れた bytes はどちらでも拒否される。presigned URL の期限切れ後に画像が回復すること。全件完了したアップロード表示だけが数秒後に消えること（実行中・失敗ありでは残る） | chromium, mobile-webkit |
 | `share.spec.ts` | album 作成 → viewer の menu から追加 → 共有リンク → 別 context の guest が閲覧（secret は Authorization header だけ、Cookie なし。thumbnail URL の期限切れから回復）→ 拡大表示の focus（閉じるボタンへ移り、Tab でも dialog 内に留まり、閉じると元の写真へ戻る）→ 再発行・無効化の確認 dialog（キャンセル・Escape では何も変わらない）→ 旧リンクと無効化したリンクは無効表示 | chromium |
 | `keyboard.spec.ts` | Base UI の Dialog / Menu の keyboard 操作と focus。viewer の ←/→ での移動（Menu 内では写真が変わらない）と、閉じたあとに最後の写真へ focus が戻ること | chromium |
 | `viewer.spec.ts` | preview の取得失敗・読み込み失敗で「高画質で表示できませんでした」と再試行が出ること。album が多い menu が画面内に収まり、keyboard で末尾までスクロールできること | chromium |
@@ -314,6 +314,8 @@ D1 / R2 の障害は、binding を Proxy で包んで再現します。
 original の期待 SHA-256 を fixture metadata として固定します。
 
 現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。Browser E2E は canvas で描いた JPEG を使います。
+
+HEIC だけは Browser で作れないので、合成画像から作った小さな HEIC を 2 つ commit しています（`tests/fixtures/`、計 1.7KB、実人物・実位置情報なし）。生成手順は `tests/fixtures/README.md` にあります。workers の test runtime には fs がないため、`vitest.config.ts` が base64 の binding として渡します（`TEST_MIGRATIONS` と同じ経路）。E2E は同じファイルを `readFileSync` で読みます。壊れた HEIC や brand 違いは、実行時に byte 列を組み立てて作り、commit しません。
 
 orientation、透明 PNG、WebP、壊れた画像などの decode 差は、下記の一度きりの検証で確認済みで、常設の fixture にはしていません。
 

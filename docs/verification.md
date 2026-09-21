@@ -111,10 +111,9 @@ metadata:
 - `CreateDate` が偽の値（`2002:12:08`）で `DateTimeOriginal` が正しい機種も、upload が成功した
 - 日付が読めない場合だけ `takenAt` が `null` になる。
 - 200 件を upload し、width / height / takenAt を Pillow で求めた期待値と照合した。両 engine とも不一致 0 件。
-- iPhone の HEIC を macOS の `sips` で JPEG に変換すると、`DateTimeOriginal`・`OffsetTimeOriginal`・MakerNote が残り、`-04:00` の offset 付きで取り込めた。Safari の変換結果の代わりに確認したもの（[D-019](decisions.md)）。**iOS の変換も ImageIO によると推定しているが、実機では未確認。**
-- Playwright WebKit 26.5 は `createImageBitmap` で HEIC を decode できた。Chromium は `InvalidStateError` になった。
+- iPhone の HEIC を macOS の `sips` で JPEG に変換すると、`DateTimeOriginal`・`OffsetTimeOriginal`・MakerNote が残り、`-04:00` の offset 付きで取り込めた。**iOS の変換も ImageIO によると推定しているが、実機では未確認。**
 
-拒否されるもの: 空ファイル、画像でない中身、APP1 の長さが壊れた JPEG、HEIC（専用の文言を表示。[D-019](decisions.md)）。途中で切れた JPEG は engine で分かれ、Chromium では decode 失敗として拒否され、WebKit では下半分が灰色のまま成功する。
+拒否されるもの: 空ファイル、画像でない中身、APP1 の長さが壊れた JPEG。途中で切れた JPEG は engine で分かれ、Chromium では decode 失敗として拒否され、WebKit では下半分が灰色のまま成功する。
 
 見つかって直した問題（[D-020](decisions.md)）:
 
@@ -274,7 +273,7 @@ backup manifest v1（[D-025](decisions.md)）:
 
 次のものを、field の位置と理由付きで拒否した。
 
-- 壊れた JSON、別の `format`、`formatVersion: 2`、必須 field の欠落、型違い
+- 壊れた JSON、別の `format`、知らない `formatVersion`、必須 field の欠落、型違い
 - 大文字や 63 桁の SHA-256、size 0 / 負数 / 上限超え、扱えない content type
 - 空や 256 文字の filename、0 pixel、空や前後に空白のある album title
 - ISO 8601 でない `takenAt`、instant でない `createdAt` / `trashedAt` / `exportedAt`
@@ -433,6 +432,36 @@ run 35581112151 を 5 回続けて実行し、すべて緑でした。
 
 attempt 1 は遅い runner に当たり、interrupted restore が 5975ms かかりました。変更前の 5000ms なら、この attempt は落ちています。最も重い test は 25014ms で、120 秒に対して 4.8 倍の余裕があります。
 
+## HEIC / HEIF の取り込み（2026-09-22）
+
+[D-030](decisions.md) の実装確認。fixture は合成した gradient を macOS の `sips -s format heic` で変換したもので、実在の人物・場所・GPS を含まない（`tests/fixtures/README.md`）。
+
+### decode の可否（Playwright）
+
+| engine | `still.heic`（64x32、EXIF Orientation 6） | `probe.heic`（2x2） |
+| --- | --- | --- |
+| WebKit 26.5 | 32x64 で decode（向きが反映される） | 2x2 で decode |
+| Chromium | `InvalidStateError` | `InvalidStateError` |
+
+`imageOrientation` を指定しない場合と、Blob の type を空にした場合も同じ結果だった。
+
+exifr は HEIC から `DateTimeOriginal`（`2019:07:14 09:30:05`）と Orientation を読めた。`sips` の変換では GPS タグは引き継がれなかったため、HEIC の GPS 抽出そのものは確認していない。
+
+### 自動テストで確認したこと
+
+- `ftyp` の brand 表（HEIC still 4 種、`mif1`、sequence 4 種、`msf1`、`avif` / `avis`）と、宣言 size の不正・truncated・4 byte 単位でない compatible brands・上限超過の拒否
+- 実 HEIC の reserve → PUT → finalize が通り、R2 に保存された bytes が fixture と byte 単位で一致し、SHA-256 も一致する
+- HEIC と称して JPEG の bytes を送ると finalize が `content_type_mismatch` で拒否し、asset を作らない。12 byte に切り詰めた HEIC も同じ
+- 同じ HEIC を別の household member が upload すると `DUPLICATE_ASSET` で同じ asset に収束する
+- backup → restore で HEIC の original bytes と checksum が維持され、manifest が v2 で `image/heic` を持つ。`verifyLibrary` も通る
+- share では derivative しか出ず、応答に `originals/`・filename・`image/heic`・SHA-256 のいずれも現れない。preview は `derivatives/v1/{id}/preview.jpg` の JPEG
+- v1 manifest は今も読め、v1 で `image/heic` を名乗る manifest は `contentType` を名指しして拒否される
+- e2e: WebKit は HEIC を追加し、記録された形式が `image/heic`、寸法が 32x64（EXIF Orientation 6 が反映された値）。Chromium は「このブラウザでは HEIC を処理できません」と表示し、reserve へ進まない
+
+### 観測した不安定な失敗
+
+`upload.spec.ts` の「a clean upload summary clears itself…」が mobile-webkit で 1 度だけ落ちた（`uploadPanel` が自動で消えることを見る assertion、`e2e/upload.spec.ts:90`）。同じ file 単独・両 engine・suite 全体の 3 回の再実行では再現しなかった。原因は特定できていない。この test は HEIC の経路を通らないので、HEIC の変更が原因とは言えないが、無関係だとも確認できていない。
+
 ## 未検証
 
 ### iPhone / Android 実機での取り込み
@@ -442,11 +471,13 @@ attempt 1 は遅い runner に当たり、interrupted restore が 5975ms かか�
 iPhone Safari:
 
 - 48MP の HEIC を複数選択する。iOS Safari の memory 上限（jetsam）と 48MP 以上の decode を見る。落ちる場合は前処理の並列数 1 を試す（[D-020](decisions.md)）
+- 写真ピッカーが実際に何を渡すかを確かめる。`accept` に `image/heic` と `image/heif` を含めた状態で、HEIC を選んだときに原本の HEIC が届くか、JPEG に変換されるか。EdgePhotos が記録する形式が、届いた bytes と一致していること（[D-030](decisions.md)）
+- JPEG を選んだときに HEIC へ transcode されないこと。WebKit で報告され修正された挙動が、利用中の Safari に残っていないかを見る
 - iCloud にしかない写真を選ぶ
 - 100〜200 枚を選ぶ
 - upload 中に画面をロックする、Safari を background へ移す、Wi-Fi とモバイル回線を切り替える
 - 10 分を超えて中断し、presigned URL の期限（600 秒）切れを踏む
-- 選択時の HEIC → JPEG 変換と、位置情報の扱いを確認する
+- 位置情報の扱いを確認する。original に GPS が残るか、ピッカーの「オプション」で外れるか
 
 Android: 上と同じ項目のうち該当するもの（HEIF 設定の端末を含む）。
 

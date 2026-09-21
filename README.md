@@ -54,7 +54,6 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 - 動画
 - Live Photos
 - RAW 現像
-- HEIC / HEIF の直接対応
 - 顔認識・AI 検索
 - バックグラウンド自動同期
 - 利用者ごとに分かれたライブラリ
@@ -65,7 +64,11 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 
 EdgePhotos は original を byte 単位で変更せずに保存します。Web 版の original は、Browser から受け取った byte 列です。
 
-iPhone の Safari では、写真を選んだ時点で HEIC が JPEG に変換されることがあります。その場合に保存されるのは変換後の JPEG です。画面では「保存したファイル」と表記しています。詳しくは [D-019](docs/decisions.md) を参照してください。
+HEIC / HEIF も original として保存します。形式はファイルの中身から判定し、受け取った byte 列をそのまま保存します。
+
+写真ピッカーが選択時に別の形式へ変換することがあります（iPhone の Safari では HEIC が JPEG になることがあります）。その場合に保存されるのは変換後の byte 列で、画面にもその形式を表示します。EdgePhotos が受け取っていないファイルを「保存した」とは表示しません。画面では「保存したファイル」と表記しています。
+
+HEIC の表示用サムネイルは Browser で作るため、HEIC を decode できない Browser（Chrome / Firefox）からは HEIC を追加できません。その場合は追加せずにその場で知らせます。詳しくは [D-030](docs/decisions.md) を参照してください。
 
 ## アーキテクチャ概要
 

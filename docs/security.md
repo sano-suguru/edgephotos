@@ -129,7 +129,15 @@ share へ返す metadata は allowlist 方式とし、次を返しません。
 - R2 object key
 - household member information
 
-thumbnail / preview は metadata をコピーせず生成します。
+thumbnail / preview は metadata をコピーせず生成します。HEIC / HEIF の original でも同じです。derivative は decode した bitmap から canvas で描き直した JPEG で、original の EXIF は写りません。
+
+### 画像を解析する箇所
+
+Worker は画像を decode しません。Worker が読むのは、形式判定のための先頭 1024 byte までと、derivative の JPEG segment だけです。
+
+EdgePhotos が足した parser は `ftyp` box の読み取り 1 つです。untrusted input として扱い、宣言された box size を検査してから読みます（不正な size、手元の bytes を超える size、4 byte 単位でない compatible brands、1024 byte を超える box はすべて拒否）。詳細は [D-030](decisions.md) にあります。
+
+HEIC の decode 自体は browser / OS の decoder が行います。EdgePhotos はそれを呼ぶだけで、攻撃面は Client の sandbox 内に閉じます。
 
 ## 8. HTTP / Browser
 

@@ -4,6 +4,18 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## HEIC / HEIF の original 保存（2026-09-22）
+
+HEIC / HEIF を original として受け付けるようにしました。受け取った byte 列は変更せず保存し、timeline や share で使う thumbnail / preview は今までどおり Browser の canvas で作る JPEG です。HEIC を JPEG へ変換して original と呼ぶことはしません。
+
+形式は `ftyp` box の major brand と compatible brands から決めます。still image の brand だけを受け入れ、image sequence と AVIF は拒否します。判定する parser は Client と Worker で同じものです。
+
+HEIC を decode できるかは、埋め込んだ小さな HEIC を実際に decode する probe で判断します。UA では分岐しません。decode できない Browser では、reserve と R2 PUT の前に、何をすればよいかを添えて止めます。`image/heif` は probe の対象にせず、そのファイル自身の decode 結果で判断します。
+
+backup manifest は v2 になりました。v1 の backup も引き続き restore できます。
+
+判断は [D-030](decisions.md)、確認内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md)。実機 iPhone / Android での確認は [roadmap.md](roadmap.md) の Post-merge verification に残しています。
+
 ## 夫婦 2 人での共同利用（2026-09-21）
 
 private API を使える identity を 1 つの `OWNER_EMAIL` から `HOUSEHOLD_EMAILS`（email の comma 区切り）へ広げました。設定した member はすべて対等で、1 つの library を共同利用します。片方が upload した写真を、もう片方が同じ timeline から見て、favorite・album・share・trash・restore まで同じように扱えます。
