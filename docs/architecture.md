@@ -195,11 +195,13 @@ album 一覧は `covers=true` のときだけ、各 album の最新の写真の 
 
 finalize での確認内容（[D-012](decisions.md)）:
 
-- 3 object の存在。欠けていれば `409 UPLOAD_OBJECT_MISSING` で、upload は `pending` のまま再試行できる
-- original について、R2 が記録した SHA-256（binding の `head().checksums.sha256`）が reserve 時の申告と一致すること。記録がなければ `checksum_missing`、不一致なら `checksum_mismatch` で、どちらも `422 UPLOAD_OBJECT_INVALID`（[D-018](decisions.md)）
+- 3 object の存在。欠けている間、upload は `pending` のまま再試行できる
+- original について、R2 が記録した SHA-256（binding の `head().checksums.sha256`）が reserve 時の申告と一致すること（[D-018](decisions.md)）
 - size が reserve 時の申告と一致すること
 - original の magic bytes が申告 content type と一致すること
-- thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG であること。違反は `422 UPLOAD_OBJECT_INVALID`
+- thumbnail / preview が EXIF / XMP / IPTC segment を含まない JPEG であること
+
+検査に通らない upload は `ready` になりません。どの検査がどの status になるかは `/api/v1/openapi.json`、error code の一覧は `src/contracts/errors.ts` が定義します。
 
 D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transaction）で行います。asset は upload 行がまだ `pending` の場合だけ作ります（`INSERT ... SELECT ... WHERE status = 'pending'`。[D-023](decisions.md)）。
 
@@ -209,17 +211,13 @@ presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済
 
 original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw digest の base64）として署名します。R2 は body の digest が一致しない PUT を拒否し、object を作りません。Client はこの header を省略も変更もできません（[D-018](decisions.md)）。
 
-Client は一時的な PUT の失敗（network error、408、429、5xx）を backoff 付きで再試行し、`412` は保存済みとして扱います。`If-None-Match: *` と reserve ごとに固有の key により、`412` になるのは同じ upload の以前の試行が届いていた場合だけです。いずれにしても finalize が size と checksum を確認します（[D-020](decisions.md)）。
-
-digest 不一致の PUT は R2 が `400` で拒否します。original が存在しないため finalize は `409 UPLOAD_OBJECT_MISSING` を返し、upload は `pending` のままです。URL の期限内なら、正しい bytes を同じ URL へ PUT し直して finalize を再試行できます。
-
 finalize は upload の期限を見ません。期限内に PUT が済んでいれば、background に回した tab が期限後に復帰しても finalize できます。PUT が済んでいない upload は、presigned URL が失効しているため完了できず、`pending` のまま残ります。
 
-中断した upload は、owner が実行する storage cleanup が片付けます（[D-023](decisions.md)）。期限から 1 日過ぎた `pending` のうち、3 object が揃って検査を通るものは finalize して写真にします。それ以外は終端状態にしてから、その upload の key の object だけを消します。cleanup の後に届いた finalize は `404` です。
+中断した upload は、owner が実行する storage cleanup が片付けます。3 object が揃って検査を通るものは finalize して写真にし、それ以外は終端状態にしてから、その upload の key の object だけを消します。実行の条件と閾値は [D-023](decisions.md) にあります。
 
 reserve の `metadata.createdAt`（任意、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。
 
-Web の再試行は、前の試行の reservation の finalize から始めます。`409 UPLOAD_OBJECT_MISSING` なら、URL の期限内に限って欠けた object だけを PUT します。期限切れ・`404`・`410`・`422` なら新しい reservation からやり直します（`src/web/features/uploads/transfer.ts`）。
+失敗した upload をどこからやり直すかは Client が決めます。Server 側の契約は、finalize が冪等であることと、presigned URL が期限内に限り再利用できることだけです（[D-020](decisions.md)、[D-023](decisions.md)、`src/web/features/uploads/transfer.ts`）。
 
 不変条件:
 
