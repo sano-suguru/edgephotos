@@ -52,7 +52,7 @@ Secrets（`wrangler secret put <NAME> --env <ENV>`）:
 
 | 名前 | 例 | 用途 |
 | --- | --- | --- |
-| `OWNER_EMAIL` | `you@example.com` | owner として許可する Access identity |
+| `HOUSEHOLD_EMAILS` | `you@example.com,partner@example.com` | private API を許可する Access identity。email の comma 区切り（1 つ以上） |
 | `APP_ORIGIN` | `https://photos.example.com` | 共有 URL 生成、Origin check |
 | `ACCESS_TEAM_DOMAIN` | `yourteam.cloudflareaccess.com` | JWT issuer / JWKS（host のみ。URL 不可） |
 | `ACCESS_AUD` | private Access application の AUD tag | JWT audience |
@@ -82,6 +82,46 @@ secret と同じ名前の binding が 2 つになるため、deploy が拒否さ
 
 secret 未設定の binding は `undefined` になるため、`readAppConfig()` は `null` を返します。private API と share API は `503 SERVER_MISCONFIGURED` で fail-closed のままです。`secrets.required` は deploy を止めるための仕組みであり、fail-closed の根拠ではありません。
 
+### household を設定する
+
+`HOUSEHOLD_EMAILS` は email の comma 区切りです。空白は無視し、大文字小文字は区別しません。1 人だけでも同じ形式です。
+
+```bash
+pnpm wrangler secret put HOUSEHOLD_EMAILS [--env <env>]
+# 入力例: you@example.com,partner@example.com
+```
+
+読み取れない entry（余分な comma、打ち間違い、email でない値）が 1 つでもあれば設定全体が無効になり、private API は全員に対して `503` を返します。設定後は `pnpm diagnose` の `private API` が PASS になることを確認してください。
+
+### household を変更する
+
+member の追加・削除は、**Access policy と `HOUSEHOLD_EMAILS` の両方**を更新します。片方だけだと、Access で止まる（追加漏れ）か Worker が `403` にする（設定漏れ）かのどちらかになります。削除では両方から消さないと、消したつもりの identity が残ります。
+
+順序は `HOUSEHOLD_EMAILS` を基準に決めます。Worker のこの設定が最終的な判断だからです。権限を広げるときは最後に、狭めるときは最初に動かします。
+
+| 操作 | 順序 |
+| --- | --- |
+| 追加 | Access policy → `HOUSEHOLD_EMAILS` |
+| 削除 | `HOUSEHOLD_EMAILS` → Access policy |
+
+削除でこの順にするのは、Access policy から外しても、発行済みの assertion や session がいつ切れるかは Access の設定次第だからです。`HOUSEHOLD_EMAILS` から先に消せば、まだ有効な token を持つ相手も次の request から `403` になります。
+
+急いで締め出す場合も同じです。`HOUSEHOLD_EMAILS` の更新だけで Worker 側は塞がります。Access policy の削除はそのあとで構いません。
+
+member を削除しても、その人が upload した写真は library に残ります。asset に「誰が作ったか」は記録していないためです（[D-028](decisions.md)）。
+
+### `OWNER_EMAIL` から移行する
+
+`OWNER_EMAIL` を設定した Worker を更新する場合は、deploy の前に新しい secret を入れます。`secrets.required` に `HOUSEHOLD_EMAILS` があるため、設定しないまま deploy すると失敗します（データは変わりません）。Worker がすでにある更新なので、下の「secret は deploy のあとに設定する」（初回 deploy の注意）は当たりません。
+
+```bash
+pnpm wrangler secret put HOUSEHOLD_EMAILS [--env <env>]   # 旧 OWNER_EMAIL の値を含める
+# deploy（「更新（release と migration）」の手順）
+pnpm wrangler secret delete OWNER_EMAIL [--env <env>]     # deploy と diagnose が通ってから
+```
+
+D1 の migration はありません。library は元から 1 つで、asset に所有者の列を持たないためです。
+
 ### secret は deploy のあとに設定する
 
 `wrangler secret put` は Worker が無ければ作ります。しかしそのあとで `wrangler deploy` すると、deploy 前に入れた secret は残りませんでした（2026-09-18 に `restore-test` で確認）。
@@ -96,14 +136,14 @@ R2 credential は、対象 bucket だけの Object Read & Write 権限を持つ 
 
 destination（宛先）の種類は **public DNS（パブリック DNS）** を選び、hostname と path で指定します。self-hosted application は Worker そのものを宛先にもできますが、それだと Worker 全体が Access の対象になり、`/share` だけを Bypass にできません。
 
-1. `photos.example.com`: Allow policy（owner の identity のみ）
+1. `photos.example.com`: Allow policy（`HOUSEHOLD_EMAILS` と同じ identity のみ）
 2. `photos.example.com/share`: Bypass policy（Everyone）
 
 より specific な path の application が優先するため、2 が `/share` 配下を先に処理します。
 
 wildcard を使わないのは、`/alpha/*` が親の `/alpha` 自体を含まないからです。`/share` と書けば `/share` と配下の両方が Bypass になります（remote-test で `/share`、`/share/{shareId}`、`/share/api/v1/*`、`/share/assets/*` を実測確認）。
 
-1 の AUD tag を `ACCESS_AUD` に設定します。Access を通過しても `OWNER_EMAIL` と一致しない identity は Worker が `403` にします。
+1 の AUD tag を `ACCESS_AUD` に設定します。Access を通過しても `HOUSEHOLD_EMAILS` のどれとも一致しない identity は Worker が `403` にします。
 
 `/share/assets/*`（build 済み JS / CSS）と share API（`/share/api/v1/*`）はどちらも `/share` 配下なので、Bypass 1 つで公開面が揃います（[D-011](decisions.md)）。
 
@@ -183,7 +223,7 @@ production は `--env` を付けません。確認する内容と、失敗時に
 | `r2: CORS` | bucket の CORS 規則。AllowedOrigins が `EDGEPHOTOS_URL` の origin と一致しない、AllowedHeaders または `GET` が足りない |
 | `access: private path` | 匿名 request が Access login へ redirect されない（Access application の hostname） |
 | `access: share bypass + worker config` | `/share` の Bypass application。`503` なら secret の欠落か形式違い（`ACCESS_TEAM_DOMAIN` は host のみ、`R2_ACCOUNT_ID` は 32 桁 hex） |
-| `owner API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `OWNER_EMAIL` |
+| `private API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `HOUSEHOLD_EMAILS` |
 | `worker: APP_ORIGIN` | `APP_ORIGIN` が `EDGEPHOTOS_URL` の origin と一致しない（scheme、host、custom domain 追加後の更新漏れ） |
 | `worker: D1 schema` | Worker が見ている D1 の最新 migration と checkout の不一致（別 DB を bind している、migration 未適用） |
 | `r2: presigned GET` | Worker が署名した URL を R2 が拒否（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`）。library が空なら SKIP |
@@ -295,7 +335,7 @@ manifest はページごとに順に読むので、ある一瞬の完全な写�
 
 含めないもの: R2 credential、JWT、share secret、presigned URL。Access token は API request の header にだけ使い、R2 へは送らず、保存もしません。
 
-owner 以外の identity（service token 等）では API を利用できないため、CLI も owner の Access token を使います。
+household member 以外の identity（service token 等）では API を利用できないため、CLI も member の Access token を使います。
 
 ## 10. Restore
 
@@ -435,7 +475,7 @@ R2 API token（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）は presigned URL �
 
 - R2 の古い token で何ができたか: 対象 bucket の読み書き。original を含むすべての写真を読めた可能性があります。上書きは reserve ごとの key と `If-None-Match` に守られません（token を持つ者は条件なしで PUT できる）
 - original の改ざんを疑う場合は `pnpm backup verify <直近の backup>` を実行します。R2 から original を取り直し、SHA-256 を照合します
-- Access の service token や Cloudflare account の API token が漏れた場合は、この節ではなく Cloudflare 側で revoke します。EdgePhotos は owner の email を持たない identity を受け付けません（[private API の認証と認可](security.md#3-private-api-の認証と認可)）
+- Access の service token や Cloudflare account の API token が漏れた場合は、この節ではなく Cloudflare 側で revoke します。EdgePhotos は household member の email を持たない identity を受け付けません（[private API の認証と認可](security.md#3-private-api-の認証と認可)）
 
 share secret が漏れた場合は、その share を revoke するか再発行します（`/api/v1/shares/{id}/revoke`、`/regenerate`）。
 

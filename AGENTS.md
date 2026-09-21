@@ -49,7 +49,9 @@ Cloudflare Access 固有の token / assertion / Cookie を、認証後の処理�
 
 HTTP 層で検証し、正規化した principal だけを渡します。`AppPrincipal` の定義はアーキテクチャの [認証境界](docs/architecture.md#3-認証境界) にあります。文書とコードが食い違う場合は、実装の型定義を優先します。
 
-v1 は 1 owner です。Access を通過した全員を owner と扱わないでください。
+利用者は 1 つの household（対等な少人数の member）です。Access を通過した全員を member と扱わないでください。許可する identity は Worker 側でも必ず照合します（[D-028](docs/decisions.md)）。
+
+member を区別する権限や、asset ごとの所有者を持ち込まないでください。
 
 ## 5. ストレージ
 
@@ -80,7 +82,7 @@ D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>`
 - multi-cloud provider abstraction
 - generic repository pattern
 - plugin framework
-- multi-user model
+- user ごとに分かれた library を持つ multi-user model
 - Android 専用 API
 - 独自認証サーバー
 - telemetry SaaS
@@ -120,7 +122,7 @@ UI の余白変更などで Decision Log を追加しないでください。
 
 特に次を変える場合は回帰テストを必須とします。
 
-- authentication / authorization
+- authentication / authorization（household の許可リストを含む）
 - upload finalize
 - duplicate handling
 - delete / restore

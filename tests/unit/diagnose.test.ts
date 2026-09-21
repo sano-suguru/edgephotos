@@ -35,13 +35,13 @@ describe('setup diagnostics', () => {
   it('flags config mistakes', () => {
     expect(checkConfig(goodConfig).every((c) => c.status === 'pass')).toBe(true)
     const bad = checkConfig({
-      vars: { OWNER_EMAIL: '', R2_BUCKET_NAME: 'other' },
-      secretsRequired: ['OWNER_EMAIL'],
+      vars: { HOUSEHOLD_EMAILS: '', R2_BUCKET_NAME: 'other' },
+      secretsRequired: ['HOUSEHOLD_EMAILS'],
       previewUrls: undefined,
       bucketName: 'photos',
     })
     expect(bad.map((c) => c.status)).toEqual(['fail', 'fail', 'fail', 'fail'])
-    expect(bad[1].detail).toContain('OWNER_EMAIL')
+    expect(bad[1].detail).toContain('HOUSEHOLD_EMAILS')
   })
 
   it('reports pending migrations and unknown public-access wording', () => {
@@ -90,27 +90,27 @@ describe('setup diagnostics', () => {
     expect(status(checks, 'access: private path')).toBe('fail')
     expect(status(checks, 'access: share bypass + worker config')).toBe('fail')
     expect(status(checks, 'share page')).toBe('fail')
-    expect(status(checks, 'owner API')).toBe('skip')
+    expect(status(checks, 'private API')).toBe('skip')
 
     const redirect = new Response(null, { status: 302, headers: { location: 'https://team.cloudflareaccess.com/x' } })
     const shareBehindAccess: Fetch = async () => redirect.clone()
     const behind = await checkDeployment({ api: shareBehindAccess, blob: shareBehindAccess, token: 't' })
     expect(status(behind, 'access: private path')).toBe('pass')
     expect(status(behind, 'access: share bypass + worker config')).toBe('fail')
-    expect(status(behind, 'owner API')).toBe('fail')
+    expect(status(behind, 'private API')).toBe('fail')
   })
 
-  it('distinguishes owner mismatch, stale schema and bad R2 credentials', async () => {
+  it('distinguishes a non-member identity, stale schema and bad R2 credentials', async () => {
     const redirect = () => new Response(null, { status: 302, headers: { location: 'https://t.cloudflareaccess.com/' } })
     const base = async (path: string, init?: RequestInit): Promise<Response> => {
-      const owner = new Headers(init?.headers).has('cf-access-token')
+      const member = new Headers(init?.headers).has('cf-access-token')
       if (path.startsWith('/share/api')) {
         return new Response(JSON.stringify({ error: { code: 'SHARE_UNAVAILABLE' } }), { status: 404 })
       }
       if (path.startsWith('/share/')) {
         return new Response('<html>', { headers: { 'content-security-policy': "default-src 'self'" } })
       }
-      if (!owner) return redirect()
+      if (!member) return redirect()
       if (path === '/api/v1/me') return Response.json({ email: 'o@example.test' })
       if (path === '/api/v1/diagnostics') {
         // Pending uploads that have not expired are in flight and not worth a warning.
@@ -128,7 +128,7 @@ describe('setup diagnostics', () => {
       token: 'token',
       latestLocalMigration: '0002_next.sql',
     })
-    expect(status(checks, 'owner API')).toBe('pass')
+    expect(status(checks, 'private API')).toBe('pass')
     expect(status(checks, 'worker: D1 schema')).toBe('fail')
     expect(status(checks, 'library: interrupted uploads')).toBeUndefined()
     expect(status(checks, 'library: unfinished deletes')).toBeUndefined()
@@ -149,16 +149,16 @@ describe('setup diagnostics', () => {
     expect(warned.find((c) => c.name === 'library: interrupted uploads')?.detail).toMatch(/^2 /)
     expect(status(warned, 'library: unfinished deletes')).toBe('warn')
 
-    const notOwner: Fetch = async (path, init) =>
+    const notMember: Fetch = async (path, init) =>
       path === '/api/v1/me' && new Headers(init?.headers).has('cf-access-token')
         ? new Response(JSON.stringify({ error: { code: 'FORBIDDEN' } }), { status: 403 })
         : base(path, init)
-    const forbidden = await checkDeployment({ api: notOwner, blob: denied, token: 'token' })
-    expect(forbidden.find((c) => c.name === 'owner API')?.detail).toContain('OWNER_EMAIL')
+    const forbidden = await checkDeployment({ api: notMember, blob: denied, token: 'token' })
+    expect(forbidden.find((c) => c.name === 'private API')?.detail).toContain('HOUSEHOLD_EMAILS')
   })
 
   // Runs the probe against the real Worker: Access would turn cf-access-token into the assertion header.
-  it('detects an APP_ORIGIN that differs from the URL the owner opens, without changing anything', async () => {
+  it('detects an APP_ORIGIN that differs from the URL a member opens, without changing anything', async () => {
     const app = await makeApp()
     const api: Fetch = async (path, init) => {
       const headers = new Headers(init?.headers)

@@ -4,6 +4,14 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## 夫婦 2 人での共同利用（2026-09-21）
+
+private API を使える identity を 1 つの `OWNER_EMAIL` から `HOUSEHOLD_EMAILS`（email の comma 区切り）へ広げました。設定した member はすべて対等で、1 つの library を共同利用します。片方が upload した写真を、もう片方が同じ timeline から見て、favorite・album・share・trash・restore まで同じように扱えます。
+
+D1 の schema は変えていません。asset に所有者を持たないため、migration はありません。既存の deployment は deploy の前に `HOUSEHOLD_EMAILS` を設定します（[operations.md](operations.md#3-利用者が設定する値)）。
+
+判断は [D-028](decisions.md)。
+
 ## derivative の作り直し（2026-09-18）
 
 欠けた thumbnail / preview を、original に触れずに作り直せるようにしました。経路は state を持たない 1 つの冪等な呼び出しで、object を 1 つも削除しません。競合したときは、古い repair が新しい結果を取り消せません。

@@ -2,7 +2,22 @@ import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../src/worker/app'
 import { authenticateAccess, remoteAccessKeys } from '../../src/worker/auth/access'
-import { APP_ORIGIN, AUD, accessKeys, assertion, call, makeApp, OWNER, otherKey, TEAM, testEnv } from '../helpers'
+import type { Env } from '../../src/worker/env'
+import {
+  APP_ORIGIN,
+  AUD,
+  accessKeys,
+  assertion,
+  call,
+  HOUSEHOLD,
+  MEMBER_A,
+  MEMBER_B,
+  makeApp,
+  OUTSIDER,
+  otherKey,
+  TEAM,
+  testEnv,
+} from '../helpers'
 
 async function status(app: Awaited<ReturnType<typeof makeApp>>, token: string | null, path = '/api/v1/assets') {
   const res = await call(app, 'GET', path, { token })
@@ -10,11 +25,15 @@ async function status(app: Awaited<ReturnType<typeof makeApp>>, token: string | 
 }
 
 describe('private API authentication', () => {
-  it('accepts a valid owner assertion', async () => {
+  it.each([MEMBER_A, MEMBER_B])('accepts a valid assertion for household member %s', async (email) => {
     const app = await makeApp()
-    const res = await call(app, 'GET', '/api/v1/me')
+    const res = await call(app, 'GET', '/api/v1/me', { token: await assertion({ email }) })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ subject: 'owner-subject', email: OWNER, authSource: 'cloudflare-access' })
+    expect(await res.json()).toEqual({
+      subject: `${email.split('@')[0]}-subject`,
+      email,
+      authSource: 'cloudflare-access',
+    })
   })
 
   it('rejects a request without an Access assertion', async () => {
@@ -36,10 +55,11 @@ describe('private API authentication', () => {
     expect(r.body.items).toBeUndefined()
   })
 
-  it('rejects an authenticated Access user who is not the owner', async () => {
-    const r = await status(await makeApp(), await assertion({ email: 'someone-else@example.test' }))
+  it('rejects an authenticated Access user who is not a household member', async () => {
+    const r = await status(await makeApp(), await assertion({ email: OUTSIDER }))
     expect(r.status).toBe(403)
     expect(r.body.error?.code).toBe('FORBIDDEN')
+    expect(r.body.items).toBeUndefined()
   })
 
   it('rejects identities without email (e.g. service tokens)', async () => {
@@ -47,12 +67,42 @@ describe('private API authentication', () => {
     expect(r.status).toBe(403)
   })
 
-  it('matches the owner email case-insensitively', async () => {
-    const r = await status(await makeApp(), await assertion({ email: OWNER.toUpperCase() }))
-    expect(r.status).toBe(200)
+  it('matches member emails case-insensitively on both the token and the setting', async () => {
+    const app = await makeApp({ env: { HOUSEHOLD_EMAILS: ` ${MEMBER_A.toUpperCase()} , ${MEMBER_B} ` } })
+    expect((await status(app, await assertion({ email: MEMBER_A.toUpperCase() }))).status).toBe(200)
+    expect((await status(app, await assertion({ email: MEMBER_B }))).status).toBe(200)
   })
 
-  it.each(['OWNER_EMAIL', 'ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'APP_ORIGIN'] as const)(
+  it('admits only the one member when a single address is configured', async () => {
+    const app = await makeApp({ env: { HOUSEHOLD_EMAILS: MEMBER_A } })
+    expect((await status(app, await assertion({ email: MEMBER_A }))).status).toBe(200)
+    expect((await status(app, await assertion({ email: MEMBER_B }))).status).toBe(403)
+  })
+
+  // The setting HOUSEHOLD_EMAILS replaced is inert: an un-migrated Worker locks everyone out at 503
+  // rather than falling back to it.
+  it('ignores a leftover OWNER_EMAIL when HOUSEHOLD_EMAILS is not set', async () => {
+    const legacy = { HOUSEHOLD_EMAILS: undefined, OWNER_EMAIL: MEMBER_A } as Partial<Env>
+    const r = await status(await makeApp({ env: legacy }), await assertion())
+    expect(r.status).toBe(503)
+    expect(r.body.error?.code).toBe('SERVER_MISCONFIGURED')
+    expect(r.body.items).toBeUndefined()
+  })
+
+  // A list the Worker cannot read in full must not admit the part it can read.
+  it.each([
+    ['an empty entry from a trailing comma', `${HOUSEHOLD},`],
+    ['a leading comma', `,${HOUSEHOLD}`],
+    ['an entry that is not an email address', `${MEMBER_A},not-an-email`],
+    ['no entries at all', ''],
+  ])('fails closed when HOUSEHOLD_EMAILS has %s', async (_name, value) => {
+    const r = await status(await makeApp({ env: { HOUSEHOLD_EMAILS: value } }), await assertion())
+    expect(r.status).toBe(503)
+    expect(r.body.error?.code).toBe('SERVER_MISCONFIGURED')
+    expect(r.body.items).toBeUndefined()
+  })
+
+  it.each(['HOUSEHOLD_EMAILS', 'ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'APP_ORIGIN'] as const)(
     'fails closed when %s is missing, even with a valid token',
     async (key) => {
       const r = await status(await makeApp({ env: { [key]: '' } }), await assertion())
@@ -79,7 +129,7 @@ describe('private API authentication', () => {
   it('fails closed when R2 signing credentials are not configured', async () => {
     const { createLocalJWKSet } = await import('jose')
     const jwks = createLocalJWKSet((await accessKeys()).jwks)
-    // No signer override and no R2_* vars: a valid owner request must still get no data.
+    // No signer override and no R2_* vars: a valid member request must still get no data.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const app = createApp({ env: testEnv(), accessKeys: () => jwks })
     const res = await app.request(`${APP_ORIGIN}/api/v1/assets`, {
@@ -97,7 +147,7 @@ describe('private API authentication', () => {
     try {
       const result = await authenticateAccess(
         await assertion(),
-        { ownerEmail: OWNER, teamDomain: 'unreachable-team.cloudflareaccess.com', audience: AUD },
+        { memberEmails: new Set([MEMBER_A]), teamDomain: 'unreachable-team.cloudflareaccess.com', audience: AUD },
         remoteAccessKeys,
       )
       expect(result).toEqual({ ok: false, reason: 'invalid_assertion' })
@@ -116,7 +166,7 @@ describe('private API authentication', () => {
     try {
       const result = await authenticateAccess(
         await assertion(),
-        { ownerEmail: OWNER, teamDomain: TEAM, audience: AUD },
+        { memberEmails: new Set([MEMBER_A]), teamDomain: TEAM, audience: AUD },
         remoteAccessKeys,
       )
       expect(result.ok).toBe(true)

@@ -19,7 +19,7 @@
 到達点:
 
 - ✅ Web / Worker が同一 deployable unit として起動できる
-- ✅ private API の認証・owner authorization が機能する
+- ✅ private API の認証と household authorization が機能する
 - ✅ D1 migration と private R2 binding が利用できる（local）
 - ✅ OpenAPI を生成できる（`/api/v1/openapi.json`）
 - 🟡 local / remote-test / production が分離されている（remote-test は D1 / R2 / Worker を作成・デプロイ済み。production は未作成）
@@ -33,7 +33,7 @@
 
 到達点:
 
-- ✅ 実 Access で `/*` が owner 以外を拒否し、`/share/*` の Bypass が公開経路として機能する（Worker 側の owner check は unit test で担保。[verification.md](verification.md)）
+- ✅ 実 Access で `/*` が許可外の identity を拒否し、`/share/*` の Bypass が公開経路として機能する（Worker 側の household check は test で担保。[verification.md](verification.md)）
 - ✅ 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
 - ✅ original の checksum 付き PUT が実 R2 で機能する（[D-018](decisions.md)）
 - 🟡 スマートフォンで撮影した実写真（orientation・GPS・大きい画素数を含む）を 20〜30 枚 upload し、timeline の向きと表示を確認する（合成画像と実機由来の JPEG 1 枚で確認済み。カメラロール原本による確認は Post-merge verification へ送る）
@@ -56,7 +56,7 @@ v1 の完成条件には含めません。
 
 ### 中断した upload の片付けは手動
 
-finalize されなかった upload の行と object は、owner が storage cleanup を実行するまで残ります（[D-023](decisions.md)）。写真の整合性には影響しません。
+finalize されなかった upload の行と object は、member が storage cleanup を実行するまで残ります（[D-023](decisions.md)）。写真の整合性には影響しません。
 
 定期実行は入れていません。次のどちらかが続く場合に、Cron も候補に含めて検討します（[将来要件を先回りしない](../AGENTS.md#6-将来要件を先回りしない)）。
 
@@ -100,6 +100,15 @@ Chromium は拒否し、WebKit は読めた部分から derivative を作って 
 ## Release polish
 
 - **実 R2 で `If-Match` 付き presigned PUT を 1 度踏む。** 作り直しの競合安全性がこれに依存します。公式ドキュメントが PutObject の対応を明記していることと、EdgePhotos の SigV4 署名が正しいことは別の問題なので、自分たちが発行した URL と header で確かめます。Browser から壊れた写真を実際に作り直す往復と合わせて、有効な ETag で `200`、古い ETag で `412`、先に保存された bytes が残ることを見ます（[D-026](decisions.md)、[verification.md](verification.md)）
+- **2 人が実環境の端末で 1 つの library を使う。** Worker 側の household 判定は test で担保しています（`tests/integration/household.test.ts`）。実環境でしか分からないのは、Access policy の Allow 一覧と `HOUSEHOLD_EMAILS` が揃っているか、そして 2 人が日常の操作で困らないかです。remote-test に 2 アカウントを設定し、実機 2 台で次を踏みます（[D-028](decisions.md)、[operations.md](operations.md#4-cloudflare-access)）
+  - 1 人目が写真を 5 枚 upload し、2 人目が login してその 5 枚を見る
+  - 2 人目が別の 5 枚を upload し、1 人目の timeline に出る
+  - 同じ写真を双方から upload したとき、duplicate の表示で迷わない
+  - 2 人目が album を作り、1 人目がそこへ写真を追加する
+  - original を双方から開く
+  - 片方が trash し、もう片方が restore する
+  - logout / login しても続きから使える
+  - 許可していない 3 つ目のアカウントは入れない
 - Deploy to Cloudflare
 - setup guide
 - update / uninstall procedure
@@ -116,7 +125,7 @@ v1 の完成条件には含めません。
 - background sync
 - HEIC
 - video
-- multi-user
+- user ごとに分かれた library を持つ multi-user（1 household の共同利用は実装済み。[D-028](decisions.md)）
 - advanced search
 - Queues / background processing
 - client-specific adapter / BFF

@@ -9,7 +9,9 @@ export default defineConfig(async ({ command }) => {
   let devVars: Record<string, string> | undefined
 
   if (command === 'serve') {
-    const devAccess = await createDevAccess(process.env.DEV_OWNER_EMAIL ?? 'owner@localhost.test')
+    const devAccess = await createDevAccess(
+      process.env.DEV_HOUSEHOLD_EMAILS ?? 'you@localhost.test,partner@localhost.test',
+    )
     devVars = devAccess.vars
     // Must run before the Cloudflare plugin so the emulated Access header reaches the Worker.
     plugins.push(devAccess.plugin)

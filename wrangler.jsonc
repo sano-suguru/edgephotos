@@ -27,7 +27,7 @@
   // Deploy fails if any of these are not set on the Worker. Keep in sync with env.remote-test.
   "secrets": {
     "required": [
-      "OWNER_EMAIL",
+      "HOUSEHOLD_EMAILS",
       "APP_ORIGIN",
       "ACCESS_TEAM_DOMAIN",
       "ACCESS_AUD",
@@ -42,7 +42,7 @@
       "d1_databases": [{ "binding": "DB", "database_name": "edgephotos-remote-test", "migrations_dir": "migrations" }],
       "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "edgephotos-remote-test" }],
       // Environment-specific values are Worker secrets, not vars: this repository is public and
-      // OWNER_EMAIL / ACCESS_* / R2_ACCOUNT_ID identify a person and a Cloudflare account.
+      // HOUSEHOLD_EMAILS / ACCESS_* / R2_ACCOUNT_ID identify people and a Cloudflare account.
       // Unset secrets leave the bindings undefined, so readAppConfig() still fails closed.
       "vars": {
         "R2_BUCKET_NAME": "edgephotos-remote-test"
@@ -50,7 +50,7 @@
       // Deploy fails if any of these are not set on the Worker.
       "secrets": {
         "required": [
-          "OWNER_EMAIL",
+          "HOUSEHOLD_EMAILS",
           "APP_ORIGIN",
           "ACCESS_TEAM_DOMAIN",
           "ACCESS_AUD",

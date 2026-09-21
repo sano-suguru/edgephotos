@@ -7,7 +7,7 @@ export type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
 // Every value readAppConfig() / readR2SignerConfig() needs, except R2_BUCKET_NAME (a var).
 export const REQUIRED_SECRETS = [
-  'OWNER_EMAIL',
+  'HOUSEHOLD_EMAILS',
   'APP_ORIGIN',
   'ACCESS_TEAM_DOMAIN',
   'ACCESS_AUD',
@@ -227,7 +227,7 @@ export async function checkDeployment(opts: {
 
   if (!token) {
     results.push(
-      check('owner API', 'skip', 'set EDGEPHOTOS_ACCESS_TOKEN to check the owner path, migrations and R2 signing'),
+      check('private API', 'skip', 'set EDGEPHOTOS_ACCESS_TOKEN to check the member path, migrations and R2 signing'),
     )
     return results
   }
@@ -238,14 +238,14 @@ export async function checkDeployment(opts: {
       me.status === 401
         ? 'token rejected: expired token, or ACCESS_AUD / ACCESS_TEAM_DOMAIN do not match the Access application'
         : me.status === 403
-          ? 'authenticated identity is not OWNER_EMAIL'
+          ? 'authenticated identity is not listed in HOUSEHOLD_EMAILS'
           : isAccessRedirect(me)
             ? 'Access did not accept the token (expired? wrong application?)'
             : `got ${me.status} ${await errorCode(me)}`
-    results.push(check('owner API', 'fail', reason))
+    results.push(check('private API', 'fail', reason))
     return results
   }
-  results.push(check('owner API', 'pass', 'owner token accepted (ACCESS_AUD, ACCESS_TEAM_DOMAIN, OWNER_EMAIL)'))
+  results.push(check('private API', 'pass', 'member token accepted (ACCESS_AUD, ACCESS_TEAM_DOMAIN, HOUSEHOLD_EMAILS)'))
 
   if (origin) results.push(await checkAppOrigin(api, auth, origin))
 

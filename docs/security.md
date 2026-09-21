@@ -6,7 +6,7 @@ EdgePhotos は写真と metadata を扱うため、MVP でも以下を妥協し�
 
 - private R2 を維持する。
 - private API は fail-closed とする。
-- Access を通過しただけでは owner とみなさない。
+- Access を通過しただけでは household member とみなさない。
 - share は明示した album の derivative だけを公開する。
 - original を share しない。
 - share secret、JWT、presigned URL、R2 credential をログへ出さない。
@@ -18,7 +18,7 @@ EdgePhotos は写真と metadata を扱うため、MVP でも以下を妥協し�
 - thumbnail / preview
 - 撮影日時・位置情報等の metadata
 - album 関係
-- owner identity
+- household member identity
 - share secret
 - R2 signing credential
 - Access configuration
@@ -30,7 +30,7 @@ Cloudflare アカウントの完全侵害、利用端末の完全侵害、Cloudf
 private API は二段階で認証・認可します。
 
 1. Cloudflare Access が入口を保護する。
-2. Worker が Access assertion を検証し、owner identity と照合する。
+2. Worker が Access assertion を検証し、設定された household の identity と照合する。
 
 JWT は存在するだけで信用しません。署名、issuer、audience、期限を固定設定に対して検証します。
 
@@ -40,8 +40,21 @@ JWT は存在するだけで信用しません。署名、issuer、audience、�
 
 - `Cf-Access-Jwt-Assertion` header だけを検証対象にします（Cookie は読みません）。
 - RS256 署名・issuer（`https://{ACCESS_TEAM_DOMAIN}`）・audience（`ACCESS_AUD`）・`exp` を検証します。
-- `email` が `OWNER_EMAIL` と一致する principal だけを owner とします（大文字小文字は区別しません）。email を持たない service token は owner になりません。
-- `OWNER_EMAIL` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` / `APP_ORIGIN` / R2 署名設定のいずれかが欠けていれば、token が正しくても `503 SERVER_MISCONFIGURED` を返し、データを返しません。
+- `email` が `HOUSEHOLD_EMAILS` のいずれかと一致する principal だけを member とします（大文字小文字は区別しません）。email を持たない service token は member になりません。
+- `HOUSEHOLD_EMAILS` は email の comma 区切りです。読み取れない entry が 1 つでもあれば設定全体を無効とし、`503` にします。打ち間違えた設定で「一部だけ通る」状態にしないためです。
+- `HOUSEHOLD_EMAILS` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` / `APP_ORIGIN` / R2 署名設定のいずれかが欠けていれば、token が正しくても `503 SERVER_MISCONFIGURED` を返し、データを返しません。
+
+### member 間の信頼
+
+member は互いに対等で、library 全体に同じ権限を持ちます。写真をどの member が upload したかは記録しません。
+
+したがって次は設計上の前提です（[D-028](decisions.md)）。
+
+- どの member も、他の member が upload した写真を trash・完全削除・export できます。
+- どの member も、他の member が作った share を revoke・再発行できます。
+- member 1 人のアカウントや端末が侵害されれば、library 全体が侵害されます。member の削除は Access policy と `HOUSEHOLD_EMAILS` の両方から行います。
+
+member 間で権限を分けたい場合、この設計では解決できません。
 
 ## 4. 公開共有（share）
 
@@ -94,7 +107,7 @@ Presigned URL は bearer capability として扱います。
 | 操作 | TTL | 署名に含めるもの | 保証 |
 | --- | --- | --- | --- |
 | upload PUT | 600 秒 | `Content-Type`、`If-None-Match: *`、original は `x-amz-checksum-sha256` | 期限内に URL を再利用しても、保存済み object を上書きできない。original の body が申告 SHA-256 と違えば R2 が拒否する |
-| owner GET | 600 秒 | — | — |
+| member GET | 600 秒 | — | — |
 | repair PUT（欠落） | 300 秒 | `Content-Type: image/jpeg`、`If-None-Match: *` | derivative key に限る。original の key は署名しない。空の key しか埋められない（[D-026](decisions.md)） |
 | repair PUT（置き換え） | 300 秒 | `Content-Type: image/jpeg`、`If-Match: <検査した ETag>` | 検査した「使えない object」だけを置き換える。別の repair が先に直していれば `412`。妥当な derivative は上書きできない（[D-026](decisions.md)） |
 | share GET | 最大 300 秒 | — | share の残り期限を超えて発行しない |
@@ -114,7 +127,7 @@ share へ返す metadata は allowlist 方式とし、次を返しません。
 - original filename
 - checksum
 - R2 object key
-- owner information
+- household member information
 
 thumbnail / preview は metadata をコピーせず生成します。
 
@@ -176,7 +189,7 @@ D1 に参照がない R2 object を、即座に「ゴミ」と判定しません
 
 storage cleanup（[D-023](decisions.md)）が削除するのは、`uploads` 行が指す key のうち、asset にならずに終わった upload のものだけです。
 
-key は Server が `uploads.asset_id` から作り、client や R2 の list から受け取った文字列を削除に使いません。同じ ID の `assets` 行がある場合は削除しません。cleanup は owner の API で、Access と Origin の検査は他の書き込みと同じです。
+key は Server が `uploads.asset_id` から作り、client や R2 の list から受け取った文字列を削除に使いません。同じ ID の `assets` 行がある場合は削除しません。cleanup は member の API で、Access と Origin の検査は他の書き込みと同じです。
 
 完全削除は、asset が trash 内にあることを D1 の条件付き更新で確かめてから始めます。
 
@@ -185,7 +198,8 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 以下は UI テストより優先します。
 
 - 未認証 private API が拒否される。
-- Access user でも非 owner は拒否される。
+- Access user でも household 外の email は拒否される。
+- 設定した 2 人の member がどちらも同じ library を読み書きできる。
 - Access 設定異常時に private data を返さない。
 - share secret 不正 / expired / revoked を拒否する。
 - 別 album の asset を share から取得できない。
