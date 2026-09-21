@@ -5,7 +5,7 @@ import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
 import { toHex } from '../lib/crypto'
-import { INSPECT_HEAD_BYTES, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
+import { INSPECT_HEAD_BYTES, scanIsoBmffBoxes, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
 import { assetObjectKeys } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import { getAssetRow, purgeAsset, sortAtFor } from './assets'
@@ -78,6 +78,10 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
 
 type ObjectProblem = { object: 'original' | 'thumbnail' | 'preview'; problem: string }
 
+function isIsoBmff(contentType: string): boolean {
+  return contentType === 'image/heic' || contentType === 'image/heif'
+}
+
 async function readHead(bucket: R2Bucket, key: string, size: number): Promise<Uint8Array | null> {
   const obj = await bucket.get(key, { range: { offset: 0, length: Math.min(size, INSPECT_HEAD_BYTES) } })
   if (!obj) return null
@@ -125,6 +129,15 @@ async function verifyObjects(ctx: ServiceContext, upload: UploadRow) {
     ])
     if (!originalHead || sniffImageType(originalHead) !== upload.original_content_type) {
       problems.push({ object: 'original', problem: 'content_type_mismatch' })
+    } else if (isIsoBmff(upload.original_content_type)) {
+      // A HEIC that lost its second half still decodes in some browsers, so the client having made a
+      // thumbnail from it proves nothing. Every top-level box header is in the head we already read, and
+      // each box states its own length: the file either accounts for all of its bytes or it does not
+      // (docs/decisions.md D-030). 'unverified' means the headers ran past the head, which no camera file
+      // does; it is not treated as a problem.
+      if (scanIsoBmffBoxes(originalHead, upload.original_size) === 'incomplete') {
+        problems.push({ object: 'original', problem: 'incomplete_file' })
+      }
     }
     for (const [name, head] of [
       ['thumbnail', thumbnailHead],

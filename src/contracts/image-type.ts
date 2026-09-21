@@ -69,3 +69,63 @@ function sniffIsoBmff(head: Uint8Array): ContentType | null {
 function ascii(bytes: Uint8Array, start: number, end: number): string {
   return String.fromCharCode(...bytes.subarray(start, end))
 }
+
+// Whether the top-level boxes of an ISO BMFF file account for every byte of it.
+//
+// 'complete'   every box the file declares fits inside it, and together they reach its last byte
+// 'incomplete' a box claims to end past the file, states a size smaller than its own header, or bytes
+//              are left over that cannot hold another box
+// 'unverified' the boxes are consistent so far, but the next header is past the bytes we were handed
+export type IsoBmffScan = 'complete' | 'incomplete' | 'unverified'
+
+const BOX_HEADER_BYTES = 8
+const LARGE_BOX_HEADER_BYTES = 16
+
+// A decoder may hand back a picture from a file whose second half never arrived, so "it decoded" is not
+// evidence that the original is whole. The boxes each carry their own length, so walking the top level is
+// a cheap, format-defined check that the bytes we hold are all of them (docs/decisions.md D-030).
+//
+// `head` is the start of the file (all of it on the client, the inspected head on the server) and
+// `totalSize` the length of the whole object. Only box headers are read, so a head of a few KB settles a
+// file of any size. This says nothing about whether the image data inside the boxes is intact.
+export function scanIsoBmffBoxes(head: Uint8Array, totalSize: number): IsoBmffScan {
+  let offset = 0
+  while (offset < totalSize) {
+    if (offset + BOX_HEADER_BYTES > head.length) {
+      // Fewer than a header's worth of bytes are left in the file itself: they belong to no box.
+      return offset + BOX_HEADER_BYTES > totalSize ? 'incomplete' : 'unverified'
+    }
+    // A box names its type with four printable characters. At the top level of a HEIF file nothing else is
+    // valid, and refusing the rest keeps files made of padding away from the parsers that come after: exifr
+    // never returns from a HEIC whose boxes are zero bytes (docs/verification.md).
+    if (!isPrintableBoxType(head, offset + 4)) return 'incomplete'
+    let size = readU32(head, offset)
+    let header = BOX_HEADER_BYTES
+    if (size === 1) {
+      // 64-bit size in the 8 bytes after the type.
+      if (offset + LARGE_BOX_HEADER_BYTES > head.length) return 'unverified'
+      const high = readU32(head, offset + 8)
+      const low = readU32(head, offset + 12)
+      size = high * 0x1_0000_0000 + low
+      header = LARGE_BOX_HEADER_BYTES
+    } else if (size === 0) {
+      // "To the end of the file", allowed for the last box.
+      size = totalSize - offset
+    }
+    if (size < header) return 'incomplete'
+    if (offset + size > totalSize) return 'incomplete'
+    offset += size
+  }
+  return offset === totalSize ? 'complete' : 'incomplete'
+}
+
+function isPrintableBoxType(bytes: Uint8Array, at: number): boolean {
+  for (let i = at; i < at + 4; i++) {
+    if (bytes[i] < 0x21 || bytes[i] > 0x7e) return false
+  }
+  return true
+}
+
+function readU32(bytes: Uint8Array, at: number): number {
+  return ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) >>> 0
+}

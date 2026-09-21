@@ -1,9 +1,17 @@
-import { FileTooLargeError, HeicNotDecodableHereError, ImageDecodeError } from '../../lib/image-errors'
+import {
+  FileTooLargeError,
+  HeicNotDecodableHereError,
+  ImageDecodeError,
+  IncompleteFileError,
+} from '../../lib/image-errors'
 
 // Why a file was refused and what the person can do about it. Exported so the wording is unit-tested
 // without a browser. Nothing here is retryable: the same file would be refused again.
 export function unsupportedFileMessage(err: unknown): string {
   if (err instanceof FileTooLargeError) return '100MB を超えるファイルは未対応です'
+  if (err instanceof IncompleteFileError) {
+    return 'ファイルが最後まで揃っていません（書き出しか転送が途中で終わったファイルの可能性があります）'
+  }
   if (err instanceof HeicNotDecodableHereError) {
     return 'このブラウザでは HEIC を処理できません。Safari で開くか、JPEG などに書き出してから選んでください'
   }

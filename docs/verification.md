@@ -453,14 +453,25 @@ fixture の orientation は EXIF の `Orientation` で持っている。実機�
 
 `still.heic` を壊した 4 種類を `createImageBitmap` に通した。
 
-| 壊し方 | WebKit | Chromium |
+| 壊し方 | WebKit の decode | EdgePhotos の扱い |
 | --- | --- | --- |
-| 先頭 40 byte（`ftyp` だけ残す） | `InvalidStateError` | `InvalidStateError` |
-| `ftyp` の後をすべて 0 で埋める | `InvalidStateError` | `InvalidStateError` |
-| 半分で切る | **32x64 で成功** | `InvalidStateError` |
-| 末尾付近の 1 byte を反転 | 32x64 で成功 | `InvalidStateError` |
+| 先頭 40 byte（`ftyp` だけ残す） | `InvalidStateError` | 拒否（構造が揃っていない） |
+| `ftyp` の後をすべて 0 で埋める | `InvalidStateError` | 拒否（padding は box ではない） |
+| 半分で切る | **32x64 で成功** | 拒否（`mdat` が 674 byte を宣言、残り 59 byte） |
+| `mdat` の中身を 0xff で埋める | **32x64 で成功** | 受け入れる（構造は揃っている） |
+| 末尾付近の 1 byte を反転 | 32x64 で成功 | 受け入れる（構造は揃っている） |
 
-途中で切れた HEIC が WebKit で成功するのは、途中で切れた JPEG と同じ挙動（上の「Browser での取り込み」）。この場合、EdgePhotos は decode できた画像から derivative を作り、asset として登録する。original の byte 列は受け取ったままなので、後から別の環境で開き直せる。
+Chromium はどれも `InvalidStateError`。
+
+途中で切れた HEIC が WebKit で decode できるのは、途中で切れた JPEG と同じ挙動（上の「Browser での取り込み」）。thumbnail が出ることは original が全部揃っている証拠にならないので、top-level box を歩いて宣言された長さがファイルを覆うかを確認し、覆わないものは Client と Worker の両方で拒否する（[D-030](decisions.md)）。
+
+最後の 2 行のとおり、構造が揃っていれば中身が壊れていても受け入れる。この検査が言うのは「手元の byte 列がそのファイルの全部か」だけである。
+
+### exifr が返ってこなくなる HEIC
+
+`ftyp` の後をすべて 0 で埋めた HEIC を `exifr.parse` に渡すと、Node で 20 秒待っても返らなかった。size 0 の box を歩き続けるためと思われる。Browser では tab ごと応答しなくなり、Playwright の page が落ちた。
+
+対処は 2 つ入れた。top-level box type に印字可能な 4 文字を要求してこの形を先に拒否すること、metadata の読み取りを decode の成功後に移すことである。どちらも [D-030](decisions.md) に書いた。
 
 ### 自動テストで確認したこと
 
@@ -472,7 +483,8 @@ fixture の orientation は EXIF の `Orientation` で持っている。実機�
 - share では derivative しか出ず、応答に `originals/`・filename・`image/heic`・SHA-256 のいずれも現れない。preview は `derivatives/v1/{id}/preview.jpg` の JPEG
 - v1 manifest は今も読め、v1 で `image/heic` を名乗る manifest は `contentType` を名指しして拒否される
 - e2e: WebKit は HEIC を追加し、記録された形式が `image/heic`、寸法が 32x64（EXIF Orientation 6 が反映された値）、`takenAt` が `2019-07-14T09:30:05`。timeline の thumbnail も 32x64 で、derivative 自体が正しい向きになっている。Chromium は「このブラウザでは HEIC を処理できません」と表示し、reserve へ進まない
-- e2e: `ftyp` だけ残して中身を落とした HEIC は、WebKit では「HEIC を読み取れませんでした」、Chromium では「このブラウザでは HEIC を処理できません」になり、どちらでも asset にならない。ブラウザの制約とファイルの破損を分けて伝えられている
+- e2e: 半分で切った HEIC と、`ftyp` の後を padding にした HEIC は、WebKit では「ファイルが最後まで揃っていません」、Chromium では decode 不能として先に止まり、どちらでも asset にならない
+- 「probe は通るがそのファイルだけ decode に失敗する」経路は unit test のみ。WebKit は構造の揃った変種をすべて decode したため、e2e では再現できていない
 
 ### 観測した不安定な失敗
 

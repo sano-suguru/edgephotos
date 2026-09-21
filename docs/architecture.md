@@ -248,7 +248,9 @@ Browser の JPEG encoder が付ける APP1 / APP13 は、Client が PUT 前に�
 
 original の形式は JPEG / PNG / WebP / HEIC / HEIF です。判定は Client と Worker が共有する 1 つの sniff が bytes から行います。HEIC / HEIF では `ftyp` box の major brand と compatible brands の両方を読み、still image の brand だけを受け入れます。image sequence と AVIF は拒否します（[D-030](decisions.md)）。
 
-`<input accept>` は選択 UI への hint です。どの形式を保存するかの根拠にはしません。filename と `File.type` も使いません。
+`<input accept>` は選択 UI への hint です。どの形式を保存するかの根拠にはしません。filename と `File.type` も使いません。Client はファイルの先頭 1024 byte を読んで形式を決め、そのあとで全体を読みます。
+
+HEIC / HEIF では、top-level box を歩いて宣言された長さがファイル全体を覆うかも確認します。decoder は後半が失われた HEIC からでも画像を返すため、「表示できた」を原本が揃っている証拠にしません。Client と Worker の両方で確認し、覆わないものは asset にしません（[D-030](decisions.md)）。
 
 HEIC は decode できる環境でのみ受け付けます。判定は UA ではなく、埋め込んだ小さな HEIC を `createImageBitmap` に通す capability probe です。decode できない環境では、reserve と R2 PUT の前に拒否します。`image/heif` は HEVC 以外の codec を含められるため、この probe の対象にせず、そのファイル自身の decode 結果で判断します。
 

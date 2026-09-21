@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SNIFF_HEAD_BYTES } from '../../src/contracts/image-type'
+import { SNIFF_HEAD_BYTES, scanIsoBmffBoxes } from '../../src/contracts/image-type'
 import { LIMITS, ORIGINAL_CONTENT_TYPES } from '../../src/contracts/schemas'
 import { resumePurges } from '../../src/web/features/settings/resume-purges'
 import { canAutoDismissUploads, mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
@@ -10,6 +10,7 @@ import {
   FileTooLargeError,
   HeicNotDecodableHereError,
   ImageDecodeError,
+  IncompleteFileError,
   UnsupportedFileError,
 } from '../../src/web/lib/image-errors'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
@@ -340,11 +341,87 @@ describe('upload failure messages', () => {
     const heif = unsupportedFileMessage(new ImageDecodeError('failed', 'image/heif'))
     expect(heif).toMatch(/HEIF を読み取れませんでした/)
     expect(heif).not.toMatch(/このブラウザでは HEIF/)
+    // A file that decodes but is not all there gets its own answer: nothing about the browser.
+    const incomplete = unsupportedFileMessage(new IncompleteFileError('short'))
+    expect(incomplete).toMatch(/最後まで揃っていません/)
+    expect(incomplete).not.toMatch(/ブラウザ/)
     expect(unsupportedFileMessage(new FileTooLargeError('too big'))).toMatch(/100MB/)
     expect(unsupportedFileMessage(new UnsupportedFileError('nope'))).toMatch(/対応していない形式/)
   })
 
   it('offers the picker exactly the formats the server accepts', () => {
     expect([...SUPPORTED_TYPES]).toEqual([...ORIGINAL_CONTENT_TYPES])
+  })
+})
+
+describe('ISO BMFF completeness', () => {
+  // size(4) + type(4) + payload. `declared` overrides the size field without changing the payload.
+  const box = (type: string, payload: number, declared?: number) => {
+    const out = new Uint8Array(8 + payload)
+    const size = declared ?? 8 + payload
+    out.set([size >>> 24, (size >>> 16) & 0xff, (size >>> 8) & 0xff, size & 0xff])
+    out.set(new TextEncoder().encode(type), 4)
+    return out
+  }
+  const join = (...parts: Uint8Array[]) => {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0))
+    let at = 0
+    for (const p of parts) {
+      out.set(p, at)
+      at += p.byteLength
+    }
+    return out
+  }
+  const scan = (bytes: Uint8Array) => scanIsoBmffBoxes(bytes, bytes.byteLength)
+
+  it('accepts a file whose boxes tile it exactly', () => {
+    expect(scan(join(box('ftyp', 28), box('meta', 100), box('mdat', 200)))).toBe('complete')
+    expect(scanIsoBmffBoxes(heicFixture(), heicFixture().byteLength)).toBe('complete')
+  })
+
+  it('catches the truncation a decoder is willing to overlook', () => {
+    // The real case: ftyp and meta survive, mdat claims more bytes than the file has. WebKit decodes this
+    // to a picture; the declared structure still says the file is not all here.
+    const full = heicFixture()
+    expect(scanIsoBmffBoxes(full.subarray(0, full.byteLength >> 1), full.byteLength >> 1)).toBe('incomplete')
+    expect(scan(join(box('ftyp', 28), box('mdat', 10, 4000)))).toBe('incomplete')
+  })
+
+  it('accepts the legal ways a box states its size', () => {
+    // size 0 = "to the end of the file", allowed for the last box.
+    expect(scan(join(box('ftyp', 28), box('mdat', 40, 0)))).toBe('complete')
+    // size 1 = 64-bit largesize in the 8 bytes after the type.
+    const large = new Uint8Array(24)
+    large.set([0, 0, 0, 1])
+    large.set(new TextEncoder().encode('mdat'), 4)
+    large.set([0, 0, 0, 0, 0, 0, 0, 24], 8)
+    expect(scan(join(box('ftyp', 28), large))).toBe('complete')
+    // free/skip and unknown boxes are walked like any other.
+    expect(scan(join(box('ftyp', 28), box('free', 16), box('xxxx', 8), box('mdat', 40)))).toBe('complete')
+  })
+
+  it('refuses sizes that cannot be walked', () => {
+    expect(scan(join(box('ftyp', 28), box('mdat', 40, 4)))).toBe('incomplete') // below the header
+    const badLarge = new Uint8Array(24)
+    badLarge.set([0, 0, 0, 1])
+    badLarge.set(new TextEncoder().encode('mdat'), 4)
+    badLarge.set([0, 0, 0, 0, 0, 0, 0, 8], 8) // largesize below its own 16-byte header
+    expect(scan(join(box('ftyp', 28), badLarge))).toBe('incomplete')
+    // Bytes left over that cannot hold another header belong to no box.
+    expect(scan(join(box('ftyp', 28), box('mdat', 40), new Uint8Array(3)))).toBe('incomplete')
+    // Padding is not a box, whatever its size field claims. exifr never returns from a file like this,
+    // so it must not reach the metadata reader (docs/verification.md).
+    const fixture = heicFixture()
+    const hollow = join(fixture.subarray(0, 36), new Uint8Array(fixture.byteLength - 36))
+    expect(scan(hollow)).toBe('incomplete')
+  })
+
+  it('says so when the head it was given stops before the boxes do', () => {
+    // How the Worker sees a large original: every header is in the first 256KB, so it still concludes.
+    const file = join(box('ftyp', 28), box('meta', 100), box('mdat', 1_000_000))
+    expect(scanIsoBmffBoxes(file.subarray(0, 4096), file.byteLength)).toBe('complete')
+    // A file whose headers run past the head cannot be judged from it.
+    const many = join(...Array.from({ length: 40 }, () => box('free', 92)), box('mdat', 40))
+    expect(scanIsoBmffBoxes(many.subarray(0, 300), many.byteLength)).toBe('unverified')
   })
 })

@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
+import { sniffImageType } from '../../src/contracts/image-type'
 import type { UploadFinalizeResult } from '../../src/contracts/schemas'
 import { toHex } from '../../src/worker/lib/crypto'
 import { hexToBase64 } from '../../src/worker/storage/signer'
@@ -529,7 +530,29 @@ describe('HEIC originals', () => {
     expect(await assetCount(p.sha256)).toBe(0)
   })
 
-  it('refuses a truncated HEIC instead of storing it half-understood', async () => {
+  it('refuses a HEIC whose header survived but whose image data did not', async () => {
+    const app = await makeApp()
+    // The case a decoder hides: ftyp and meta are intact and WebKit renders a picture from this, but mdat
+    // claims more bytes than the file has. A photo library keeps originals, so this is not one.
+    const full = uniqueHeic()
+    const half = full.slice(0, full.byteLength >> 1)
+    const p = {
+      original: half,
+      thumbnail: syntheticJpeg(),
+      preview: syntheticJpeg({ padding: 32 }),
+      sha256: await sha256(half),
+    }
+    expect(sniffImageType(half)).toBe('image/heic') // the brand still says HEIC
+    const r = await reserve(app, p, {}, 'image/heic')
+    await put(app, r, p)
+    const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
+    expect(res.status).toBe(422)
+    const body = (await res.json()) as { error: { details: { problems: { object: string; problem: string }[] } } }
+    expect(body.error.details.problems).toContainEqual({ object: 'original', problem: 'incomplete_file' })
+    expect(await assetCount(p.sha256)).toBe(0)
+  })
+
+  it('refuses a HEIC cut before its brand is even readable', async () => {
     const app = await makeApp()
     const broken = uniqueHeic().slice(0, 12)
     const p = {

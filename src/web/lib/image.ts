@@ -1,8 +1,14 @@
 import exifr from 'exifr'
-import type { ContentType } from '../../contracts/image-type'
+import { type ContentType, SNIFF_HEAD_BYTES, scanIsoBmffBoxes } from '../../contracts/image-type'
 import { exifDateToIso } from './exif-date'
 import { canDecodeHeic } from './heic-probe'
-import { FileTooLargeError, HeicNotDecodableHereError, ImageDecodeError, UnsupportedFileError } from './image-errors'
+import {
+  FileTooLargeError,
+  HeicNotDecodableHereError,
+  ImageDecodeError,
+  IncompleteFileError,
+  UnsupportedFileError,
+} from './image-errors'
 import { stripJpegMetadata } from './jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from './original-limit'
 import { originalTypeOf } from './original-type'
@@ -112,6 +118,16 @@ async function refuseIfHeicIsUndecodableHere(contentType: ContentType | null) {
   }
 }
 
+// A HEIC missing its second half still decodes in some browsers, so the picture on screen is no evidence
+// that the file is whole. Its boxes say how long it should be; a photo library keeps the original, so a
+// file that is not all here is refused rather than stored (docs/decisions.md D-030).
+function refuseIfIncomplete(contentType: ContentType, bytes: Uint8Array) {
+  if (contentType !== 'image/heic' && contentType !== 'image/heif') return
+  if (scanIsoBmffBoxes(bytes, bytes.byteLength) !== 'complete') {
+    throw new IncompleteFileError('The file is shorter than the boxes inside it declare')
+  }
+}
+
 // Rebuilds derivatives from an original that is already stored, for repair (docs/decisions.md D-026).
 // Same renderer, same sizes, same metadata stripping as upload: a repaired thumbnail is the thumbnail the
 // upload would have produced, and finalize's APP1 / APP13 rule holds for both paths by construction.
@@ -131,21 +147,23 @@ export async function renderDerivatives(
 }
 
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
-  // Cheap refusals before reading: non-images by the browser's type, oversized files. The format itself is
-  // decided from the bytes below, never from the name or the type the picker guessed.
-  if (file.type !== '' && !file.type.startsWith('image/')) {
-    throw new UnsupportedFileError(`Unsupported file type: ${file.type || 'unknown'}`)
-  }
   if (file.size > ORIGINAL_MAX_BYTES) throw new FileTooLargeError(`File is larger than ${ORIGINAL_MAX_BYTES} bytes`)
-  const buffer = await file.arrayBuffer()
-  const contentType = originalTypeOf(buffer)
+  // The format comes from the bytes, never from the name or the type the picker guessed: a camera file
+  // handed over as application/octet-stream is still that camera file. Reading the head first also means a
+  // file this browser will refuse never costs a full read.
+  const contentType = originalTypeOf(await file.slice(0, SNIFF_HEAD_BYTES).arrayBuffer())
   if (!contentType) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
   // Before the reservation and before any PUT: a photo this browser cannot turn into derivatives must not
   // reach storage half-done.
   await refuseIfHeicIsUndecodableHere(contentType)
-  const [sha256, takenAt] = await Promise.all([sha256Hex(buffer), readTakenAt(buffer)])
+  const buffer = await file.arrayBuffer()
+  refuseIfIncomplete(contentType, new Uint8Array(buffer))
+  const sha256 = await sha256Hex(buffer)
   const bitmap = await decode(file, contentType)
   try {
+    // Only now, on a file a real decoder accepted: the metadata reader is the least defensive thing we run
+    // over an untrusted file, so it is the last to see one (docs/decisions.md D-030).
+    const takenAt = await readTakenAt(buffer)
     const { thumbnail, preview } = await renderAll(bitmap, ['thumbnail', 'preview'])
     return {
       file,

@@ -12,6 +12,8 @@ HEIC / HEIF を original として受け付けるようにしました。受け�
 
 HEIC を decode できるかは、埋め込んだ小さな HEIC を実際に decode する probe で判断します。UA では分岐しません。decode できない Browser では、reserve と R2 PUT の前に、何をすればよいかを添えて止めます。`image/heif` は probe の対象にせず、そのファイル自身の decode 結果で判断します。
 
+「decode できた」を原本が健全な証拠にしません。HEIC / HEIF では top-level box を歩いて、宣言された長さがファイル全体を覆うかを Client と Worker の両方で確認します。後半が失われた HEIC は、WebKit が画像を返しても asset にしません。
+
 backup manifest は v2 になりました。v1 の backup も引き続き restore できます。
 
 判断は [D-030](decisions.md)、確認内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md)。実機 iPhone / Android での確認は [roadmap.md](roadmap.md) の Post-merge verification に残しています。

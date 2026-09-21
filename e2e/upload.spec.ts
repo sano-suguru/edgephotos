@@ -51,16 +51,23 @@ test('uploads a photo with browser-made derivatives, and takes HEIC where it can
     await expect(uploadRow(page, 'camera.heic')).toContainText('このブラウザでは HEIC を処理できません')
   }
 
-  // A HEIC whose header is intact but whose image data is gone separates the two refusals: an engine that
-  // can decode HEIC blames the file, one that cannot blames itself. Neither stores anything.
-  const gutted = { name: 'gutted.heic', mimeType: 'image/heic', buffer: heicFixture().subarray(0, 40) }
-  const guttedRows = await uploadFiles(page, [gutted])
-  expect(guttedRows.get('gutted.heic')).toContain(
-    browserName === 'webkit' ? 'HEIC を読み取れませんでした' : 'このブラウザでは HEIC を処理できません',
-  )
-  expect(await page.evaluate(() => fetch('/api/v1/assets?limit=200').then((r) => r.json()))).not.toMatchObject({
-    items: [{ filename: 'gutted.heic' }],
-  })
+  // Two files a HEIC decoder is happy to overlook, and one rule: nothing half-there is stored.
+  const full = heicFixture()
+  // Half the file. WebKit decodes this to a picture; the boxes still say the second half never arrived.
+  const half = { name: 'half.heic', mimeType: 'image/heic', buffer: full.subarray(0, full.length >> 1) }
+  // Header kept, everything after it padding. Nothing here is a box, and exifr never returns from it.
+  const hollow = Buffer.concat([full.subarray(0, 36), Buffer.alloc(full.length - 36)])
+  const rejected = await uploadFiles(page, [half, { name: 'hollow.heic', mimeType: 'image/heic', buffer: hollow }])
+  for (const name of ['half.heic', 'hollow.heic']) {
+    // On an engine with no HEIC decoder the refusal comes earlier, before the file is even read.
+    expect(rejected.get(name)).toContain(
+      browserName === 'webkit' ? '最後まで揃っていません' : 'このブラウザでは HEIC を処理できません',
+    )
+  }
+  const stored = await page.evaluate(() => fetch('/api/v1/assets?limit=200').then((r) => r.json()))
+  const names = stored.items.map((i: { filename: string }) => i.filename)
+  expect(names).not.toContain('half.heic')
+  expect(names).not.toContain('hollow.heic')
 
   const thumbnail = tile(page, name).locator('img')
   await expectImageLoaded(thumbnail)

@@ -643,6 +643,28 @@ image sequence を拒否するのは、今回のスコープが still image だ�
 
 `ftyp` は untrusted input として読みます。宣言された box size を検査し、16 byte 未満・1024 byte 超・手元の bytes を超える・compatible brands が 4 byte 単位でない・size が 0（EOF まで）や 1（64bit）のものは拒否します。読むのは先頭 1024 byte までです。
 
+### 「decode できた」を原本が健全な証拠にしない
+
+WebKit は、後半が失われた HEIC からでも画像を返します（途中で切れた JPEG と同じ挙動）。thumbnail が出ることは、original が全部揃っていることの証拠になりません。写真庫が預かるのは original なので、ここは decoder の寛容さに任せません。
+
+ISO BMFF の box は自分の長さを持つので、**top-level box を歩いて、宣言された長さがファイル全体を過不足なく覆うか**だけを確かめます。image data の中身は見ません。確認するのは 1 点、「手元にある byte 列がそのファイルの全部か」です。
+
+- 宣言が EOF を越える box があれば拒否する（途中で切れたファイル）
+- box header より小さい size、box に属さない余り byte も拒否する
+- size 0（EOF まで）と size 1（64bit largesize）は仕様どおり受け入れる。free / skip / 未知の box も同じように歩く
+- top-level の box type は印字可能な 4 文字であることを要求する。padding は box ではない
+- header がこちらの持つ byte 列を越える場合は判定しない（unverified）。実ファイルでは起きない
+
+Client はファイル全体を持っているので必ず判定できます。Worker は finalize で既に読んでいる先頭 256KB だけで判定します。box header は先頭に集まるため、100MB の original でも追加の読み出しは要りません。不一致は `incomplete_file` として `422` で拒否し、asset を作りません。
+
+この検査は「宣言された構造がファイルを覆っている」ことしか言いません。box の中の image data が壊れていないことは保証しません。JPEG / PNG / WebP には同じ検査を入れていません（今回の範囲外です。途中で切れた JPEG の扱いは [D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する) のままです）。
+
+### metadata の読み取りは decode のあとに置く
+
+`exifr` は、box が zero padding になっている HEIC で返ってこなくなります（実測。[verification.md](verification.md)）。上の box type の規則でこの形は先に弾けますが、untrusted なファイルに対して最も無防備なのは metadata parser なので、順番も変えます。
+
+`preparePhoto` は、head を sniff → probe → 全体を読む → 構造を確認 → SHA-256 → decode → **decode に成功してから** metadata を読む、の順で進みます。decoder が受け付けなかったファイルは exifr に渡りません。
+
 ### decode できるかは capability probe で決める
 
 埋め込んだ 513 byte の HEIC を `createImageBitmap` に 1 度だけ通し、結果を cache します。UA も `navigator` も見ません。probe が失敗する環境では、reserve と R2 PUT の前に「このブラウザでは HEIC を処理できません」と伝えて止めます。probe は通るがそのファイルだけ失敗した場合は「壊れているか未対応の形式です」と伝えます。この 2 つを分けることが、ブラウザの制約と壊れたファイルを推測なしに区別する方法です。
@@ -676,7 +698,8 @@ Chrome / Firefox のために libheif（WASM）や Cloudflare Images を入れ�
 - HEIC の decode は JPEG より重くなります。12.2MP で decode が約 1.7 倍、decode 後の derivative 生成は同じです（[benchmarks.md](benchmarks.md)）。bitmap の memory は JPEG と同じで、並列数 2 の制限（[D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する)）がそのまま効きます
 - bundle は probe 用 fixture の 684 byte（gzip 495 byte）だけ増えます
 - HEIC の decoder は OS / browser のものです。EdgePhotos が足す parser は `ftyp` の読み取りだけで、Worker は decode しません
-- 途中で切れた HEIC は、WebKit では decode に成功します（途中で切れた JPEG と同じ既知の挙動）。その場合は decode できた画像から derivative を作って登録します。original の byte 列は受け取ったままなので、後から別の環境で開き直せます。`ftyp` しか残っていないものなど、decode できないものは登録しません（[verification.md](verification.md)）
+- 構造の検査は HEIC / HEIF だけに入れました。JPEG / PNG / WebP は今までどおりで、途中で切れた JPEG は WebKit では登録されます
+- WebKit は mdat を 0xff で埋めた HEIC も decode します。構造が揃っているファイルを decode 失敗として拒否する経路は、e2e では再現できていません（unit test のみ）
 - fixture の orientation は EXIF で持っています。実機の HEIC が使う `irot` / `imir` は未確認です
 
 再検討する条件は、cross-browser の HEIC upload が実際の要求になったとき、または native client を作るときです。その場合も、まず original を変えずに derivative を作る経路を探します。

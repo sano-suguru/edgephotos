@@ -6,6 +6,9 @@ import type { ContentType } from '../../contracts/image-type'
 export class UnsupportedFileError extends Error {}
 export class FileTooLargeError extends UnsupportedFileError {}
 
+// The file's own structure says bytes are missing from it, whether or not a decoder would show a picture.
+export class IncompleteFileError extends UnsupportedFileError {}
+
 // The bytes are a format EdgePhotos accepts, but this browser did not produce a bitmap from them.
 export class ImageDecodeError extends UnsupportedFileError {
   readonly contentType: ContentType | null
