@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { SNIFF_HEAD_BYTES } from '../../src/contracts/image-type'
 import { LIMITS } from '../../src/contracts/schemas'
 import { resumePurges } from '../../src/web/features/settings/resume-purges'
 import { canAutoDismissUploads, mergeUploadList, type UploadListItem } from '../../src/web/features/uploads/upload-list'
@@ -9,7 +10,6 @@ import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
 import { originalTypeOf } from '../../src/web/lib/original-type'
 import { putOutcome } from '../../src/web/lib/storage-put'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
-import { SNIFF_HEAD_BYTES } from '../../src/contracts/image-type'
 import { scanJpegForMetadata, sniffImageType } from '../../src/worker/storage/inspect'
 import { heicFixture, syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
 
