@@ -1,4 +1,9 @@
+import { readFileSync } from 'node:fs'
 import { expect, type Locator, type Page } from '@playwright/test'
+
+// The same committed HEIC the worker tests use (tests/fixtures/README.md). Synthetic, 64x32 with EXIF
+// Orientation 6, so a browser that honours orientation reports 32x64.
+export const heicFixture = () => readFileSync('tests/fixtures/still.heic')
 
 // Synthetic photos drawn in the browser under test: decodable, random (so every run has a new
 // SHA-256 and never hits DUPLICATE_ASSET), and free of real people or places.

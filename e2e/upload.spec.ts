@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   expectImageLoaded,
+  heicFixture,
   makeJpeg,
   naturalSize,
   openApp,
@@ -12,17 +13,36 @@ import {
   uploadRow,
 } from './fixtures'
 
-test('uploads a photo with browser-made derivatives and rejects HEIC', async ({ page }) => {
+test('uploads a photo with browser-made derivatives, and takes HEIC where it can decode it', async ({
+  page,
+  browserName,
+}) => {
   await openApp(page)
   const name = `${uniqueName('large')}.jpg`
   const rows = await uploadFiles(page, [
     { name, mimeType: 'image/jpeg', buffer: await makeJpeg(page, 3000, 2000) },
-    { name: 'camera.heic', mimeType: 'image/heic', buffer: Buffer.from('not a real HEIC file') },
+    { name: 'camera.heic', mimeType: 'image/heic', buffer: heicFixture() },
   ])
   // finalize only succeeds if the canvas JPEGs carry no EXIF/XMP/IPTC segment (WebKit adds them, D-020).
   expect(rows.get(name)).toContain('完了')
-  // A failure keeps the summary (and its rows) until dismissed.
-  await expect(uploadRow(page, 'camera.heic')).toContainText('HEIC は未対応')
+
+  // Whether the HEIC is taken is a decode-capability question, answered by a probe, not by the engine name.
+  // WebKit decodes HEVC-coded HEIC; Chromium does not, and says so before anything is reserved or stored.
+  if (browserName === 'webkit') {
+    expect(rows.get('camera.heic')).toContain('完了')
+    const stored = await page.evaluate(async () => {
+      const res = await fetch('/api/v1/assets?limit=200')
+      const body = await res.json()
+      return body.items.find((i: { filename: string }) => i.filename === 'camera.heic')
+    })
+    // The bytes are stored as they arrived, and EXIF Orientation 6 on a 64x32 original means the recorded
+    // size is the displayed one.
+    expect(stored.contentType).toBe('image/heic')
+    expect([stored.width, stored.height]).toEqual([32, 64])
+  } else {
+    // A failure keeps the summary (and its rows) until dismissed.
+    await expect(uploadRow(page, 'camera.heic')).toContainText('このブラウザでは HEIC を処理できません')
+  }
 
   const thumbnail = tile(page, name).locator('img')
   await expectImageLoaded(thumbnail)
@@ -69,9 +89,10 @@ test('a clean upload summary clears itself, but not while another upload runs or
   await page.clock.fastForward('00:06')
   await expect(uploadPanel(page)).toBeHidden()
 
-  await uploadFiles(page, [{ name: 'camera.heic', mimeType: 'image/heic', buffer: Buffer.from('not a real HEIC') }])
+  // Bytes that claim to be HEIC but are not: refused from the bytes, in every engine.
+  await uploadFiles(page, [{ name: 'broken.heic', mimeType: 'image/heic', buffer: Buffer.from('not a real HEIC') }])
   await page.clock.fastForward('00:30')
-  await expect(uploadRow(page, 'camera.heic')).toContainText('HEIC は未対応')
+  await expect(uploadRow(page, 'broken.heic')).toContainText('対応していない形式です')
   await expect(page.getByRole('button', { name: /再試行/ })).toHaveCount(0)
 })
 
