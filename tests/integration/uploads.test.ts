@@ -1,15 +1,15 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
+import type { UploadFinalizeResult } from '../../src/contracts/schemas'
 import { toHex } from '../../src/worker/lib/crypto'
 import { hexToBase64 } from '../../src/worker/storage/signer'
-import type { UploadFinalizeResult } from '../../src/contracts/schemas'
 import {
   assetIdFromTarget,
   call,
   callJson,
   heicFixture,
-  makeApp,
   MEMBER_B,
+  makeApp,
   memberToken,
   photo,
   putObject,
@@ -482,7 +482,11 @@ describe('HEIC originals', () => {
     }
   }
 
-  const put = async (app: Awaited<ReturnType<typeof makeApp>>, r: Awaited<ReturnType<typeof reserve>>, p: Awaited<ReturnType<typeof heicPhoto>>) => {
+  const put = async (
+    app: Awaited<ReturnType<typeof makeApp>>,
+    r: Awaited<ReturnType<typeof reserve>>,
+    p: Awaited<ReturnType<typeof heicPhoto>>,
+  ) => {
     for (const v of ['original', 'thumbnail', 'preview'] as const) {
       const res = await putObject(app, r.targets[v], p[v])
       expect(res.ok).toBe(true)
@@ -510,7 +514,12 @@ describe('HEIC originals', () => {
     const app = await makeApp()
     // Reserved as HEIC, but the bytes are a JPEG. finalize decides from the stored bytes, not the claim.
     const jpeg = syntheticJpeg({ padding: 96 })
-    const p = { original: jpeg, thumbnail: syntheticJpeg(), preview: syntheticJpeg({ padding: 32 }), sha256: await sha256(jpeg) }
+    const p = {
+      original: jpeg,
+      thumbnail: syntheticJpeg(),
+      preview: syntheticJpeg({ padding: 32 }),
+      sha256: await sha256(jpeg),
+    }
     const r = await reserve(app, p, {}, 'image/heic')
     await put(app, r, p)
     const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
@@ -523,7 +532,12 @@ describe('HEIC originals', () => {
   it('refuses a truncated HEIC instead of storing it half-understood', async () => {
     const app = await makeApp()
     const broken = uniqueHeic().slice(0, 12)
-    const p = { original: broken, thumbnail: syntheticJpeg(), preview: syntheticJpeg({ padding: 32 }), sha256: await sha256(broken) }
+    const p = {
+      original: broken,
+      thumbnail: syntheticJpeg(),
+      preview: syntheticJpeg({ padding: 32 }),
+      sha256: await sha256(broken),
+    }
     const r = await reserve(app, p, {}, 'image/heic')
     await put(app, r, p)
     const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
