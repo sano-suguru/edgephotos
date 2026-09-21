@@ -1,4 +1,5 @@
 import exifr from 'exifr'
+import type { ContentType } from '../../contracts/image-type'
 import { exifDateToIso } from './exif-date'
 import { stripJpegMetadata } from './jpeg-metadata'
 import { ORIGINAL_MAX_BYTES } from './original-limit'
@@ -9,6 +10,12 @@ import { originalTypeOf } from './original-type'
 
 export const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
 export type SupportedType = (typeof SUPPORTED_TYPES)[number]
+
+// The sniff knows more formats than the upload UI offers; one list is the contract, the other is what this
+// client is ready to prepare. A unit test keeps them from drifting apart silently.
+function isSupported(type: ContentType | null): type is SupportedType {
+  return type !== null && (SUPPORTED_TYPES as readonly string[]).includes(type)
+}
 
 export const THUMBNAIL_MAX_EDGE = 512
 export const PREVIEW_MAX_EDGE = 2048
@@ -123,7 +130,7 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
   if (file.size > ORIGINAL_MAX_BYTES) throw new FileTooLargeError(`File is larger than ${ORIGINAL_MAX_BYTES} bytes`)
   const buffer = await file.arrayBuffer()
   const contentType = originalTypeOf(buffer)
-  if (!contentType) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
+  if (!isSupported(contentType)) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
   const [sha256, takenAt] = await Promise.all([sha256Hex(buffer), readTakenAt(buffer)])
   const bitmap = await decode(file)
   try {

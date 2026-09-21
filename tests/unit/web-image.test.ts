@@ -9,6 +9,7 @@ import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
 import { originalTypeOf } from '../../src/web/lib/original-type'
 import { putOutcome } from '../../src/web/lib/storage-put'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
+import { SNIFF_HEAD_BYTES } from '../../src/contracts/image-type'
 import { scanJpegForMetadata, sniffImageType } from '../../src/worker/storage/inspect'
 import { heicFixture, syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
 
@@ -214,7 +215,7 @@ describe('original format detection', () => {
     for (const bytes of [syntheticJpeg(), syntheticPng(), syntheticWebp()]) {
       expect(originalTypeOf(buf(bytes))).toBe(sniffImageType(bytes))
     }
-    // HEIC (ftyp box), GIF, empty and short files are not accepted.
+    // A truncated ftyp box, GIF, empty and short files are not accepted.
     const heic = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63, 0, 0, 0, 0])
     for (const bytes of [heic, new TextEncoder().encode('GIF89a......'), new Uint8Array(0), new Uint8Array([0xff])]) {
       expect(originalTypeOf(buf(bytes))).toBeNull()
@@ -254,6 +255,61 @@ describe('resuming unfinished deletes', () => {
       }),
     ).rejects.toBe(failure)
     expect(called).toEqual(['a', 'b'])
+  })
+})
+
+describe('ISOBMFF brand detection', () => {
+  // size(4) + 'ftyp' + major + minor + compatible brands. `size` defaults to the real length.
+  const ftyp = (major: string, compatible: string[] = [], size?: number, tail = 0) => {
+    const brands = [major, '\0\0\0\0', ...compatible].join('')
+    const body = new TextEncoder().encode(`ftyp${brands}`)
+    const out = new Uint8Array(4 + body.length + tail)
+    const declared = size ?? 4 + body.length
+    out.set([declared >>> 24, (declared >>> 16) & 0xff, (declared >>> 8) & 0xff, declared & 0xff])
+    out.set(body, 4)
+    return out
+  }
+
+  it('accepts HEIC still brands', () => {
+    for (const major of ['heic', 'heix', 'heim', 'heis']) {
+      expect(sniffImageType(ftyp(major, ['mif1']))).toBe('image/heic')
+    }
+  })
+
+  it('accepts a real HEIC file', () => {
+    expect(sniffImageType(heicFixture())).toBe('image/heic')
+  })
+
+  it('reads generic HEIF as image/heif, but prefers image/heic when the compatible brands say so', () => {
+    expect(sniffImageType(ftyp('mif1', ['mif1']))).toBe('image/heif')
+    expect(sniffImageType(ftyp('mif1', ['mif1', 'heic']))).toBe('image/heic')
+    expect(sniffImageType(ftyp('mif1', ['heis']))).toBe('image/heic')
+  })
+
+  it('refuses sequences and AVIF wherever the brand is declared', () => {
+    for (const major of ['hevc', 'hevx', 'hevm', 'hevs', 'msf1', 'avif', 'avis']) {
+      expect(sniffImageType(ftyp(major, ['mif1']))).toBeNull()
+    }
+    // A file that declares a still brand and a sequence/AVIF brand is ambiguous: refuse, do not guess.
+    expect(sniffImageType(ftyp('mif1', ['avif']))).toBeNull()
+    expect(sniffImageType(ftyp('heic', ['hevc']))).toBeNull()
+  })
+
+  it('refuses malformed ftyp boxes', () => {
+    expect(sniffImageType(ftyp('heic', [], 12))).toBeNull() // size below the minimum
+    expect(sniffImageType(ftyp('heic', ['mif1'], 0))).toBeNull() // "extends to end of file"
+    expect(sniffImageType(ftyp('heic', ['mif1'], 1))).toBeNull() // 64-bit largesize
+    expect(sniffImageType(ftyp('heic', ['mif1'], 4096, 4096))).toBeNull() // above the sniff limit
+    expect(sniffImageType(ftyp('heic', ['mif1'], 64))).toBeNull() // declared past the data we have
+    expect(sniffImageType(ftyp('heic', ['mif1'], 18, 2))).toBeNull() // compatible brands not 4-byte units
+    expect(sniffImageType(new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]))).toBeNull() // truncated
+    expect(sniffImageType(ftyp('mp42', ['isom']))).toBeNull() // a real ftyp we do not accept
+  })
+
+  it('keeps reading the same window the client passes', () => {
+    const buf = (bytes: Uint8Array) => bytes.slice().buffer as ArrayBuffer
+    expect(originalTypeOf(buf(heicFixture()))).toBe('image/heic')
+    expect(SNIFF_HEAD_BYTES).toBeGreaterThanOrEqual(1024)
   })
 })
 
