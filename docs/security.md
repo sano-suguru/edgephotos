@@ -1,6 +1,6 @@
 # セキュリティ
 
-## 1. Security Contract
+## 1. セキュリティ契約
 
 EdgePhotos は写真と metadata を扱うため、MVP でも以下を妥協しません。
 
@@ -23,11 +23,11 @@ EdgePhotos は写真と metadata を扱うため、MVP でも以下を妥協し�
 - R2 signing credential
 - Access configuration
 
-Cloudflare アカウントの完全侵害、利用端末の完全侵害、Cloudflare からも内容を隠す E2EE は v1 の保証範囲外です。
+Cloudflare アカウントの完全侵害、利用端末の完全侵害、Cloudflare からも内容を隠す E2EE は、v1 の保証範囲外です。
 
-## 3. Private API
+## 3. private API の認証と認可
 
-Private API は二段階で認証・認可します。
+private API は二段階で認証・認可します。
 
 1. Cloudflare Access が入口を保護する。
 2. Worker が Access assertion を検証し、owner identity と照合する。
@@ -43,7 +43,7 @@ JWT は存在するだけで信用しません。署名、issuer、audience、�
 - `email` が `OWNER_EMAIL` と一致する principal だけを owner とします（大文字小文字は区別しません）。email を持たない service token は owner になりません。
 - `OWNER_EMAIL` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` / `APP_ORIGIN` / R2 署名設定のいずれかが欠けていれば、token が正しくても `503 SERVER_MISCONFIGURED` を返し、データを返しません。
 
-## 4. Public share
+## 4. 公開共有（share）
 
 公開面は `/share/*` だけです。
 
@@ -55,7 +55,7 @@ secret は 32 random bytes の CSPRNG を base64url 表現したものを基準�
 
 secret と share ID が不一致・期限切れ・revoke 済み・album 削除済みのいずれでも、一律に `404 SHARE_UNAVAILABLE` を返します。secret hash の比較は定数時間で行います。
 
-share API は object key を client から受け取りません。`assetId + variant` を受け取り、server 側で R2 key を解決します。
+share API は object key を client から受け取りません。`assetId + variant` を受け取り、Server 側で R2 key を解決します。
 
 許可 variant:
 
@@ -69,24 +69,26 @@ share API は object key を client から受け取りません。`assetId + var
 - trash / deleted asset
 - 任意 object key
 
-## 5. Share revoke の意味
+## 5. 共有失効（revoke）の意味
 
 revoke 後は新しい画像 URL を発行しません。
 
-revoke 済みの share は再発行（`/regenerate`）もできません。再発行は「古い share がまだ有効である」ことを条件にした INSERT で行うため、revoke を読み取った後に届いた再発行要求も `409 SHARE_UNAVAILABLE` になります。別 tab や再送によって、閉じたはずの album に有効な link が戻ることはありません。期限切れの share も同じく再発行できません。
+revoke 済みの share は再発行（`/regenerate`）もできません。再発行は「古い share がまだ有効である」ことを条件にした INSERT で行います。そのため、revoke を読み取った後に届いた再発行要求も `409 SHARE_UNAVAILABLE` になります。
+
+別 tab や再送によって、閉じたはずの album に有効な link が戻ることはありません。期限切れの share も同じく再発行できません。
 
 ただし、すでに発行済みの presigned URL、取得済みファイル、browser cache、screenshot を回収できるとは説明しません。
 
-共有失効は「以後の新規アクセスを止める」機能であり DRM ではありません。
+共有失効は「以後の新規アクセスを止める」機能であり、DRM ではありません。
 
-## 6. Presigned URL
+## 6. presigned URL
 
 Presigned URL は bearer capability として扱います。
 
 - 操作を PUT または GET に限定する。
 - object key を限定する。
 - 有効期限を短くする。
-- Browser の R2 CORS は `APP_ORIGIN` に限定する（derivative の作り直しは original を `fetch()` で読むため、`GET` も必要。operations.md §6）。
+- Browser の R2 CORS は `APP_ORIGIN` に限定する。derivative の作り直しは original を `fetch()` で読むため、`GET` も必要（operations.md §6）。
 - Access Cookie / JWT を R2 へ送らない。
 
 | 操作 | TTL | 署名に含めるもの | 保証 |
@@ -101,7 +103,7 @@ finalize は、R2 が記録した SHA-256 と申告値の一致を確認する�
 
 例外として、D-018 より前に `ready` になった asset の `sha256` は client の申告値のままです。`pnpm backup verify` で照合するまで、この保証はありません。
 
-## 7. Metadata leak prevention
+## 7. metadata の漏れ防止
 
 original には GPS を含む可能性があります。
 
@@ -129,7 +131,9 @@ X-Robots-Tag: noindex, nofollow, noarchive
 
 CSP は `self` を基準にし、third-party analytics、外部 font、不要な script を share page へ追加しません。
 
-private write API は GET で状態変更しません。例外は `GET /api/v1/export/assets` の最後のページで、最終 export 日時（`settings.last_export_at`）だけを記録します。写真・album・share には触れません。Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま信用しません。
+private write API は GET で状態変更しません。例外は `GET /api/v1/export/assets` の最後のページで、最終 export 日時（`settings.last_export_at`）だけを記録します。写真・album・share には触れません。
+
+Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま信用しません。
 
 - `Origin` がある書き込み request は、`APP_ORIGIN` と完全一致しなければ `403 ORIGIN_NOT_ALLOWED` とします。
 - `Origin` がなく `Sec-Fetch-Site` が `same-origin` / `none` 以外の場合も拒否します。
@@ -137,7 +141,7 @@ private write API は GET で状態変更しません。例外は `GET /api/v1/e
 
 共有ページの CSP は `default-src 'self'` を基準にし、`img-src` だけ R2 の S3 endpoint を追加で許可します。
 
-## 9. Logging
+## 9. ログ
 
 ログへ残してよいもの:
 
@@ -168,9 +172,11 @@ private write API は GET で状態変更しません。例外は `GET /api/v1/e
 
 物理削除は再実行可能な処理にし、途中失敗から再開できるようにします。
 
-D1 に参照がない R2 object を即座に「ゴミ」と判定しません。D1 restore によって索引だけ過去状態になっている可能性があるためです。storage audit はこれを `unreferenced_objects` として報告するだけで、削除しません。
+D1 に参照がない R2 object を、即座に「ゴミ」と判定しません。D1 restore によって索引だけ過去状態になっている可能性があるためです。storage audit はこれを `unreferenced_objects` として報告するだけで、削除しません。
 
-storage cleanup（[D-023](decisions.md)）が削除するのは、`uploads` 行が指す key のうち、asset にならずに終わった upload のものだけです。key は server が `uploads.asset_id` から作り、client や R2 の list から受け取った文字列を削除に使いません。同じ ID の `assets` 行がある場合は削除しません。cleanup は owner の API で、Access と Origin の検査は他の書き込みと同じです。
+storage cleanup（[D-023](decisions.md)）が削除するのは、`uploads` 行が指す key のうち、asset にならずに終わった upload のものだけです。
+
+key は Server が `uploads.asset_id` から作り、client や R2 の list から受け取った文字列を削除に使いません。同じ ID の `assets` 行がある場合は削除しません。cleanup は owner の API で、Access と Origin の検査は他の書き込みと同じです。
 
 完全削除は、asset が trash 内にあることを D1 の条件付き更新で確かめてから始めます。
 
@@ -199,8 +205,14 @@ storage cleanup（[D-023](decisions.md)）が削除するのは、`uploads` 行�
 - original が壊れている写真へ作り直しの URL を発行しない。
 - 作り直しが object を削除しない。古い repair の target が、新しい repair の直した derivative を上書き・削除できない（`If-Match` で `412`）。
 
-上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Chromium と WebKit で確認しています。WebKit の encoder が付ける APP1 / APP13（撮影 metadata は含まない）は、Client が PUT 前に取り除きます。自動テストの対象は、その除去処理と Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）です。server 側の保証は変わりません（[D-020](decisions.md)）。
+上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。
+
+ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Chromium と WebKit で確認しています。WebKit の encoder が付ける APP1 / APP13（撮影 metadata は含まない）は、Client が PUT 前に取り除きます。
+
+自動テストの対象は、その除去処理と Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）です。Server 側の保証は変わりません（[D-020](decisions.md)）。
 
 ## 12. ローカル開発用の模擬機構
 
-`vite dev` の間だけ、Access assertion の付与と local blob URL を dev server で模擬します（[D-016](decisions.md)）。本番 build には含まれません。`vite preview`（production build）では設定がない限り `503` で fail-closed になることを確認しています。
+`vite dev` の間だけ、Access assertion の付与と local blob URL を dev server で模擬します（[D-016](decisions.md)）。
+
+本番 build には含まれません。`vite preview`（production build）では、設定がない限り `503` で fail-closed になることを確認しています。

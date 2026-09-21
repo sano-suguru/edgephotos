@@ -47,7 +47,7 @@
 
 Cloudflare Access 固有の token / assertion / Cookie を application logic へ直接持ち込まないでください。
 
-HTTP 層で検証し、正規化した principal を application logic へ渡します。具体的な Principal contract は `docs/architecture.md`、実装後はコードを正本とします。
+HTTP 層で検証し、正規化した principal を application logic へ渡します。具体的な Principal contract は `docs/architecture.md` にあります。文書とコードが食い違う場合は、実装の型定義を優先します。
 
 v1 は 1 owner です。Access を通過した全員を owner と扱わないでください。
 
@@ -65,7 +65,9 @@ derivatives/v1/{assetId}/preview.jpg
 
 D1 と R2 を単一 transaction として扱わず、片側だけ成功する異常系を前提にしてください。
 
-D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>` で生成した SQL を review して commit します。適用済みの `migrations/*.sql` と `migrations/meta/_journal.json` の baseline entry（`idx: 1`）は書き換えないでください。`drizzle-kit push` は使いません。
+D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>` で生成した SQL を review して commit します。
+
+適用済みの `migrations/*.sql` と `migrations/meta/_journal.json` の baseline entry（`idx: 1`）は書き換えないでください。`drizzle-kit push` は使いません。
 
 ## 6. 将来要件を先回りしない
 
@@ -85,25 +87,34 @@ D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>`
 
 これは禁止リストではなく、導入条件です。上の技術を避けること自体は目的ではありません。
 
+導入の条件:
+
 - 「将来必要かもしれない」「一般的にこの構成で使う」という理由だけでは追加しない
 - 現在の構成では解決できない要求・障害・運用負荷・性能問題・測定結果が確認できたら、候補から外さずに最小で分かりやすい解決策として評価する
-- 導入するときは、次の 3 点を根拠に判断し、`docs/decisions.md` に記録する
-  - 現在の構成で何が足りないか
-  - その技術で何が具体的に良くなるか
-  - 増える運用・障害・保守のコスト
+
+導入するときは、次の 3 点を根拠に判断し、`docs/decisions.md` に記録します。
+
+1. 現在の構成で何が足りないか
+2. その技術で何が具体的に良くなるか
+3. 増える運用・障害・保守のコスト
 
 ## 7. 変更時のドキュメント更新
 
-- 認証境界、API 境界、upload protocol、object layout を変える: `docs/architecture.md` と `docs/decisions.md`
-- 脅威モデル、公開範囲、secret の扱いを変える: `docs/security.md`
-- 開発フロー、test、CI、repository layout を変える: `docs/development.md`
-- デプロイ、migration、backup / restore を変える: `docs/operations.md`
-- 優先順位や feature scope を変える: `docs/roadmap.md`
-- 実環境や Browser で確かめた結果を残す: `docs/verification.md`（性能と memory の数値は `docs/benchmarks.md`）
+| 変更する対象 | 更新する文書 |
+| --- | --- |
+| 認証境界、API 境界、upload protocol、object layout | `docs/architecture.md` と `docs/decisions.md` |
+| 脅威モデル、公開範囲、secret の扱い | `docs/security.md` |
+| 開発フロー、test、CI、repository layout | `docs/development.md` |
+| デプロイ、migration、backup / restore | `docs/operations.md` |
+| 優先順位や feature scope | `docs/roadmap.md` |
+| 実環境や Browser で確かめた結果 | `docs/verification.md`（性能と memory の数値は `docs/benchmarks.md`） |
+| 完了した実装段階 | `docs/changelog.md` |
 
 検証の詳しい経過・証拠・測定値を operations / decisions / roadmap / README へ重複して書かないでください。これらの文書には、状態や判断に必要な短い要約だけを置き、詳細は verification / benchmarks へリンクします。
 
 UI の余白変更などで Decision Log を追加しないでください。
+
+文章と表記の規約は `docs/development.md` §12 にあります。
 
 ## 8. テストの厚さはリスクで決める
 
@@ -130,6 +141,6 @@ UI の余白変更などで Decision Log を追加しないでください。
 
 ## 10. 開発プロセス
 
-変更の進め方は `docs/development.md` を正本とします。
+変更の進め方は `docs/development.md` に従います。この文書と食い違う場合は `docs/development.md` を優先します。
 
 機能スコープは小さくしてよい一方、重要な認証・データ・API 境界を「後で置き換える前提の仮実装」にしないでください。

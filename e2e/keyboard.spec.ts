@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { makeJpeg, openApp, tile, uniqueName, uploadFiles } from './fixtures'
 
 // Base UI through preact/compat: focus trap, Escape, focus restore and menu keyboard navigation
-// (docs/development.md §4). These only exist in a real browser.
+// (docs/development.md §5). These only exist in a real browser.
 test('dialog and menu are usable from the keyboard', async ({ page }) => {
   await openApp(page, '/albums')
   const title = uniqueName('Keys')

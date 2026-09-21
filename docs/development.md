@@ -10,11 +10,11 @@
 実装 -> 必要なテスト -> CI -> commit
 ```
 
-認証境界、API 境界、upload protocol、object layout、migration 等の構造を変える場合だけ、実装前に [decisions.md](decisions.md) へ理由と採用案を短く記録します。
+構造を変える場合だけ、実装前に [decisions.md](decisions.md) へ理由と採用案を短く記録します。対象は、認証境界、API 境界、upload protocol、object layout、migration 等です。
 
 Issue、PR、ADR を変更ごとに義務化しません。
 
-## 2. Repository layout
+## 2. repository の構成
 
 ```text
 index.html                 private app entry
@@ -72,9 +72,13 @@ playwright.config.ts
 
 route は現状 `src/worker/app.ts` に集約しています。route 数が増えて見通しが悪くなった時点で `routes/` へ分割します。
 
-`contracts/` には Browser bundle に公開してよい API schema / type と、Worker と Client が同じ結果を出す必要のある小さな純関数（manifest の組み立て、形式の判定）だけを置きます。server secret 型や storage credential 実装を置きません。
+`contracts/` に置くのは 2 種類だけです。Browser bundle に公開してよい API schema / type と、Worker と Client が同じ結果を出す必要のある小さな純関数（manifest の組み立て、形式の判定）です。
 
-`scripts/` は Node の型除去（type stripping）でそのまま実行します。相対 import には `.ts` を付け、parameter property など型除去で動かない構文を使いません。workerd の test は bundler を通すため、この違いを検出できません。`pnpm cli:check`（`pnpm check` に含む）が CLI を実際に起動して確かめます。
+server secret 型や storage credential 実装は置きません。
+
+`scripts/` は Node の型除去（type stripping）でそのまま実行します。相対 import には `.ts` を付け、parameter property など型除去で動かない構文を使いません。
+
+workerd の test は bundler を通すため、この違いを検出できません。`pnpm cli:check`（`pnpm check` に含む）が CLI を実際に起動して確かめます。
 
 ## 3. Preact / Signals
 
@@ -90,9 +94,9 @@ Signals は Client UI state と派生 state に使用します。
 
 Server state の正しさまで Signals に背負わせません。保存完了の最終判定は Server が行います。
 
-v1 は `fetch` を使う小さな API client から始めます。data-fetching framework は cache invalidation が実際に複雑になった場合のみ追加判断します。
+v1 は `fetch` を使う小さな API client から始めます。data-fetching framework は、cache invalidation が実際に複雑になった場合のみ追加判断します。
 
-## 3.1 ローカル開発
+## 4. ローカル開発
 
 ```bash
 pnpm install
@@ -100,11 +104,13 @@ pnpm db:migrate:local      # local D1 (.wrangler/state) に migration を適用
 pnpm dev                   # http://localhost:5173
 ```
 
-`pnpm dev` は Access を模擬し、`DEV_OWNER_EMAIL`（既定 `owner@localhost.test`）の owner として API を呼べます（[D-016](decisions.md)）。`APP_ORIGIN` は `http://localhost:5173` 固定です。`127.0.0.1` で開くと Origin check で書き込みが拒否されます。
+`pnpm dev` は Access を模擬し、`DEV_OWNER_EMAIL`（既定 `owner@localhost.test`）の owner として API を呼べます（[D-016](decisions.md)）。
+
+`APP_ORIGIN` は `http://localhost:5173` 固定です。`127.0.0.1` で開くと Origin check で書き込みが拒否されます。
 
 `pnpm build && pnpm preview` は production build を local で起動します。Access や R2 の設定がないため、private API は `503` を返します。
 
-## 4. shadcn/ui + Base UI qualification
+## 5. shadcn/ui + Base UI の採用条件
 
 feature 実装前に、少なくとも次の component を Preact の production build で確認します。
 
@@ -125,11 +131,12 @@ feature 実装前に、少なくとも次の component を Preact の production
 
 確認結果（2026-09、`@base-ui/react` 1.8 + `preact/compat`）:
 
-- Dialog / Menu: production build・TypeScript は成立。`pnpm dev` 上の Chromium で、Dialog の focus 移動・Escape で閉じる・trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore を確認。`e2e/keyboard.spec.ts` で自動化済み（focus trap、Escape、focus restore、Menu の矢印キー移動、Menu から Dialog を開いて Enter で送信）
+- Dialog / Menu: production build・TypeScript は成立。`e2e/keyboard.spec.ts` で自動化済み（focus trap、Escape、focus restore、Menu の矢印キー移動、Menu から Dialog を開いて Enter で送信）
+  - `pnpm dev` 上の Chromium で確認した内容: Dialog の focus 移動、Escape で閉じる、trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore
 - Select / Combobox: 現状の UI で未使用のため未確認
 - touch interaction: iPhone 13 相当の viewport と touch（Playwright WebKit）で tap 操作を自動化済み（`e2e/mobile.spec.ts`）。実機では未確認
 
-## 5. Hono / OpenAPI
+## 6. Hono / OpenAPI
 
 API route は `@hono/zod-openapi` で schema と route contract を定義します。
 
@@ -143,12 +150,14 @@ API route は `@hono/zod-openapi` で schema と route contract を定義しま�
 
 開発環境では OpenAPI JSON を取得できるようにし、本番では private area に置きます。
 
-## 6. D1 / Migration
+## 7. D1 / migration
 
 D1 schema は `src/worker/db/schema.ts`（Drizzle）で定義します。方針は [D-017](decisions.md) です。
 
 - row 型は `typeof table.$inferSelect` / `$inferInsert` から導出し、手書きしない
-- 単純な CRUD は query builder、複雑な query（相関 subquery、動的 filter、keyset pagination、集計など）は `sql` テンプレートの明示的な SQL で書く。どちらも bind parameter を使う
+- 単純な CRUD は query builder で書く
+- 複雑な query（相関 subquery、動的 filter、keyset pagination、集計など）は `sql` テンプレートの明示的な SQL で書く
+- どちらも bind parameter を使う
 - Repository / DAO / relational query API を作らない。service 関数から `ctx.db` を直接使う
 - schema の property 名は column 名と同じ snake_case にし、ORM 側の値変換を使わない
 
@@ -164,7 +173,7 @@ pnpm db:check && pnpm test
 ```
 
 - migration は forward-only。適用済みの `.sql` を編集・改名しない
-- 適用される正本は commit した `migrations/*.sql`。`schema.ts` との一致は `pnpm db:check`（snapshot との差分）と `tests/integration/migrations.test.ts`（適用後の D1 との差分）で検証する
+- 実際に適用されるのは commit した `migrations/*.sql` で、`schema.ts` と食い違う場合も `.sql` が優先される。一致は `pnpm db:check`（snapshot との差分）と `tests/integration/migrations.test.ts`（適用後の D1 との差分）で検証する
 - 既存データがある前提で migration を書く
 - `drizzle-kit push` / `drizzle-kit migrate` は使わない。適用は `wrangler d1 migrations apply` だけ
 - production migration を通常の test command から実行しない
@@ -173,18 +182,24 @@ pnpm db:check && pnpm test
 
 `0001_initial.sql` は Drizzle 導入前に手書きした migration で、baseline として扱います。
 
-- `0001_initial.sql` は変更しない。production の `d1_migrations` は file 名で記録されているため、改名や再生成もしない
-- `migrations/meta/0001_snapshot.json` は、同じ schema を drizzle-kit で生成した snapshot。journal の entry は `idx: 1` / `tag: 0001_initial`。drizzle-kit は次の番号を「最後の idx + 1」で決めるため、以後の migration は `0002_*` から始まる。この journal を `idx: 0` へ「直さない」
-- `0001_initial.sql` と snapshot の差は次の 2 点だけで、どちらも既存データに影響しない
-  - SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
-  - `uploads.asset_id` の UNIQUE は、SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
-- この差が原因で生成 SQL が誤っていれば CI で分かる。test の setup は空の D1 へ `0001` から順に全 migration を適用し、drift test が `schema.ts` と比較する。生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通る
-- rehearsal が保証するのは DDL として適用できることだけ。table は空なので、既存データの保存（table 作り直し時の列の対応、値の変換、NOT NULL や CHECK の強化）は検証しない。データを変換する migration を初めて書くときは、その migration 用の fixture を追加する
-- 例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗する。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通る
+`0001_initial.sql` は変更しません。production の `d1_migrations` は file 名で記録されているため、改名や再生成もしません。
+
+`migrations/meta/0001_snapshot.json` は、同じ schema を drizzle-kit で生成した snapshot です。journal の entry は `idx: 1` / `tag: 0001_initial` です。drizzle-kit は次の番号を「最後の idx + 1」で決めるため、以後の migration は `0002_*` から始まります。この journal を `idx: 0` へ「直さない」でください。
+
+`0001_initial.sql` と snapshot の差は次の 2 点だけで、どちらも既存データに影響しません。
+
+- SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
+- `uploads.asset_id` の UNIQUE は、SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
+
+この差が原因で生成 SQL が誤っていれば CI で分かります。test の setup は空の D1 へ `0001` から順に全 migration を適用し、drift test が `schema.ts` と比較します。生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通ります。
+
+rehearsal が保証するのは、DDL として適用できることだけです。table は空なので、既存データの保存（table 作り直し時の列の対応、値の変換、NOT NULL や CHECK の強化）は検証しません。データを変換する migration を初めて書くときは、その migration 用の fixture を追加します。
+
+例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗します。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通ります。
 
 `wrangler` と `readD1Migrations` は `.sql` だけを読むため、`migrations/meta/` は適用対象になりません。
 
-## 7. Test strategy
+## 8. テスト方針
 
 ### Unit
 
@@ -222,7 +237,7 @@ auth
 
 ### Browser E2E（Playwright）
 
-workerd の test では見えない、Browser 固有の部分だけを対象にします。server の挙動（認可、finalize の検査、share の検証など）は integration test が正本で、Browser E2E では再検査しません。
+workerd の test では見えない、Browser 固有の部分だけを対象にします。Server の挙動（認可、finalize の検査、share の検証など）は integration test が固定します。Browser E2E では再検査せず、判断が分かれた場合も integration test を優先します。
 
 | spec | 確認すること | project |
 | --- | --- | --- |
@@ -237,13 +252,19 @@ pnpm exec playwright install --only-shell chromium webkit   # 初回のみ
 pnpm test:e2e
 ```
 
-`pnpm dev`（Access と presigned URL の模擬、[D-016](decisions.md)）を `.wrangler/e2e` の使い捨て local D1 / R2 で起動します（`EDGEPHOTOS_STATE_DIR`）。普段の `pnpm dev` の library には触れません。port 5173 を使うため、`pnpm dev` を止めてから実行します。写真は Browser の canvas で毎回ランダムに描くので、fixture を commit しません。
+`pnpm dev`（Access と presigned URL の模擬、[D-016](decisions.md)）を `.wrangler/e2e` の使い捨て local D1 / R2 で起動します（`EDGEPHOTOS_STATE_DIR`）。普段の `pnpm dev` の library には触れません。
+
+port 5173 を使うため、`pnpm dev` を止めてから実行します。写真は Browser の canvas で毎回ランダムに描くので、fixture を commit しません。
 
 spec を増やすのは、Browser でしか起きない不具合を直したときだけにします。
 
 ### Scale benchmark
 
-`pnpm bench` は `tests/bench/scale.bench.ts` を実行し、合成データで主要 API の時間、SQL の query plan と rows_read、storage audit の全走査、backup / restore の request 数を表示します。assert はしません。結果と判断は [benchmarks.md](benchmarks.md) に記録します。
+`pnpm bench` は `tests/bench/scale.bench.ts` を実行します。assert はしません。
+
+合成データで表示するのは、主要 API の時間、SQL の query plan と rows_read、storage audit の全走査、backup / restore の request 数です。
+
+結果と判断は [benchmarks.md](benchmarks.md) に記録します。
 
 ```bash
 pnpm bench                                                        # 1,000 / 10,000 件
@@ -260,9 +281,11 @@ pnpm cli:check   # CLI が Node の型除去で起動するか
 pnpm check       # typecheck + lint + db:check + cli:check + test + build
 ```
 
-integration test は `createApp()` に test 用の Access 鍵と local blob signer を注入し、実際の migration を適用した D1 と R2 binding を使います。D1 / R2 の障害は binding を Proxy で包んで再現します。
+integration test は `createApp()` に test 用の Access 鍵と local blob signer を注入します。D1 と R2 binding は、実際の migration を適用したものを使います。
 
-## 8. Test fixtures
+D1 / R2 の障害は、binding を Proxy で包んで再現します。
+
+## 9. テスト用 fixture
 
 実人物・実位置情報を使いません。
 
@@ -280,11 +303,17 @@ integration test は `createApp()` に test 用の Access 鍵と local blob sign
 
 original の期待 SHA-256 を fixture metadata として固定します。
 
-現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。Browser E2E は canvas で描いた JPEG を使います。orientation、透明 PNG、WebP、壊れた画像などの decode 差は、下記の一度きりの検証で確認済みで、常設の fixture にはしていません。
+現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。Browser E2E は canvas で描いた JPEG を使います。
 
-Browser での取り込み検証（decode、orientation、derivative、memory）は、公開されている実機サンプルと合成画像を使い、scratch 環境で一度きりの Playwright script として実施しました。fixture も script も commit していません。結果は [verification.md](verification.md) に、memory の数値は [benchmarks.md](benchmarks.md) に記録しています。Browser 差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（`tests/unit/web-image.test.ts`。WebKit が実際に出力した APP1 / APP13 の byte 列を含みます）。
+orientation、透明 PNG、WebP、壊れた画像などの decode 差は、下記の一度きりの検証で確認済みで、常設の fixture にはしていません。
 
-## 9. 環境分離
+Browser での取り込み検証（decode、orientation、derivative、memory）は、公開されている実機サンプルと合成画像を使いました。scratch 環境で一度きりの Playwright script として実施し、fixture も script も commit していません。
+
+結果は [verification.md](verification.md) に、memory の数値は [benchmarks.md](benchmarks.md) にあります。
+
+Browser 差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（`tests/unit/web-image.test.ts`。WebKit が実際に出力した APP1 / APP13 の byte 列を含みます）。
+
+## 10. 環境分離
 
 最低限次を分離します。
 
@@ -296,7 +325,7 @@ D1、R2、Access application、signing credential を production と共有しま
 
 ローカル用の認証 bypass を production build に混ぜません。
 
-## 10. CI
+## 11. CI
 
 最初は次だけで十分です。
 
@@ -307,14 +336,34 @@ D1、R2、Access application、signing credential を production と共有しま
 - production build
 - Browser E2E（別 job。Chromium と WebKit）
 
-GitHub Actions は commit SHA で固定し、Dependabot（`.github/dependabot.yml`）が npm と Actions の更新 PR を週 1 回作ります。
+GitHub Actions は commit SHA で固定します。Dependabot（`.github/dependabot.yml`）が npm と Actions の更新 PR を週 1 回作ります。
 
 Remote の破壊操作を通常の test command に含めません。CI は Cloudflare の credential を持ちません。
 
-## 11. Documentation rule
+## 12. ドキュメントの規約
 
-ドキュメント本文は日本語、path と code identifier は英語を基本とします。
+### どこに何を書くか
 
-API の詳細は OpenAPI、DB の詳細は migration（と一致を検証した `src/worker/db/schema.ts`）、動作の細部は test を正本とします。
+文書と実装が食い違う場合の優先順位を決めておきます。API 契約は `@hono/zod-openapi` の route schema、DB schema は適用済みの `migrations/*.sql`、`AppPrincipal` の具体的な型は実装の型定義、動作の細部は test を優先します。
 
 実環境や Browser で確かめた結果は [verification.md](verification.md)、性能と memory の数値は [benchmarks.md](benchmarks.md) に書きます。operations / decisions / roadmap / README には検証の詳しい経過や測定値を重複して書かず、状態や判断に必要な短い要約とリンクだけを置きます。
+
+完了した実装段階の記録は [changelog.md](changelog.md)、これからの作業は [roadmap.md](roadmap.md) に書きます。
+
+### 文章
+
+- 本文は日本語、path と code identifier は英語
+- 1 文 1 主張。長い文は分割を検討する。目安は 100 字だが、条件と結果を 1 文でつないだ方が明確ならその限りではない
+- 括弧の中に句点を 2 つ以上入れない。入るなら本文へ出す
+- 箇条書きの 1 項目は 1〜2 文。3 文以上になるなら小見出しと段落にする
+- 節番号は `## N. 見出し` の 1 段だけ。`## N.1` を作らず、独立した節へ上げる
+
+### 表記
+
+- 見出しは日本語を基本とする。固有名詞はラテン文字のまま（例: `## 7. D1 / migration`）
+- ただし roadmap の段階名（Foundation、Post-merge verification、Release polish など）は原綴りのままとする。他文書から名前で参照する固有の呼称のため
+- 層・実行主体を指す語は、原則として大文字で始める: Client、Server、Browser、Worker、Native client。既存の文に合わせる程度でよく、統一のためだけの変更は作らない
+- 製品名・固有名詞は原綴り。Cloudflare、Access、R2、D1、Preact、Hono、Vite、Drizzle、Miniflare、Playwright、Chromium、WebKit、Safari など
+- それ以外の一般名詞は小文字: upload、share、asset、original、derivative、thumbnail、preview、manifest、token、bucket
+- 具体物としての server は小文字（`vite dev` の dev server、auth server）
+- 画面に出る文言は「」でくくる。code identifier と command は `` ` `` でくくる
