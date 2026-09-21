@@ -10,7 +10,7 @@ import { originalTypeOf } from '../../src/web/lib/original-type'
 import { putOutcome } from '../../src/web/lib/storage-put'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
 import { scanJpegForMetadata, sniffImageType } from '../../src/worker/storage/inspect'
-import { syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
+import { heicFixture, syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
 
 describe('capture date for grouping', () => {
   it('uses the camera wall-clock digits whether or not takenAt has an offset', () => {
@@ -254,5 +254,14 @@ describe('resuming unfinished deletes', () => {
       }),
     ).rejects.toBe(failure)
     expect(called).toEqual(['a', 'b'])
+  })
+})
+
+describe('HEIC fixture', () => {
+  it('is a real, small HEIC still', () => {
+    const bytes = heicFixture()
+    expect(bytes.byteLength).toBeLessThan(2048)
+    expect(String.fromCharCode(...bytes.subarray(4, 8))).toBe('ftyp')
+    expect(String.fromCharCode(...bytes.subarray(8, 12))).toBe('heic')
   })
 })
