@@ -402,7 +402,9 @@ GitHub Actions `ubuntu-latest`、`pnpm test`。run 35576409905 の 2 回の atte
 
 CI と local の比は test ごとに 2.8〜12.8 倍と一定しません。
 
-`storage.test.ts` の `beforeEach(resetStorage)` も同じ位置にあります。8001 key を作る test の直後の 1 回だけ 768ms（他の回は 0〜5ms）で、既定の `hookTimeout` 10 秒に対する余裕は 3 倍ほどです。
+`storage.test.ts` の `beforeEach(resetStorage)` も同じ位置にあります。8001 key を作る test の直後の 1 回だけ local で 768ms かかります（他の回は 0〜5ms）。
+
+CI では測っていません。同じ file の test で観測した CI / local 比は 5.0 倍（5765ms → 28880ms）です。これを掛けると約 3.8 秒、既定の `hookTimeout` 10 秒に対する余裕は 2.6 倍という見積もりになります。
 
 ### 失敗した test の中身
 
