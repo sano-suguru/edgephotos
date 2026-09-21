@@ -237,7 +237,7 @@ auth
 
 ### Browser E2E（Playwright）
 
-workerd の test では見えない、Browser 固有の部分だけを対象にします。Server の挙動（認可、finalize の検査、share の検証など）は integration test が固定し、Browser E2E では再検査しません。挙動の判断が分かれた場合は integration test を優先します。
+workerd の test では見えない、Browser 固有の部分だけを対象にします。Server の挙動（認可、finalize の検査、share の検証など）は integration test が固定します。Browser E2E では再検査せず、判断が分かれた場合も integration test を優先します。
 
 | spec | 確認すること | project |
 | --- | --- | --- |
