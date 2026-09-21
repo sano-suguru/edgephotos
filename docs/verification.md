@@ -419,6 +419,18 @@ test file 単独では 725ms、suite 全体では 960〜1085ms です。`storage
 
 `vitest.config.ts` に `testTimeout` / `hookTimeout` = 120 秒を置き、`storage.test.ts` の個別指定を消しました。test の中身と assertion は変えていません。
 
+run 35581112151 を 5 回続けて実行し、すべて緑でした。
+
+| attempt | tests 合計 | storage audit の 8001 key test | interrupted restore |
+| --- | --- | --- | --- |
+| 1 | 66.54s | 25014ms | 5975ms |
+| 2 | 28.94s | 13648ms | 2058ms |
+| 3 | 29.73s | 13400ms | 2136ms |
+| 4 | 26.64s | 12150ms | 1921ms |
+| 5 | 30.33s | 14654ms | 2379ms |
+
+attempt 1 は遅い runner に当たり、interrupted restore が 5975ms かかりました。変更前の 5000ms なら、この attempt は落ちています。最も重い test は 25014ms で、120 秒に対して 4.8 倍の余裕があります。
+
 ## 未検証
 
 ### iPhone / Android 実機での取り込み
