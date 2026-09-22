@@ -55,6 +55,15 @@ export type BatchDeps = {
 
 const NOT_ADDED = 'ライブラリには追加されていません（選んだファイルはそのままです）。'
 
+// The server refused this screen, not this photo: an identity outside the household, an origin that is not
+// the configured one, a deployment whose settings are incomplete. None of it depends on the file, and none
+// of it changes while this page is open, so the same request gets the same answer.
+const REFUSED_SCREEN: Record<string, string> = {
+  FORBIDDEN: 'この操作を行う権限がありません',
+  ORIGIN_NOT_ALLOWED: 'このアドレスからは写真を追加できません',
+  SERVER_MISCONFIGURED: 'サーバーの設定が完了していません',
+}
+
 // How many rows the summary keeps. Running rows are never dropped (upload-list.ts).
 const DISPLAY_LIMIT = 200
 
@@ -169,6 +178,8 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
 function settledFailure(err: unknown): string | null {
   if (err instanceof FileTooLargeError || err instanceof UnsupportedFileError) return unsupportedFileMessage(err)
   if (err instanceof ApiRequestError) {
+    const refused = REFUSED_SCREEN[err.code]
+    if (refused) return `${refused}。${NOT_ADDED}`
     // The request itself is out of range (a size past the limit, a value the schema refuses). The same
     // file builds the same request.
     if (err.code === 'VALIDATION_FAILED') return `この写真は登録できません。${NOT_ADDED}`
@@ -187,6 +198,11 @@ function failureMessage(err: unknown, stage: UploadState): string {
   }
   if (err instanceof ApiRequestError && err.code === 'UPLOAD_OBJECT_INVALID') {
     return `転送した内容をサーバーで確認できなかったため、登録しませんでした。${NOT_ADDED}再試行すると最初から送り直します。`
+  }
+  if (err instanceof ApiRequestError && err.code === 'UNAUTHENTICATED') {
+    // The code also covers a key fetch that simply failed, so the same request may pass next time.
+    // Reloading this page would throw the selection away; these rows can still be finished without it.
+    return `ログインを確認できませんでした。${NOT_ADDED}別のタブで開き直してログインしてから再試行してください。`
   }
   if (stage === 'finalizing') {
     return `転送は終わりましたが、登録を確認できませんでした。${userMessage(err)} 再試行すると、転送をやり直さずに登録します。`
