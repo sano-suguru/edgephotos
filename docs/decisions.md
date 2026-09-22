@@ -839,6 +839,10 @@ full text search、AI / semantic search、tag、場所、uploader での絞り�
 
 **実行中は選択を凍結する。** 実行は開始時点の写真に対して行われます。その間に選択を変えられると、一度も送っていない写真が選択から消えたり、読者が外した写真が結果の書き戻しで戻ってきたりします。50 枚で 1〜2 秒なので、途中で選択を編集できる価値より、この race を無くす価値が上回ります。background job にはしません。
 
+凍結は入口ごとに掛けます。checkbox と bar の各操作に加え、選択を抜ける Escape も実行中は効きません。control だけを disabled にすると keyboard から同じ race に入れます。
+
+**album の一覧は選択を始めるたびに読み直す。** `ALBUM_NOT_FOUND` のときは選択を残して「別の album を選ぶ」で回復させるので、その menu が前回の一覧のままでは噛み合いません。cache を無効化する仕組みは作らず、選択の開始を読み直す契機にします。
+
 **selection は view ごとの一時 state とする。** URL にも IndexedDB にも書きません。grid は view ごとに作り直されるので、view を移ると選択は消えます。view をまたぐ manager は作りません。年月の jump も選択を解除します（別の場所へ移動する操作なので）。pagination で page を足したときは保持します。
 
 却下した案:

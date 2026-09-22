@@ -139,16 +139,20 @@ export function AssetGrid(props: AssetGridProps) {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return
       if (document.querySelector('[role="dialog"], [role="menu"]')) return
+      // The same freeze the controls have: leaving during a run would end it with a selection nobody chose.
+      if (busy.peek()) return
       exitSelection()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
-  // The albums a selection can be added to. Read every time selection mode starts, so a list that could
-  // not be read is asked for again rather than staying empty for the rest of the visit.
+  // The albums a selection can be added to, read again every time selection mode starts. An album another
+  // member deleted meanwhile is exactly what `ALBUM_NOT_FOUND` asks the reader to pick their way out of,
+  // so the menu they pick from must not be the one from the last visit. The list is not read here, so
+  // storing it does not start this again.
   useSignalEffect(() => {
-    if (!picked.active.value || albums.value.length > 0) return
+    if (!picked.active.value) return
     api
       .listAlbums()
       .then((r) => {

@@ -226,10 +226,20 @@ type Sent = {
   hold: boolean
   // Set to answer every album add as if the album had been deleted meanwhile.
   albumGone: boolean
+  // How many times the client asked for the album list.
+  albumReads: number
 }
 
 async function serveActions(page: Page, failFor: string | null = null): Promise<Sent> {
-  const sent: Sent = { album: [], favorite: [], trash: [], failing: failFor, hold: false, albumGone: false }
+  const sent: Sent = {
+    album: [],
+    favorite: [],
+    trash: [],
+    failing: failFor,
+    hold: false,
+    albumGone: false,
+    albumReads: 0,
+  }
   const held = async () => {
     while (sent.hold) await new Promise((resolve) => setTimeout(resolve, 50))
   }
@@ -239,6 +249,7 @@ async function serveActions(page: Page, failFor: string | null = null): Promise<
   await page.route('**/api/v1/albums**', async (route) => {
     const url = new URL(route.request().url())
     if (route.request().method() === 'GET' && url.pathname === '/api/v1/albums') {
+      sent.albumReads++
       return route.fulfill({ json: { items: [ALBUM] } })
     }
     const member = /^\/api\/v1\/albums\/[^/]+\/assets\/(.+)$/.exec(url.pathname)
@@ -426,12 +437,27 @@ test.describe('selecting several photos', () => {
     await expect(toolbar.getByRole('button', { name: '全解除' })).toBeDisabled()
     await expect(toolbar.getByRole('button', { name: 'ゴミ箱へ移動' })).toBeDisabled()
     await expect(page.getByRole('checkbox').first()).toBeDisabled()
+    // Escape is frozen too: the keyboard must not get past what the controls refuse.
+    await page.keyboard.press('Escape')
+    await expect(toolbar).toBeVisible()
+    await expect(page.getByText('2枚を選択中')).toBeVisible()
 
     sent.hold = false
     await expect(page.getByText('2枚をお気に入りに追加しました')).toBeVisible()
     // Exactly the two photos it started with, however many times the screen was poked meanwhile.
     expect(sent.favorite).toHaveLength(2)
     await expect(toolbar).toBeHidden()
+  })
+
+  test('reads the albums again every time the selection starts', async ({ page }) => {
+    const sent = await serveActions(page)
+    await openApp(page)
+    await startSelecting(page)
+    await expect.poll(() => sent.albumReads).toBe(1)
+    await page.getByRole('button', { name: '選択を終了' }).click()
+    await startSelecting(page)
+    // An album another member deleted meanwhile must not still be in the menu.
+    await expect.poll(() => sent.albumReads).toBe(2)
   })
 
   test('offers no retry when the album is gone, and keeps the photos picked for another one', async ({ page }) => {
