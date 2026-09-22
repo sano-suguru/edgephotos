@@ -7,6 +7,7 @@ import type {
   Album,
   AlbumListItem,
   Asset,
+  AssetMonth,
   AssetPage,
   DerivativeRepair,
   ExportManifest,
@@ -44,11 +45,19 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (res.status === 204 ? undefined : await res.json()) as T
 }
 
-type ListQuery = { cursor?: string | null; favorite?: boolean; trashed?: boolean; limit?: number }
+type ListQuery = {
+  cursor?: string | null
+  // 'newer' reads the page above the cursor (only after a jump into a month).
+  direction?: 'older' | 'newer'
+  favorite?: boolean
+  trashed?: boolean
+  limit?: number
+}
 
 function qs(q: ListQuery): string {
   const p = new URLSearchParams()
   if (q.cursor) p.set('cursor', q.cursor)
+  if (q.direction) p.set('direction', q.direction)
   if (q.favorite !== undefined) p.set('favorite', String(q.favorite))
   if (q.trashed !== undefined) p.set('trashed', String(q.trashed))
   p.set('limit', String(q.limit ?? 60))
@@ -58,6 +67,8 @@ function qs(q: ListQuery): string {
 export const api = {
   me: () => request<{ email: string }>('GET', '/api/v1/me'),
   listAssets: (q: ListQuery = {}) => request<AssetPage>('GET', `/api/v1/assets${qs(q)}`),
+  // Months that have a photo, newest first. One row per month, so this does not grow with the library.
+  listMonths: () => request<{ items: AssetMonth[] }>('GET', '/api/v1/assets/months'),
   getAsset: (id: string) => request<Asset>('GET', `/api/v1/assets/${id}`),
   setFavorite: (id: string, isFavorite: boolean) => request<Asset>('PATCH', `/api/v1/assets/${id}`, { isFavorite }),
   originalUrl: (id: string) => request<SignedUrl>('GET', `/api/v1/assets/${id}/original`),

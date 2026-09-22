@@ -10,13 +10,17 @@ import { captureParts, formatMonth, monthKey } from '../../lib/dates'
 import { userMessage } from '../../lib/errors'
 import { libraryVersion } from '../uploads/upload'
 import { AssetViewer, type ViewerRemoval } from './AssetViewer'
-import { createPageList } from './page-list'
+import { invalidateMonths } from './months'
+import { createPageList, type PageDirection } from './page-list'
 
 export type AssetGridProps = {
-  load: (cursor: string | null) => Promise<AssetPage>
+  load: (cursor: string | null, direction: PageDirection) => Promise<AssetPage>
   empty: ComponentChildren
   mode?: 'library' | 'trash' | 'album'
   albumId?: string
+  // Where the list starts: null for the newest photo, a month's cursor after a jump, 'pending' while that
+  // cursor is still being fetched (docs/decisions.md D-031).
+  start?: string | null | 'pending'
 }
 
 type Group = { key: string; label: string; items: { asset: AssetSummary; index: number }[] }
@@ -52,6 +56,8 @@ const UNDO: Partial<
 
 export function AssetGrid(props: AssetGridProps) {
   const selectedId = useSignal<string | null>(null)
+  // A prop, mirrored into a signal so the effect below reloads when the reader picks another month.
+  const start = useSignal(props.start ?? null)
   const version = useSignal(0)
   // When the first loaded page arrived (performance.now(), so a wrong device clock does not matter).
   const loadedAt = useRef(0)
@@ -66,24 +72,40 @@ export function AssetGrid(props: AssetGridProps) {
   loadRef.current = props.load
   const list = useRef<ReturnType<typeof createPageList<AssetSummary>>>()
   list.current ??= createPageList<AssetSummary>(
-    (c) => loadRef.current(c),
+    (c, direction) => loadRef.current(c, direction),
     userMessage,
     () => {
       loadedAt.current = performance.now()
     },
   )
-  const { items, cursor, loading, loaded, error, loadPage } = list.current
+  const { items, cursor, topCursor, loading, loadingNewer, loaded, error, loadPage, loadNewer } = list.current
+
+  useEffect(() => {
+    start.value = props.start ?? null
+  }, [props.start])
 
   useSignalEffect(() => {
-    // Refetch when uploads finish or when the parent asks for it.
+    // Refetch when uploads finish, when the parent asks for it, or when another month was chosen.
     void libraryVersion.value
     void version.value
+    const from = start.value
+    // The month's cursor is still on its way; the skeleton stays until it arrives.
+    if (from === 'pending') return
     if (selectedId.peek()) {
       reloadPending.current = true
       return
     }
-    void loadPage(true)
+    void loadPage(true, from)
   })
+
+  // Reading up the timeline puts the newer photos at the top of the list, and the page moves to them: the
+  // button asks for those photos, so it shows them. Keeping the reader's position instead would need the
+  // height of what was added, and the sections above are `content-visibility: auto`, so their height is a
+  // guess until they are rendered.
+  async function loadNewerPage() {
+    await loadNewer()
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }
 
   // Load the next page before the user reaches the end of the grid. Observing again after every page makes
   // the observer report the current state, so a short page that leaves the sentinel in view loads the next one.
@@ -105,23 +127,17 @@ export function AssetGrid(props: AssetGridProps) {
   async function refreshUrls() {
     if (refreshing.current || performance.now() - loadedAt.current < 60_000) return
     refreshing.current = true
-    // A reload that starts meanwhile has newer data; do not overwrite it with this refresh.
-    const current = list.current?.snapshot() ?? (() => false)
     try {
-      const fresh: AssetSummary[] = []
-      let next: string | null = null
-      do {
-        const page = await loadRef.current(next)
-        fresh.push(...page.items)
-        next = page.nextCursor
-      } while (next && fresh.length < items.value.length)
-      if (!current()) return
+      // Reads exactly the pages this list was built from, so a list that starts at a month stays on it.
+      const fresh = await list.current?.reloadRange()
+      if (!fresh) return
       const previous = new Map(items.value.map((a) => [a.id, a]))
-      items.value = fresh.map((a) => {
+      items.value = fresh.items.map((a) => {
         const old = previous.get(a.id)
         return old && shown.current.has(a.id) ? { ...a, thumbnailUrl: old.thumbnailUrl } : a
       })
-      cursor.value = next
+      cursor.value = fresh.nextCursor
+      topCursor.value = fresh.topCursor
       loadedAt.current = performance.now()
     } catch {
       // Leave the broken images; the next image error retries.
@@ -159,6 +175,9 @@ export function AssetGrid(props: AssetGridProps) {
     if (neighbour) selectedId.value = neighbour.id
     else closeViewer()
 
+    // The month list counts what the timeline shows, so it changes with this photo.
+    invalidateMonths()
+
     const undo = UNDO[how]
     if (!undo) {
       showToast('完全に削除しました')
@@ -181,6 +200,7 @@ export function AssetGrid(props: AssetGridProps) {
             next.splice(Math.min(index, next.length), 0, asset)
             items.value = next
           }
+          invalidateMonths()
           // Other views (timeline, trash) load again when they are opened.
           showToast('元に戻しました')
         },
@@ -202,7 +222,7 @@ export function AssetGrid(props: AssetGridProps) {
     )
   }
 
-  if (!loaded.value) {
+  if (!loaded.value || props.start === 'pending') {
     return (
       <div aria-busy="true">
         <span class="sr-only">読み込み中…</span>
@@ -224,9 +244,21 @@ export function AssetGrid(props: AssetGridProps) {
 
   return (
     <div>
+      {topCursor.value && (
+        <div class="flex min-h-12 flex-col items-center justify-center gap-2 pb-4 text-sm">
+          {error.value?.kind === 'newer' && <p class="text-destructive">{error.value.message}</p>}
+          <Button variant="secondary" disabled={loadingNewer.value} onClick={() => void loadNewerPage()}>
+            {loadingNewer.value ? '読み込み中…' : error.value?.kind === 'newer' ? '再試行' : 'これより新しい写真'}
+          </Button>
+        </div>
+      )}
       {groups.value.map((group) => (
         <section key={`${group.key}-${group.items[0].index}`} class="offscreen-skip mb-8" aria-label={group.label}>
-          <h2 class="mb-3 text-lg font-semibold tracking-tight">{group.label}</h2>
+          {/* Sticky, so the month being looked at stays named while the grid scrolls. The header is sticky
+              only from md up; below that it scrolls away and the heading takes the top edge. */}
+          <h2 class="sticky top-0 z-10 mb-3 bg-background py-1 text-lg font-semibold tracking-tight md:top-14">
+            {group.label}
+          </h2>
           <ul class="grid grid-cols-3 gap-0.5 sm:grid-cols-4 sm:gap-1 md:grid-cols-6 lg:grid-cols-8">
             {group.items.map(({ asset }) => (
               <li key={asset.id} class="group relative aspect-square overflow-hidden bg-muted">
@@ -270,7 +302,7 @@ export function AssetGrid(props: AssetGridProps) {
         {error.value?.kind === 'more' && <p class="text-destructive">{error.value.message}</p>}
         {cursor.value && (
           <Button variant="secondary" disabled={loading.value} onClick={() => loadPage(false)}>
-            {loading.value ? '読み込み中…' : error.value ? '再試行' : 'さらに読み込む'}
+            {loading.value ? '読み込み中…' : error.value?.kind === 'more' ? '再試行' : 'さらに読み込む'}
           </Button>
         )}
       </div>

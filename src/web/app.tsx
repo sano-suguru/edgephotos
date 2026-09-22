@@ -7,9 +7,12 @@ import { AlbumPage } from './features/albums/AlbumPage'
 import { AlbumsPage } from './features/albums/AlbumsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { AssetGrid } from './features/timeline/AssetGrid'
+import { MonthNav } from './features/timeline/MonthNav'
+import { startFor } from './features/timeline/month-list'
+import { months, monthsError } from './features/timeline/months'
 import { UploadButton, UploadList } from './features/uploads/UploadPanel'
 import { ApiRequestError, api } from './lib/api/client'
-import { navigate, path, route } from './state/router'
+import { navigate, path, route, timelineMonth } from './state/router'
 
 // Below Tailwind's md breakpoint the nav is the bottom tab bar, where the trash has no tab of its own.
 const tabBarQuery = window.matchMedia('(width < 48rem)')
@@ -80,8 +83,12 @@ function Page() {
       return (
         <>
           <h1 class="sr-only">タイムライン</h1>
+          <div class="mb-4 flex items-center gap-2">
+            <MonthNav />
+          </div>
           <AssetGrid
             key="timeline"
+            start={startFor(months.value, timelineMonth.value, monthsError.value !== null)}
             empty={
               <>
                 <Images class="size-8 text-muted-foreground/50" />
@@ -89,7 +96,7 @@ function Page() {
                 <p>「アップロード」から写真を選ぶと、撮影した月ごとにここへ並びます。</p>
               </>
             }
-            load={(cursor) => api.listAssets({ cursor })}
+            load={(cursor, direction) => api.listAssets({ cursor, direction })}
           />
         </>
       )
@@ -106,7 +113,7 @@ function Page() {
                 <p>写真を開いて ☆ を押すと、ここに集まります。</p>
               </>
             }
-            load={(cursor) => api.listAssets({ cursor, favorite: true })}
+            load={(cursor, direction) => api.listAssets({ cursor, direction, favorite: true })}
           />
         </>
       )
@@ -127,7 +134,7 @@ function Page() {
             key="trash"
             mode="trash"
             empty={<p>ゴミ箱は空です。</p>}
-            load={(cursor) => api.listAssets({ cursor, trashed: true })}
+            load={(cursor, direction) => api.listAssets({ cursor, direction, trashed: true })}
           />
         </>
       )

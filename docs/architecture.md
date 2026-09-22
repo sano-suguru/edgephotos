@@ -154,7 +154,8 @@ Web も将来の Native client も、同じ API を使います。
 GET    /api/v1/me
 POST   /api/v1/uploads                          reserve
 POST   /api/v1/uploads/{uploadId}/finalize      idempotent
-GET    /api/v1/assets?cursor&limit&favorite&trashed
+GET    /api/v1/assets?cursor&limit&direction&favorite&trashed
+GET    /api/v1/assets/months                    写真のある年月と件数（D-031）
 GET    /api/v1/assets/{assetId}
 PATCH  /api/v1/assets/{assetId}                 { isFavorite }
 GET    /api/v1/assets/{assetId}/original        short-lived URL (household member only)
@@ -180,6 +181,16 @@ GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
 一覧（`GET /api/v1/assets`、album の assets）は thumbnail の URL だけを返します。preview の URL は個別の asset（`GET /api/v1/assets/{assetId}` など）で返します（[D-022](decisions.md)）。
 
 album 一覧は `covers=true` のときだけ、各 album の最新の写真の thumbnail URL を返します。album ごとの request を 1 回にまとめるためです。
+
+### timeline の pagination
+
+`GET /api/v1/assets` は `(sort_at, id)` の keyset pagination です。1 ページの response は `nextCursor`（古い方向）と `prevCursor`（新しい方向）を持ちます。`direction=newer` は cursor より新しい側を読み、items は常に新しい順です。cursor なしの `direction=newer` は 400 です。先頭より新しい写真は無いためです。
+
+cursor が null のときだけ「その方向に写真が無い」を意味します。request が来た側の cursor は、その先を読んでいないので null になりません。渡すと空の page が返ることがあります。
+
+`GET /api/v1/assets/months` は、写真のある年月を新しい順に 1 行ずつ返します。各行は件数と、その月の最も新しい写真から page を始める cursor を持ちます。写真が 0 枚の月は行そのものがありません。response の大きさは library の枚数ではなく、写真のある月数で決まります（[D-031](decisions.md)）。
+
+この cursor は位置ではなく写真を指し、その写真自身が page の先頭に入ります。月は撮影時刻の digits、並び順は UTC の瞬間なので、違う月の写真が同じ瞬間を持てます。位置で指すと、選んだ月の外から page が始まることがあります。最も新しい月の cursor は null です。その月は timeline の先頭から始まります。
 
 ## 5. Upload の手順
 
@@ -263,6 +274,8 @@ Web 版が保存する original は「Browser から受け取った byte 列」�
 - timeline の並び順（`sort_at`）だけは、offset の無い日時を UTC とみなして計算します。そのため、日本時間で動く offset を書かないカメラの写真は、同じ瞬間に offset 付きで撮った写真より 9 時間新しいものとして並びます
 - EXIF は original に残っているため、将来 GPS や端末の設定から offset を推定する場合も、保存済みの original から計算し直せます
 - `takenAt` は backup / restore でも文字列のまま保持されます
+
+年月 navigation（[D-031](decisions.md)）の月は、`takenAt` があればその先頭の digits、無ければ `createdAt`（UTC）です。`takenAt` のある写真は、grid の見出しと必ず同じ月になります。`takenAt` の無い写真だけは、navigation が UTC の月、見出しが閲覧端末の timezone の月なので、月境界の数時間だけ違う月に見えることがあります。並び順の fallback 自体は変えていません。
 
 ### thumbnail
 

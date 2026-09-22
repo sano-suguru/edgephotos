@@ -24,7 +24,7 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /mobile\.spec/ },
     // WebKit is where canvas JPEGs gained EXIF/IPTC segments (D-020); it also stands in for iPhone Safari layout.
-    { name: 'mobile-webkit', use: { ...devices['iPhone 13'] }, testMatch: /(upload|mobile)\.spec/ },
+    { name: 'mobile-webkit', use: { ...devices['iPhone 13'] }, testMatch: /(upload|mobile|timeline)\.spec/ },
   ],
   webServer: {
     command: `rm -rf ${STATE_DIR} && wrangler d1 migrations apply DB --local --persist-to ${STATE_DIR} && vite dev`,

@@ -263,6 +263,17 @@ describe('scale', () => {
       } while (cursor)
       report(size, `timeline walk (${pages} pages x 200)`, `${(performance.now() - walk).toFixed(0)} ms`)
       if (cursor) await measure(size, 'timeline last page (60)', `/api/v1/assets?limit=60&cursor=${cursor}`)
+      // Month navigation: one row per month whatever the library holds, then a jump into the middle month
+      // and the page above it (docs/decisions.md D-031).
+      await measure(size, 'months', '/api/v1/assets/months')
+      const monthList: { items: { month: string; count: number; cursor: string }[] } = await (
+        await req('/api/v1/assets/months')
+      ).json()
+      const mid = monthList.items[Math.floor(monthList.items.length / 2)]
+      report(size, `months (${monthList.items.length} rows)`, `jump into ${mid.month} (${mid.count})`)
+      const jump = encodeURIComponent(mid.cursor)
+      await measure(size, 'timeline jump to month (60)', `/api/v1/assets?limit=60&cursor=${jump}`)
+      await measure(size, 'timeline page above (60)', `/api/v1/assets?limit=60&direction=newer&cursor=${jump}`)
       await measure(size, 'favorites p1 (1%)', '/api/v1/assets?limit=60&favorite=true')
       await measure(size, 'trash p1 (5%)', '/api/v1/assets?limit=60&trashed=true')
       // A filtered list stops only after 61 matches or the end of the index: the page after the last few

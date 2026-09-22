@@ -31,6 +31,11 @@ export function formatMonth(p: Parts): string {
   return `${p.year}年${p.month}月`
 }
 
+// The same label from a month key ('2024-05'), as the API returns them.
+export function formatMonthKey(month: string): string {
+  return `${Number(month.slice(0, 4))}年${Number(month.slice(5))}月`
+}
+
 export function formatDate(p: Parts): string {
   const weekday = WEEKDAYS[new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()]
   return `${p.year}年${p.month}月${p.day}日（${weekday}）`

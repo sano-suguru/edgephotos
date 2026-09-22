@@ -713,3 +713,94 @@ Chrome / Firefox のために libheif（WASM）や Cloudflare Images を入れ�
 - fixture の orientation は EXIF で持っています。実機の HEIC が使う `irot` / `imir` は未確認です
 
 再検討する条件は、cross-browser の HEIC upload が実際の要求になったとき、または native client を作るときです。その場合も、まず original を変えずに derivative を作る経路を探します。
+
+## D-031: 年月の一覧を別の endpoint で返し、jump は既存の cursor で行う
+
+**状態:** 採用（2026-09-22）
+
+数千枚の library では、古い写真へ辿り着くために timeline を延々と読み進めることになります。解くのは「目的の時期へ直接移動できること」だけで、検索基盤は作りません。
+
+### 年月の一覧は 1 行 1 月で返す
+
+`GET /api/v1/assets/months` が、写真のある年月を新しい順に、件数と cursor を付けて返します。
+
+```sql
+SELECT substr(COALESCE(taken_at, created_at), 1, 7) AS month, COUNT(*),
+       MAX(printf('%015d', sort_at + 100000000000000) || id)
+FROM assets WHERE status = 'ready' AND trashed_at IS NULL GROUP BY month ORDER BY month DESC
+```
+
+response の行数は library の枚数ではなく、写真のある月数で決まります。写真が 0 枚の月は行がありません。navigation を作るために全 asset を client へ渡すことはしません。
+
+`MAX` が 1 つの値しか取れないため、月の先頭の写真の `(sort_at, id)` を 1 つの文字列に符号化しています。`sort_at` を負にならない値へずらして固定長へ padding し、後ろに id を繋げます。この順序は timeline の並び順と一致します（詳細は「jump は写真を指す cursor で行う」）。
+
+D1 側は ready かつ trash でない行の走査です。`assets_timeline` は `(sort_at, id)` なので、この GROUP BY には使えません。10,000 件で 19,500 行・5 ms です（[benchmarks.md](benchmarks.md)）。
+
+同じことを window function（`ROW_NUMBER() OVER (PARTITION BY month ...)`）で書く方が素直ですが、20,000 件で rows_read が 39,000 → 96,029、7 → 27 ms になりました。読む行が 2.5 倍になるため採りません。符号化した pair は rows_read を増やさず、20,000 件で 13 ms です。
+
+式 index（`substr(COALESCE(taken_at, created_at), 1, 7)` の部分 index）は測ったうえで入れていません。20,000 件で rows_read は 39,000 → 19,000、13 → 3 ms になりますが、どちらも枚数に比例します。現在の library では index 無しで 1〜5 ms で、対価は migration と、drizzle-kit の snapshot が式 index を持ち続けることです。rows_read が運用上の問題になった時点で入れます。
+
+月ごとの件数を別 table に持って維持する案は採りません。upload・trash・restore・完全削除・restore 済み backup のすべてに整合性の責任が増え、D1 と R2 が単一 transaction ではない前提（[AGENTS.md](../AGENTS.md)）で「count だけずれた library」を作れてしまいます。取り込むのは、実測した month query の rows_read が運用上の問題になったときです。
+
+### 月の定義は「記録した撮影時刻の digits」
+
+`takenAt` があればその先頭 7 文字、無ければ `createdAt`（UTC）です。`sort_at` は使いません。`sort_at` は offset 付きの撮影時刻を UTC の瞬間へ直すので、`2024-05-01T08:00:00+09:00` の写真が 2024-04 になります。grid の見出しは撮影時刻の digits をそのまま出すため（[architecture.md](architecture.md#6-保存する画像の契約)）、`sort_at` を月にすると見出しと navigation が食い違います。
+
+`takenAt` の無い写真だけは、navigation が UTC の月、見出しが閲覧端末の timezone の月です。月境界の数時間で違う月に見えることがあります。並び順の fallback（`sort_at` = upload 時刻）は変えていません。端末の timezone を server に送って月を計算し直す案は、household の 2 人が別の timezone にいると「同じ library に別の年月構成」が見えるため採りません。
+
+### jump は写真を指す cursor で行う
+
+守るべき契約は「選んだ月へ移動したら、最初に出る写真がその月の最も新しい写真である」ことです。
+
+cursor は、その写真自身を指す `(sort_at, id, at)` です。`at` が付いた cursor は、その行を page に含めます（`(sort_at, id) <= (s, i)`）。既存の cursor の比較にそのまま乗るので、cursor の形式は増えても pagination の仕組みは変わりません。「指定月へ行く」ために offset pagination へ変えることもしていません。
+
+はじめは「その月の `MAX(sort_at) + 1` の位置」を cursor にしていました。これは契約を守れません。**月は撮影時刻の digits、並び順は UTC の瞬間なので、違う月の写真が同じ `sort_at` を持てます。**
+
+```text
+2024-05-01T09:00:00+09:00  -> 2024-05-01T00:00:00Z（月は 2024-05）
+2024-04-30T12:00:00-12:00  -> 2024-05-01T00:00:00Z（月は 2024-04）
+```
+
+同じ瞬間なので、最終的な並びは id で決まります。4 月の写真の id が大きければ、5 月を選んだのに 4 月の見出しから始まります。位置を指す cursor では、その瞬間の写真をすべて拾ってしまうためです。写真自身を指す cursor なら、選んだ月の写真が必ず page の先頭になります。上にある 4 月の写真は「これより新しい写真」で読めます。
+
+`at` が効くのは古い方向だけです。上方向ではその写真は下の page に属するため、境界の行を含めません。こうすると、jump した位置から上と下へ読んだ結果が、timeline をちょうど 1 回覆います。
+
+最も新しい月の cursor は null です。その月は timeline の先頭から始まるので、cursor は要りません。上に page があるかのように見せることもなくなります。
+
+### jump の後も上下に読めるようにする
+
+jump した位置より新しい写真を読む方法が必要です。`AssetSummary` は `sort_at` を持たないので、client 側では作れません。`GET /api/v1/assets` に `direction=newer` と `prevCursor` を足しました。`direction=newer` は `(sort_at, id) > cursor` を `ASC` で読み、返す items は常に新しい順です。`assets_timeline` を逆向きに辿るだけで、新しい index は要りません。
+
+cursor が null のときだけ「その方向に写真が無い」を意味します。request が来た側の cursor は、その先を読んでいないので null にしません。渡すと空の page が返ることがあります。これを厳密にするには、page ごとにもう 1 回 query することになるため、意味の方を弱く定義しています。
+
+この弱さが見えるのは、最も新しい写真より上を読もうとしたときだけです。最も新しい月の cursor を null にしたので、年月から入った場合はその状態になりません。
+
+上方向は IntersectionObserver ではなく button です。上へ足すと、読んでいた写真の位置がずれます。押したときだけ動く方が分かりやすく、押した結果として新しい写真が画面に出ます。
+
+読んでいた位置を保つ案は採りません。足した分の高さが要りますが、section は `content-visibility: auto` なので、render されるまで高さは `contain-intrinsic-size` の見積もりです。実測では、押した直後に合わせても、その section が render された時点で約 1,200px ずれました（Chromium）。Safari には `overflow-anchor` も無いため、どちらの方法でも browser 任せにはできません。
+
+### client の状態
+
+`createPageList` は、list を組み立てた request の並び（jump の cursor、下への append、上への prepend）を覚えます。presigned URL の期限切れで読み直すとき、同じ範囲を同じ順で読み直すためです。先頭から読み直すと、jump した list が先頭の月に置き換わります。
+
+年月は `?m=YYYY-MM` として URL に残します。back / forward と reload で同じ月へ戻れます。SPA router も scroll 復元の仕組みも足していません。pixel 単位の位置は戻しません。選んだ月の先頭に戻ります。
+
+写真が 1 枚も無くなった月が URL に残っている場合は、param を落として最新から表示します。エラーにはしません。
+
+### virtualization は入れない
+
+grid は `content-visibility: auto` で画面外の section を render しません。Chromium の実測では、年月から開いた画面は 120 tile・419 node です。末尾まで読み込めば 5,000 tile・15,128 node になりますが、年月へ直接移動できるようになったので、古い写真を見るために末尾まで読む必要はありません（[benchmarks.md](benchmarks.md)）。
+
+この測定の thumbnail は 1x1 の画像なので、decode 済み画像の memory は含みません。実際に画像を表示した値は、10,000 件を末尾まで読み込んだ Chromium の 64 MB / 30,487 node です（[benchmarks.md](benchmarks.md)）。
+
+つまり「全部 scroll すれば枚数の分だけ node を持つ」ことは変わっていません。変えたのは、古い写真を見るために全部 scroll する必要をなくしたことです。実機の memory は [roadmap.md](roadmap.md) の Post-merge verification で見ます。そこで問題が出たときに virtualization を候補に入れます。
+
+### 範囲外
+
+full text search、AI / semantic search、tag、場所、uploader での絞り込み、member ごとの timeline は作りません。viewer の ←/→ は読み込み済みの範囲のままで、jump した先頭より新しい写真へは進みません（grid の button で読んでから開きます）。navigation は library 全体に対するもので、household の 2 人には同じ年月構成が見えます（[D-028](#d-028-許可した複数の-email-が-1-つの-library-を対等に共同利用する)）。
+
+### 再検討する条件
+
+- month query の rows_read または時間が、実測で運用上の問題になったとき（式 index、あるいは維持する集計 table を候補に入れる）
+- 実測した DOM node 数・memory が問題になったとき（virtualization を候補に入れる）
+- `takenAt` の無い写真の月が、実際の利用で分かりにくいと分かったとき
