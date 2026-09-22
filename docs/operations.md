@@ -23,17 +23,13 @@ Free の CPU 上限は 1 request 10 ms です。数千枚以上の library で�
 
 ### R2 の保存容量と料金
 
-R2 Standard は月 10 GB まで無料で、超えた分は $0.015 / GB-month です。インターネットへの egress は無料、Class A operation は月 100 万回、Class B operation は月 1000 万回まで無料です（2026-09 時点）。
+R2 Standard は 10 GB-month / 月まで無料で、超えた分は $0.015 / GB-month です。インターネットへの egress は無料、Class A operation は月 100 万回、Class B operation は月 1000 万回まで無料です（2026-09 時点）。
 
-| R2 使用量 | ストレージ料金の目安 |
-| ---: | ---: |
-| 10 GB | $0 |
-| 100 GB | 約 $1.35 |
-| 500 GB | 約 $7.35 |
-| 1 TB | 約 $14.85 |
-| 2 TB | 約 $29.85 |
+保存量は GB-month で計算します。日ごとの保存量を請求期間で平均した値です。
 
-無料枠の 10 GB を引いた概算です。操作の料金と、他の Cloudflare サービスの料金は含みません。R2 の使用量は写真本体だけでなく derivative も含みます。写真の枚数あたりの容量は測定していないため、枚数からの見積もりは出していません。
+R2 の保存量は写真本体だけでなく derivative も含みます。写真の枚数あたりの容量は測定していないため、枚数からの見積もりは出していません。
+
+Workers の plan 料金を足した目安の表は [README](../README.md#費用) にあります。
 
 最新の料金は [R2](https://developers.cloudflare.com/r2/pricing/) と [Workers](https://developers.cloudflare.com/workers/platform/pricing/) の料金ページを確認してください。
 

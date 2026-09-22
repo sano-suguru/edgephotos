@@ -7,13 +7,11 @@ EdgePhotos は、あなた自身の Cloudflare アカウントへデプロイし
 VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカウントで管理したい人のために作っています。Google フォトの機能を全部そろえることは目指さず、写真の保存・閲覧・整理・共有と、データを自分で export / restore できることに範囲を絞ります。
 
 > [!WARNING]
-> 現在 **alpha** です（[段階の呼び方](docs/roadmap.md#段階の呼び方)）。production 環境へのデプロイと、iPhone / Android 実機からの取り込みは未確認です。
+> 現在 **alpha** です（[段階の呼び方](docs/roadmap.md#段階の呼び方)）。
 >
 > EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export` と `pnpm backup check` を実行してください（[Backup と export](docs/operations.md#9-backup-と-export)）。
 
 ![EdgePhotos のタイムライン画面。撮影月ごとに写真が並ぶ](docs/images/timeline.png)
-
-実 Cloudflare 環境で確認した範囲と、未確認の項目は [検証記録](docs/verification.md) にあります。
 
 ## できること
 
@@ -34,7 +32,7 @@ VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカ�
 - バックグラウンド自動同期
 - 利用者ごとに分かれたライブラリ
 - 任意クラウドへの抽象化
-- 課金
+- EdgePhotos 自体の課金・サブスクリプション
 
 ## セットアップ
 
@@ -49,11 +47,18 @@ VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカ�
 
 EdgePhotos 自体は無料です。Cloudflare の料金は、保存容量と利用量で決まります。
 
-R2 Standard は月 10 GB まで無料で、超えた分は $0.015 / GB-month です（2026-09 時点）。目安は 100 GB で約 $1.35/月、500 GB で約 $7.35/月、1 TB で約 $14.85/月です。R2 の使用量には、写真本体に加えて表示用の derivative も含まれます。
+| 月平均の R2 保存量 | Workers Free | Workers Paid |
+| ---: | ---: | ---: |
+| 10 GB | $0〜 | $5〜 |
+| 100 GB | 約 $1.35〜 | 約 $6.35〜 |
+| 500 GB | 約 $7.35〜 | 約 $12.35〜 |
+| 1,000 GB | 約 $14.85〜 | 約 $19.85〜 |
 
-Workers Free でも試せます。数千枚以上のライブラリでは Free の CPU 上限に近づくため、継続して使うなら Workers Paid（最低 $5/月）を推奨します（[セットアップの方針](docs/operations.md#1-セットアップの方針)）。
+R2 Standard の保存料金（10 GB-month / 月まで無料、超えた分は $0.015 / GB-month）と、Workers の plan 料金だけを足した概算です（2026-09 時点）。R2 の operation、Workers / D1 の超過分は含みません。R2 の保存量には、写真本体に加えて表示用の derivative も含まれます。
 
-内訳は [R2 の保存容量と料金](docs/operations.md#r2-の保存容量と料金)、最新の料金は [Cloudflare の R2 料金ページ](https://developers.cloudflare.com/r2/pricing/) を確認してください。
+Workers Free の CPU 上限は 1 request 10 ms です。Node での測定でも、isolate 起動直後の最初の署名だけで 16〜41 ms かかります。Free に収まる根拠がないため、継続して使うなら Workers Paid を推奨します（[測定](docs/benchmarks.md#plan-に依存する注意)）。
+
+最新の料金は [R2](https://developers.cloudflare.com/r2/pricing/) と [Workers](https://developers.cloudflare.com/workers/platform/pricing/) の料金ページを確認してください。
 
 ## ローカルで開発する
 
@@ -73,7 +78,7 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 
 EdgePhotos は、アップロード時に受け取った写真の byte 列を変更せず保存します。EdgePhotos 側で別の形式へ変換して置き換えることはありません。
 
-ブラウザや写真ピッカーが、EdgePhotos へ渡す前にファイル形式を変換することはあります。その場合は変換後のファイルを保存し、画面にもその形式を表示します。受け取っていないファイルを「保存した」とは表示しません（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
+ブラウザや写真ピッカーが、EdgePhotos へ渡す前にファイル形式を変換することはあります。その場合は変換後のファイルを保存し、画面にもその形式を表示します（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
 
 ## セキュリティ
 
