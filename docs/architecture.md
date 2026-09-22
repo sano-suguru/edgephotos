@@ -182,6 +182,8 @@ GET    /share/api/v1/shares/{shareId}/assets/{assetId}/{thumbnail|preview}
 
 album 一覧は `covers=true` のときだけ、各 album の最新の写真の thumbnail URL を返します。album ごとの request を 1 回にまとめるためです。
 
+選択した写真へまとめて行う操作（album への追加、お気に入り、ゴミ箱）に専用の endpoint はありません。Client が上の単体 endpoint を写真 1 枚につき 1 回、並列に呼びます。どれも冪等なので、結果は写真ごとに決まり、1 枚の失敗が残りを巻き戻すことはありません（[D-032](decisions.md)）。
+
 ### timeline の pagination
 
 `GET /api/v1/assets` は `(sort_at, id)` の keyset pagination です。1 ページの response は `nextCursor`（古い方向）と `prevCursor`（新しい方向）を持ちます。`direction=newer` は cursor より新しい側を読み、items は常に新しい順です。cursor なしの `direction=newer` は 400 です。先頭より新しい写真は無いためです。
