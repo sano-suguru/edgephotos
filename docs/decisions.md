@@ -725,15 +725,20 @@ Chrome / Firefox のために libheif（WASM）や Cloudflare Images を入れ�
 `GET /api/v1/assets/months` が、写真のある年月を新しい順に、件数と cursor を付けて返します。
 
 ```sql
-SELECT substr(COALESCE(taken_at, created_at), 1, 7) AS month, COUNT(*), MAX(sort_at)
+SELECT substr(COALESCE(taken_at, created_at), 1, 7) AS month, COUNT(*),
+       MAX(printf('%015d', sort_at + 100000000000000) || id)
 FROM assets WHERE status = 'ready' AND trashed_at IS NULL GROUP BY month ORDER BY month DESC
 ```
 
 response の行数は library の枚数ではなく、写真のある月数で決まります。写真が 0 枚の月は行がありません。navigation を作るために全 asset を client へ渡すことはしません。
 
-D1 側は ready かつ trash でない行の走査です。`assets_timeline` は `(sort_at, id)` なので、この GROUP BY には使えません。10,000 件で 19,500 行・4 ms です（[benchmarks.md](benchmarks.md)）。
+`MAX` が 1 つの値しか取れないため、月の先頭の写真の `(sort_at, id)` を 1 つの文字列に符号化しています。`sort_at` を負にならない値へずらして固定長へ padding し、後ろに id を繋げます。この順序は timeline の並び順と一致します（詳細は「jump は写真を指す cursor で行う」）。
 
-式 index（`substr(COALESCE(taken_at, created_at), 1, 7)` の部分 index）は測ったうえで入れていません。20,000 件で rows_read は 39,000 → 19,000、7 → 2 ms になりますが、どちらも枚数に比例します。現在の library では index 無しで 1〜4 ms で、対価は migration と、drizzle-kit の snapshot が式 index を持ち続けることです。rows_read が運用上の問題になった時点で入れます。
+D1 側は ready かつ trash でない行の走査です。`assets_timeline` は `(sort_at, id)` なので、この GROUP BY には使えません。10,000 件で 19,500 行・5 ms です（[benchmarks.md](benchmarks.md)）。
+
+同じことを window function（`ROW_NUMBER() OVER (PARTITION BY month ...)`）で書く方が素直ですが、20,000 件で rows_read が 39,000 → 96,029、7 → 27 ms になりました。読む行が 2.5 倍になるため採りません。符号化した pair は rows_read を増やさず、20,000 件で 13 ms です。
+
+式 index（`substr(COALESCE(taken_at, created_at), 1, 7)` の部分 index）は測ったうえで入れていません。20,000 件で rows_read は 39,000 → 19,000、13 → 3 ms になりますが、どちらも枚数に比例します。現在の library では index 無しで 1〜5 ms で、対価は migration と、drizzle-kit の snapshot が式 index を持ち続けることです。rows_read が運用上の問題になった時点で入れます。
 
 月ごとの件数を別 table に持って維持する案は採りません。upload・trash・restore・完全削除・restore 済み backup のすべてに整合性の責任が増え、D1 と R2 が単一 transaction ではない前提（[AGENTS.md](../AGENTS.md)）で「count だけずれた library」を作れてしまいます。取り込むのは、実測した month query の rows_read が運用上の問題になったときです。
 
@@ -743,11 +748,24 @@ D1 側は ready かつ trash でない行の走査です。`assets_timeline` は
 
 `takenAt` の無い写真だけは、navigation が UTC の月、見出しが閲覧端末の timezone の月です。月境界の数時間で違う月に見えることがあります。並び順の fallback（`sort_at` = upload 時刻）は変えていません。端末の timezone を server に送って月を計算し直す案は、household の 2 人が別の timezone にいると「同じ library に別の年月構成」が見えるため採りません。
 
-### jump は既存 cursor の値で行う
+### jump は写真を指す cursor で行う
 
-各行の cursor は `(MAX(sort_at) + 1, '')` です。既存の `(sort_at, id) < (cursor.s, cursor.i)` にそのまま渡せて、その月の最も新しい写真から page が始まります。同じ `sort_at` の写真が何枚あっても、id によらず全部が入ります。次の 1 ミリ秒に `''` より小さい id は無いので、その先の写真は入りません。
+守るべき契約は「選んだ月へ移動したら、最初に出る写真がその月の最も新しい写真である」ことです。
 
-cursor の形式も pagination 契約も変えていません。「指定月へ行く」ために offset pagination へ変えることもしていません。
+cursor は、その写真自身を指す `(sort_at, id, at)` です。`at` が付いた cursor は、その行を page に含めます（`(sort_at, id) <= (s, i)`）。既存の cursor の比較にそのまま乗るので、cursor の形式は増えても pagination の仕組みは変わりません。「指定月へ行く」ために offset pagination へ変えることもしていません。
+
+はじめは「その月の `MAX(sort_at) + 1` の位置」を cursor にしていました。これは契約を守れません。**月は撮影時刻の digits、並び順は UTC の瞬間なので、違う月の写真が同じ `sort_at` を持てます。**
+
+```text
+2024-05-01T09:00:00+09:00  -> 2024-05-01T00:00:00Z（月は 2024-05）
+2024-04-30T12:00:00-12:00  -> 2024-05-01T00:00:00Z（月は 2024-04）
+```
+
+同じ瞬間なので、最終的な並びは id で決まります。4 月の写真の id が大きければ、5 月を選んだのに 4 月の見出しから始まります。位置を指す cursor では、その瞬間の写真をすべて拾ってしまうためです。写真自身を指す cursor なら、選んだ月の写真が必ず page の先頭になります。上にある 4 月の写真は「これより新しい写真」で読めます。
+
+`at` が効くのは古い方向だけです。上方向ではその写真は下の page に属するため、境界の行を含めません。こうすると、jump した位置から上と下へ読んだ結果が、timeline をちょうど 1 回覆います。
+
+最も新しい月の cursor は null です。その月は timeline の先頭から始まるので、cursor は要りません。上に page があるかのように見せることもなくなります。
 
 ### jump の後も上下に読めるようにする
 
@@ -755,7 +773,7 @@ jump した位置より新しい写真を読む方法が必要です。`AssetSum
 
 cursor が null のときだけ「その方向に写真が無い」を意味します。request が来た側の cursor は、その先を読んでいないので null にしません。渡すと空の page が返ることがあります。これを厳密にするには、page ごとにもう 1 回 query することになるため、意味の方を弱く定義しています。
 
-そのため、最も新しい月へ jump したときも「これより新しい写真」が出ます。押すと空の page が返り、button は消えます。1 行の存在確認を足せば消せますが、page ごとに D1 への往復が 1 回増えます。実際に分かりにくいと分かった時点で入れます。
+この弱さが見えるのは、最も新しい写真より上を読もうとしたときだけです。最も新しい月の cursor を null にしたので、年月から入った場合はその状態になりません。
 
 上方向は IntersectionObserver ではなく button です。上へ足すと、読んでいた写真の位置がずれます。押したときだけ動く方が分かりやすく、押した結果として新しい写真が画面に出ます。
 

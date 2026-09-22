@@ -76,7 +76,7 @@ remote-test の往復時間（中央値、東京から）:
 | timeline 1 ページ目（200 = 上限） | 14 → **8** ms | 15 → **9** ms（229 → 149 KiB） | 212 |
 | timeline 最終ページ（60） | 4 → 2 ms | 4 → 3 ms | 9,959 → **65**（修正後） |
 | timeline を 200 件ずつ全件 | 68 ms | 693 ms（48 ページ） | |
-| 年月の一覧（`/assets/months`） | 1 ms（2 行、0 KiB） | 4 ms（14 行、1 KiB） | 1,950 / 19,500 |
+| 年月の一覧（`/assets/months`） | 1 ms（2 行、0 KiB） | 5 ms（14 行、2 KiB） | 1,950 / 19,500 |
 | 指定の月から 1 ページ（60） | 3 ms | 3 ms（46 KiB） | 64 |
 | その 1 つ上の page（60、`direction=newer`） | 3 ms | 3 ms（46 KiB） | 64 |
 | favorites 1 ページ目（1%） | 1 ms | 6 ms | 6,001 |
@@ -146,16 +146,20 @@ remote での見積もり（上の往復時間から。original の転送時間�
 
 `GET /api/v1/assets/months` は、写真のある月を 1 行ずつ返します（[D-031](decisions.md)）。response は枚数ではなく月数で決まり、10,000 件・14 か月で 1 KiB です。
 
-query は ready かつ trash でない行の走査です（`SCAN a | USE TEMP B-TREE FOR GROUP BY`）。rows_read は枚数の約 2 倍で、10,000 件で 19,500 行・4 ms でした。
+query は ready かつ trash でない行の走査です（`SCAN a | USE TEMP B-TREE FOR GROUP BY`）。rows_read は枚数の約 2 倍で、10,000 件で 19,500 行・5 ms でした。
 
-式 index（`substr(COALESCE(taken_at, created_at), 1, 7)` の部分 index）を試した結果です。20,000 件、同じ local 環境、中央値:
+月の先頭の写真を特定する方法と、式 index（`substr(COALESCE(taken_at, created_at), 1, 7)` の部分 index）を試した結果です。20,000 件、同じ local 環境、中央値:
 
-| | rows_read | 時間 | plan |
+| 書き方 | rows_read | 時間 | plan |
 | --- | --- | --- | --- |
-| index なし | 39,000 | 7 ms | `SCAN a \| USE TEMP B-TREE FOR GROUP BY` |
-| 式 index あり | 19,000 | 2 ms | `SCAN a USING INDEX assets_months` |
+| `MAX(sort_at)` だけ（選んだ月から始まる保証なし） | 39,000 | 7 ms | `SCAN a \| USE TEMP B-TREE FOR GROUP BY` |
+| `(sort_at, id)` を符号化して `MAX`（採用） | 39,000 | 13 ms | 同じ |
+| 同じことを window function で | 96,029 | 27 ms | `CO-ROUTINE m \| ... \| USE TEMP B-TREE FOR ORDER BY \| USE TEMP B-TREE FOR GROUP BY` |
+| 採用した書き方 + 式 index | 19,000 | 3 ms | `SCAN a USING INDEX assets_months` |
 
-rows_read は半分、時間は 3 分の 1 になります。どちらも枚数に比例する点は同じです。現在の library では index 無しで 1〜4 ms なので追加しません（[D-031](decisions.md) の再検討条件）。
+window function は読む行が 2.5 倍になるため採りません。符号化は rows_read を増やしません（[D-031](decisions.md)）。
+
+式 index は rows_read を半分、時間を 4 分の 1 にします。どちらも枚数に比例する点は同じです。現在の library では index 無しで 1〜5 ms なので追加しません（[D-031](decisions.md) の再検討条件）。
 
 月へ jump した page と、その 1 つ上の page は、通常の timeline の page と同じ 64 行・3 ms です。`assets_timeline` を前後どちらにも辿れるため、index は追加していません。
 
@@ -267,7 +271,7 @@ bundle: probe 用の HEIC fixture を埋め込んだ分だけ `app.js` が増え
 | backup / restore の並列化 | remote で約 1〜1.5 時間（10,000 件）と見積もった。並列化で縮むのは往復時間の分だけで、転送時間は縮まない | 並列化しない。年に数回の操作で、再試行を入れたので途中で止まりにくい |
 | restore の再開 | 10,000 件で remote 1〜1.5 時間、100,000 件では 10 時間を超える見積もり。Access token の期限切れだけで最初からになる | 実装した（`--resume`、[D-024](decisions.md)） |
 | timeline の仮想スクロール | 10,000 件を手で読み込むと、WebKit で 1 回 0.8 秒、viewer を開くのに 1.3 秒。5,000 枚を末尾まで読み込むと Chromium で 15,128 node、年月から開くと 419 node（上の表） | 入れない。年月へ直接移動できるようになり、古い写真を見るために末尾まで読む必要がなくなった。実機の memory で問題が出た時点で再検討する（[D-031](decisions.md)） |
-| 年月一覧の式 index | 20,000 件で rows_read 39,000 → 19,000、7 → 2 ms（上の表） | 追加しない。現在の library では 1〜4 ms で、どちらも枚数に比例する。rows_read が運用上の問題になった時点で入れる |
+| 年月一覧の式 index | 20,000 件で rows_read 39,000 → 19,000、13 → 3 ms（上の表） | 追加しない。現在の library では 1〜5 ms で、どちらも枚数に比例する。rows_read が運用上の問題になった時点で入れる |
 | Queue / Durable Objects / 別 Worker / cache | どの測定でも必要性が出なかった | 追加しない |
 | 大きな album の page | 50,000 枚の album で 1 ページ 147,501 行、65 ms | 今回は変更しない。非正規化とデータ移行が要る。Free の rows read 上限で問題になった時点、または体感で遅くなった時点で行う |
 | storage cleanup の定期実行 | 手動の実行で件数を 0 にでき、写真の整合性に影響しない | Cron を入れない（[D-023](decisions.md)） |

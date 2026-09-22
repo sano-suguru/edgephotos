@@ -10,7 +10,7 @@
 
 `GET /api/v1/assets/months` が、写真のある年月を新しい順に、件数と「その月から始める cursor」付きで返します。行は月ごとに 1 つなので、response は library の枚数では増えません。写真が 0 枚の月は行がありません。
 
-月を選ぶと、既存の cursor pagination のまま、その月の最も新しい写真から表示します。cursor の形式は変えていません。jump したあとは上へも下へも読めます（`direction=newer` と `prevCursor`）。同じ写真が二重に出ることも、間を飛ばすこともありません。
+月を選ぶと、既存の cursor pagination のまま、その月の最も新しい写真から表示します。cursor はその写真自身を指します。月は撮影時刻の digits、並び順は UTC の瞬間なので、違う月の写真が同じ瞬間を持てるからです。jump したあとは上へも下へも読めます（`direction=newer` と `prevCursor`）。同じ写真が二重に出ることも、間を飛ばすこともありません。
 
 月の見出しは sticky にしました。scroll 中も、見ている写真がどの年月かが分かります。
 

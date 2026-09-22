@@ -48,10 +48,25 @@ export function sortAtFor(takenAt: string | null | undefined, createdAt: Date): 
   return createdAt.getTime()
 }
 
-type Cursor = { s: number; i: string }
+// A position in the timeline. `at` means the row itself belongs to the page ("start here"); without it the
+// page starts after the row ("continue from here"). Every cursor a page response returns is the second kind;
+// `at` is only used by the month list, which names the photo a month starts at.
+type Cursor = { s: number; i: string; at?: boolean }
+
+// Enough to make every capture time EdgePhotos can store non-negative, and to keep the shifted value inside
+// 15 digits: the padded form is only sortable as text while the width does not change.
+const SORT_AT_SHIFT = 100_000_000_000_000
+
+function encode(cursor: Cursor): string {
+  return base64UrlEncode(new TextEncoder().encode(JSON.stringify(cursor)))
+}
 
 export function encodeCursor(row: { sort_at: number; id: string }): string {
-  return base64UrlEncode(new TextEncoder().encode(JSON.stringify({ s: row.sort_at, i: row.id })))
+  return encode({ s: row.sort_at, i: row.id })
+}
+
+export function startCursor(row: { sort_at: number; id: string }): string {
+  return encode({ s: row.sort_at, i: row.id, at: true })
 }
 
 export function decodeCursor(value: string | undefined): Cursor | null {
@@ -59,6 +74,7 @@ export function decodeCursor(value: string | undefined): Cursor | null {
   try {
     const parsed = JSON.parse(new TextDecoder().decode(base64UrlDecode(value))) as Cursor
     if (typeof parsed.s !== 'number' || typeof parsed.i !== 'string') throw new Error('bad cursor')
+    if (parsed.at !== undefined && typeof parsed.at !== 'boolean') throw new Error('bad cursor')
     return parsed
   } catch {
     throw new ApiError(400, 'VALIDATION_FAILED', 'Invalid cursor.')
@@ -94,10 +110,12 @@ export async function listAssets(ctx: ServiceContext, query: TimelineQuery) {
   if (cursor) {
     // Row-value form so D1 seeks assets_timeline. With bound values the equivalent OR form scanned the index
     // from the start, so rows read grew with page depth (docs/benchmarks.md). 'newer' walks the same index
-    // the other way.
-    where.push(
-      newer ? sql`(a.sort_at, a.id) > (${cursor.s}, ${cursor.i})` : sql`(a.sort_at, a.id) < (${cursor.s}, ${cursor.i})`,
-    )
+    // the other way. A cursor with `at` keeps its own row in the page.
+    // `at` only widens the older direction, where the page starts at that photo. Reading the other way, the
+    // photo belongs to the page below, so the two directions together cover the timeline exactly once.
+    const bound = sql`(${cursor.s}, ${cursor.i})`
+    if (newer) where.push(sql`(a.sort_at, a.id) > ${bound}`)
+    else where.push(cursor.at ? sql`(a.sort_at, a.id) <= ${bound}` : sql`(a.sort_at, a.id) < ${bound}`)
   }
   const results = await ctx.db.all<AssetRow>(
     sql`SELECT a.* FROM ${from} WHERE ${sql.join(where, sql` AND `)}
@@ -127,20 +145,32 @@ export async function listAssets(ctx: ServiceContext, query: TimelineQuery) {
 // carries an offset to UTC. A photo without a capture time is the one case where the two can differ: the
 // month here is UTC, the heading is the reader's time zone (docs/architecture.md §6).
 //
+// Because the month and the order come from different values, two photos in different months can share a
+// `sort_at`. The cursor therefore names the month's newest photo itself (`at`), instead of a position just
+// above it: a position would also take in a photo of another month at the same instant, and the page could
+// then begin outside the month that was asked for.
+//
 // One row per month, so the response is bounded by the range of the library, not by its size.
 export async function listMonths(ctx: ServiceContext) {
-  const rows = await ctx.db.all<{ month: string; count: number; max_sort: number }>(
-    sql`SELECT substr(COALESCE(a.taken_at, a.created_at), 1, 7) AS month, COUNT(*) AS count, MAX(a.sort_at) AS max_sort
+  // The month's newest photo is the greatest `(sort_at, id)` pair in the month. MAX() takes one value, so
+  // the pair is encoded as one sortable string: `sort_at` shifted past zero and zero-padded to a fixed
+  // width (negative capture times exist), then the id, which compares the same way the timeline orders it.
+  // A window function would express this directly, but it reads 2.5x the rows (docs/benchmarks.md).
+  const rows = await ctx.db.all<{ month: string; count: number; first: string }>(
+    sql`SELECT substr(COALESCE(a.taken_at, a.created_at), 1, 7) AS month, COUNT(*) AS count,
+               MAX(printf('%015d', a.sort_at + ${SORT_AT_SHIFT}) || a.id) AS first
         FROM assets a WHERE a.status = 'ready' AND a.trashed_at IS NULL
         GROUP BY month ORDER BY month DESC`,
   )
-  return rows.map((row) => ({
+  return rows.map((row, index) => ({
     month: row.month,
     count: row.count,
-    // One millisecond past the month's newest photo: `(sort_at, id) < (max + 1, '')` keeps every photo of
-    // that instant, whatever its id, and no id sorts below '' at the next millisecond. So the page starts
-    // exactly at the month's newest photo without a second cursor form.
-    cursor: encodeCursor({ sort_at: row.max_sort + 1, id: '' }),
+    // The first row is the newest month: it starts the timeline at its own first page, which is what the
+    // timeline shows anyway. Saying so with null keeps a page above it from being offered at all.
+    cursor:
+      index === 0
+        ? null
+        : startCursor({ sort_at: Number(row.first.slice(0, 15)) - SORT_AT_SHIFT, id: row.first.slice(15) }),
   }))
 }
 

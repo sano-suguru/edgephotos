@@ -550,6 +550,8 @@ CI は Linux runner の WebKit で HEIC を decode できないため、この a
 | offset 付きの撮影時刻（`2024-05-01T08:00:00+09:00`、UTC では 2024-04-30） | 2024-05。grid の見出しと同じ月になる |
 | 撮影時刻の無い写真（`createdAt` 2024-04-30T23:30Z） | 2024-04（UTC の upload 月）。並び順の fallback は変わらない |
 | 指定の月へ jump | その月の最も新しい写真から page が始まる |
+| 違う月の写真が同じ `sort_at` を持つ（`+09:00` と `-12:00`）。あとの月の写真の id を小さくした | 5 月を選ぶと 5 月の写真が先頭。位置を指す cursor（`MAX(sort_at) + 1`）ではここが 4 月から始まる（この test で確認） |
+| 最も新しい月 | cursor は null。timeline の先頭から始まり、上の page は提示されない |
 | jump した位置から上下へ全部読む | 上と下を合わせると timeline 全体と一致し、重複も欠けも無い |
 | 同じ撮影時刻の写真が 3 枚 | 3 枚とも jump した page に入る。id による取りこぼしが無い |
 | upload の直後 | 新しい月が現れ、既存の月の件数が増える |
@@ -568,8 +570,14 @@ CI は Linux runner の WebKit で HEIC を decode できないため、この a
 - 「これより新しい写真」を押すと 1 ページ上を読む。重複は無く、library の並び順のまま連続している
 - 月の見出しは scroll 中も上端に残る（desktop は header の下、phone は画面上端）
 - dialog には写真のある月だけが件数付きで並ぶ。「最新の写真へ」で先頭に戻る
+- 最も新しい月を選ぶと timeline の先頭が出て、「これより新しい写真」は現れない
+- 撮影時刻のない写真を upload した直後、その月が dialog に出る（`upload.spec.ts`。実 library を実 API で読む唯一の経路）
 
 **scroll 位置を保つ方法は採れなかった。** 上に page を足したあと、読んでいた写真の位置を復元しようとすると、Chromium で約 1,200px ずれた。section が `content-visibility: auto` なので、render されるまで高さは `contain-intrinsic-size` の見積もり（40rem）のままで、その section が render された時点で残りの高さの分だけ下へ動く。`scrollHeight` でも、写真を anchor にした相対位置でも同じだった。押した結果として新しい写真を見せる（先頭へ移動する）方式にした。
+
+### 直した race
+
+「これより新しい写真」の request 中に別の月へ移ると、その list はもう上を読んでいないのに `loadingNewer` が true のまま残り、以後 button が反応しなくなっていました。reset でこの状態を明示的に降ろします。`tests/unit/page-list.test.ts` に、stale な応答が届いたあとで同じ list から上を読める test を置きました（修正前は失敗します）。
 
 ### DOM と memory
 

@@ -196,6 +196,32 @@ describe('paged list starting at a month', () => {
     expect(list.topCursor.value).toBe('above-may')
   })
 
+  it('can read up again after the list was replaced while a newer page was in flight', async () => {
+    const { calls, load } = manualLoader()
+    const list = createPageList(load, () => 'failed')
+    const jump = list.loadPage(true, 'may')
+    calls[0].resolve({ items: ['m1'], nextCursor: 'c1', prevCursor: 'above-may' })
+    await jump
+
+    const up = list.loadNewer()
+    // Another month is chosen while the page above is still on its way.
+    const reset = list.loadPage(true, 'april')
+    calls[2].resolve({ items: ['a1'], nextCursor: 'c2', prevCursor: 'above-april' })
+    await reset
+    calls[1].resolve({ items: ['stale'], nextCursor: 'x', prevCursor: 'y' })
+    await up
+
+    expect(list.items.value).toEqual(['a1'])
+    expect(list.loadingNewer.value).toBe(false)
+
+    // Reading up works on the new list; the stale answer did not leave it stuck.
+    const again = list.loadNewer()
+    expect(calls[3]).toMatchObject({ cursor: 'above-april', direction: 'newer' })
+    calls[3].resolve({ items: ['n1'], nextCursor: 'z', prevCursor: null })
+    await again
+    expect(list.items.value).toEqual(['n1', 'a1'])
+  })
+
   it('reads the same range again for fresh urls, however it was assembled', async () => {
     const { calls, load } = manualLoader()
     const list = createPageList(load, () => 'failed')

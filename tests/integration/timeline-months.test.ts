@@ -16,14 +16,16 @@ async function clearLibrary() {
 
 // Rows straight into D1, as the scale benchmark seeds: the endpoints under test read D1 and sign URLs, and
 // signing does not read R2. `takenAt: null` exercises the upload-time fallback.
-async function seed(rows: { takenAt?: string | null; createdAt?: string; trashed?: boolean }[]): Promise<string[]> {
+async function seed(
+  rows: { takenAt?: string | null; createdAt?: string; trashed?: boolean; id?: string }[],
+): Promise<string[]> {
   const ids: string[] = []
   const bytes = syntheticJpeg({ seed: 7 })
   for (let start = 0; start < rows.length; start += 500) {
     const chunk: D1PreparedStatement[] = []
     for (const [offset, row] of rows.slice(start, start + 500).entries()) {
       const i = start + offset
-      const id = crypto.randomUUID()
+      const id = row.id ?? crypto.randomUUID()
       ids.push(id)
       const createdAt = row.createdAt ?? new Date(Date.UTC(2020, 0, 1, 0, 0, i % 60)).toISOString()
       const takenAt = row.takenAt === undefined ? null : row.takenAt
@@ -55,6 +57,13 @@ async function seed(rows: { takenAt?: string | null; createdAt?: string; trashed
 
 const months = (app: App, token?: string) =>
   callJson<{ items: AssetMonth[] }>(app, 'GET', '/api/v1/assets/months', { expect: 200, token })
+
+// The cursor of a month that is not the newest one; those have a cursor by contract.
+async function monthCursor(app: App, month: string): Promise<string> {
+  const row = (await months(app)).items.find((m) => m.month === month)
+  if (!row?.cursor) throw new Error(`${month} has no cursor`)
+  return row.cursor
+}
 
 async function page(app: App, query: string): Promise<AssetPage> {
   return callJson<AssetPage>(app, 'GET', `/api/v1/assets?${query}`, { expect: 200 })
@@ -144,14 +153,13 @@ describe('timeline months', () => {
       { takenAt: '2023-01-05T09:00:00' },
     ])
     const all = await timeline(app)
-    const may = (await months(app)).items.find((m) => m.month === '2024-05')
-    if (!may) throw new Error('2024-05 missing')
+    const may = await monthCursor(app, '2024-05')
 
-    const jumped = await page(app, `limit=3&cursor=${encodeURIComponent(may.cursor)}`)
+    const jumped = await page(app, `limit=3&cursor=${encodeURIComponent(may)}`)
     const newest = jumped.items[0]
     expect(newest.takenAt).toBe('2024-05-30T09:00:00')
 
-    const { older, newer, all: walked } = await walk(app, may.cursor)
+    const { older, newer, all: walked } = await walk(app, may)
     // The month's own page and everything after it, then everything above it: the whole timeline, once.
     expect(walked).toEqual(all)
     expect(new Set(walked).size).toBe(walked.length)
@@ -159,19 +167,62 @@ describe('timeline months', () => {
     expect(older).toEqual(all.slice(2))
   })
 
+  it('starts at the chosen month when another month has a photo of the same instant', async () => {
+    const app = await makeApp()
+    // The month comes from the capture time's own digits, the order from the instant, so two photos in
+    // different months can share a sort_at. Here the April photo has the larger id, so it is the first row
+    // of that instant in the timeline; a page that started just above the instant would begin in April.
+    await seed([
+      { takenAt: '2024-09-09T09:00:00' },
+      { takenAt: '2024-05-01T09:00:00+09:00', id: '00000000-0000-4000-8000-000000000001' },
+      { takenAt: '2024-04-30T12:00:00-12:00', id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' },
+      { takenAt: '2024-05-01T08:00:00+09:00', id: '00000000-0000-4000-8000-000000000002' },
+    ])
+    const all = await timeline(app)
+
+    const mayCursor = await monthCursor(app, '2024-05')
+    const jumped = await page(app, `limit=10&cursor=${encodeURIComponent(mayCursor)}`)
+    expect(jumped.items[0].takenAt).toBe('2024-05-01T09:00:00+09:00')
+
+    // The April photo is above the page, and reading up the timeline reaches it. Nothing is lost.
+    const { all: walked } = await walk(app, mayCursor)
+    expect(walked).toEqual(all)
+    expect(new Set(walked).size).toBe(walked.length)
+  })
+
+  it('has no cursor for the newest month: it starts the timeline at its own first page', async () => {
+    const app = await makeApp()
+    await seed([{ takenAt: '2024-05-01T09:00:00' }, { takenAt: '2023-08-08T08:08:08' }])
+
+    const { items } = await months(app)
+    expect(items.map((m) => [m.month, m.cursor === null])).toEqual([
+      ['2024-05', true],
+      ['2023-08', false],
+    ])
+
+    // Starting there is the plain first page, so nothing above it is offered.
+    const top = await page(app, 'limit=60')
+    expect(top.prevCursor).toBeNull()
+  })
+
   it('starts at the same photo when several share a capture time', async () => {
     const app = await makeApp()
     const takenAt = '2024-06-15T12:00:00'
-    await seed([{ takenAt }, { takenAt }, { takenAt }, { takenAt: '2024-04-01T12:00:00' }])
+    await seed([
+      { takenAt: '2024-08-01T12:00:00' },
+      { takenAt },
+      { takenAt },
+      { takenAt },
+      { takenAt: '2024-04-01T12:00:00' },
+    ])
     const all = await timeline(app)
 
-    const june = (await months(app)).items.find((m) => m.month === '2024-06')
-    if (!june) throw new Error('2024-06 missing')
-    const jumped = await page(app, `limit=10&cursor=${encodeURIComponent(june.cursor)}`)
+    const june = await monthCursor(app, '2024-06')
+    const jumped = await page(app, `limit=10&cursor=${encodeURIComponent(june)}`)
 
     // All three, in the timeline's own order, none of them skipped by the cursor.
-    expect(jumped.items.map((i) => i.id)).toEqual(all)
-    expect((await walk(app, june.cursor, 2)).all).toEqual(all)
+    expect(jumped.items.map((i) => i.id)).toEqual(all.slice(1))
+    expect((await walk(app, june, 2)).all).toEqual(all)
   })
 
   it('shows a new month as soon as a photo is uploaded into it', async () => {
@@ -238,7 +289,9 @@ describe('timeline months', () => {
     expect(items.some((m) => m.month === '2019-07')).toBe(false)
 
     // The navigation never downloads the library: a page stays at the page size wherever it starts.
-    const first = await page(app, `limit=60&cursor=${encodeURIComponent(items[10].cursor)}`)
+    const tenth = items[10].cursor
+    if (!tenth) throw new Error('no cursor')
+    const first = await page(app, `limit=60&cursor=${encodeURIComponent(tenth)}`)
     expect(first.items).toHaveLength(60)
     expect(first.items[0].takenAt?.slice(0, 7)).toBe(items[10].month)
     expect(first.nextCursor).not.toBeNull()

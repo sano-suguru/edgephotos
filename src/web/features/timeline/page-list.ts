@@ -44,6 +44,9 @@ export function createPageList<T>(
     if (inflight && !reset) return inflight
     if (reset) {
       generation++
+      // A request for the page above the old list can no longer report back (it belongs to the generation
+      // that just ended), so this list is not reading upwards any more.
+      loadingNewer.value = false
       if (startCursor !== undefined) start = startCursor
     }
     const mine = generation

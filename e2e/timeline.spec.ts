@@ -61,10 +61,12 @@ async function serveLibrary(page: Page) {
     if (url.pathname.endsWith('/months')) {
       const counts = new Map<string, number>()
       for (const [index, item] of ITEMS.entries()) if (!counts.has(item.month)) counts.set(item.month, index)
-      const items = [...counts].map(([month, first]) => ({
+      const items = [...counts].map(([month, first], index) => ({
         month,
         count: ITEMS.filter((i) => i.month === month).length,
-        cursor: cursorAt(first),
+        // As the Worker answers: the newest month starts the timeline at its own first page, so it has no
+        // cursor, and every other month starts at its newest photo.
+        cursor: index === 0 ? null : cursorAt(first),
       }))
       return route.fulfill({ json: { items } })
     }
@@ -154,6 +156,15 @@ test.describe('timeline month navigation', () => {
     expect(ids).toEqual(order.slice(order.indexOf(ids[0]), order.indexOf(ids[0]) + ids.length))
   })
 
+  test('shows the newest month as the plain first page, with nothing above it', async ({ page }) => {
+    await openApp(page)
+    await jumpTo(page, '2024-01')
+    await expect(page).toHaveURL(/\?m=2024-01$/)
+    await expect(headings(page).first()).toHaveText('2024年1月')
+    // Nothing is newer than the newest month, so no control offers it.
+    await expect(page.getByRole('button', { name: 'これより新しい写真' })).toHaveCount(0)
+  })
+
   test('keeps the month of the photos on screen at the top edge while scrolling', async ({ page }) => {
     await openApp(page, '/?m=2023-03')
     const heading = headings(page).first()
@@ -174,7 +185,8 @@ test.describe('timeline month navigation', () => {
     await expect(monthButton(page, '2023-03')).toContainText(String(PER_MONTH))
     // No month between the first and the last is missing, and none is listed with no photos.
     await expect(monthButton(page, '2021-12')).toHaveCount(0)
-    await page.keyboard.press('Escape')
+    await dialog.getByRole('button', { name: '閉じる' }).click()
+    await expect(dialog).toBeHidden()
 
     await jumpTo(page, '2022-05')
     await page.getByRole('button', { name: '年月で移動' }).click()

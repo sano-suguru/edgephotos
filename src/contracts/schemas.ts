@@ -87,8 +87,9 @@ export const AssetMonthSchema = z
   .object({
     month: z.string().regex(/^\d{4}-\d{2}$/),
     count: z.number().int().positive(),
-    // Pass as `cursor` to GET /assets to start the timeline at this month's newest photo.
-    cursor: z.string(),
+    // Pass as `cursor` to GET /assets to start the timeline at this month's newest photo. Null for the
+    // newest month: it starts at the timeline's own first page, which needs no cursor.
+    cursor: z.string().nullable(),
   })
   .openapi('AssetMonth')
 
