@@ -1,24 +1,56 @@
 # EdgePhotos
 
-**Your photos. Your Cloudflare account. No server.**
+**Your photos. Your Cloudflare account. No server to manage.**
 
-EdgePhotos は、利用者自身の Cloudflare アカウントへデプロイする、サーバーレス・セルフホスト型の写真ライブラリです。
+EdgePhotos は、あなた自身の Cloudflare アカウントの中だけで動く、小さなセルフホスト型の写真ライブラリです。
 
-写真の保存・閲覧・整理・共有に必要な機能へ範囲を絞り、Cloudflare Workers、D1、R2、Access を使って構成します。
+VPS や NAS を運用せずに、家族の写真を自分の手元に置きたい人のために作っています。Google フォトの機能を全部そろえることは目指さず、写真の保存・閲覧・整理・共有と、いつでも取り出せることに範囲を絞ります。
+
+> [!WARNING]
+> 現在 **private alpha** です。EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[Backup と export](docs/operations.md#9-backup-と-export)）。
+
+![EdgePhotos のタイムライン画面。撮影月ごとに写真が並ぶ](docs/images/timeline.png)
 
 ## 状態
 
-**private alpha**。upload、timeline、favorite、album、期限付き共有と失効、trash と完全削除、export / restore を実装しています。
+実 Cloudflare 環境（`remote-test`）で、Access、private R2 への直接アップロード、共有と失効、backup / restore を確認済みです。production 環境での deploy と、iPhone / Android 実機での取り込みはまだ確認していません。
 
-実 Cloudflare 環境（`remote-test`）で、Access、private R2 への直接 upload、共有と失効、backup / restore を確認済みです。production 環境での deploy と、iPhone / Android 実機での取り込みはまだ確認していません。確認した内容と日付は [検証記録](docs/verification.md) にあります。
+確認した内容と日付は [検証記録](docs/verification.md) にあります。
 
-### 唯一の保存先にしないでください
+自分のライブラリの保存内容と記録が食い違っていないかは、ライブラリ画面の「ストレージの点検」または `pnpm storage audit` で確認できます（[監視と点検](docs/operations.md#12-監視と点検)）。
 
-EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残してください。
+## できること
 
-定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[Backup と export](docs/operations.md#9-backup-と-export)）。
+- 写真のアップロード
+- タイムライン
+- お気に入り
+- アルバム
+- 期限付き共有リンク
+- 共有の失効・再発行
+- ゴミ箱と完全削除
+- export / restore
+- 安全な更新と migration
 
-保存内容と記録の食い違いは、ライブラリ画面の「ストレージの点検」または `pnpm storage audit` で確認できます（[監視と点検](docs/operations.md#12-監視と点検)）。
+## できないこと
+
+初期版では次を作りません。
+
+- 動画
+- Live Photos
+- RAW 現像
+- 顔認識・AI 検索
+- バックグラウンド自動同期
+- 利用者ごとに分かれたライブラリ
+- 任意クラウドへの抽象化
+- 課金
+
+### 「original」の意味
+
+original とは、EdgePhotos が受け取った byte 列そのものです。再エンコードも上書きもしません。HEIC / HEIF も、形式をファイルの中身から判定して、そのまま保存します。
+
+写真ピッカーが選択時に別の形式へ変換することがあります（iPhone の Safari では HEIC が JPEG になることがあります）。その場合に保存されるのは変換後の byte 列で、画面にもその形式を表示します。受け取っていないファイルを「保存した」とは表示しません。
+
+HEIC を decode できないブラウザ（Chrome / Firefox）からは HEIC を追加できません。その場合は追加せずにその場で知らせます（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
 
 ## ローカルで試す
 
@@ -36,39 +68,14 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 
 デプロイ手順と必要な設定は [運用・デプロイ・復元](docs/operations.md) を参照してください。
 
-## 初期スコープ
+## 写真の公開範囲
 
-含めるもの:
+- R2 bucket は private のままで、公開しません
+- ライブラリへのアクセスは Cloudflare Access を通ります
+- 写真本体は、有効期限の短い presigned URL でクライアントと R2 の間を直接流れます
+- 外部から見えるのは、明示的に作った共有リンクだけです。共有では original を配信しません
 
-- 写真アップロード
-- タイムライン
-- お気に入り
-- アルバム
-- 期限付き共有リンク
-- 共有の失効・再発行
-- export / restore
-- 安全な更新と migration
-
-初期版に含めないもの:
-
-- 動画
-- Live Photos
-- RAW 現像
-- 顔認識・AI 検索
-- バックグラウンド自動同期
-- 利用者ごとに分かれたライブラリ
-- 任意クラウドへの抽象化
-- 課金
-
-### 「original」の意味
-
-EdgePhotos は original を byte 単位で変更せずに保存します。Web 版の original は、Browser から受け取った byte 列です。
-
-HEIC / HEIF も original として保存します。形式はファイルの中身から判定し、受け取った byte 列をそのまま保存します。
-
-写真ピッカーが選択時に別の形式へ変換することがあります（iPhone の Safari では HEIC が JPEG になることがあります）。その場合に保存されるのは変換後の byte 列で、画面にもその形式を表示します。EdgePhotos が受け取っていないファイルを「保存した」とは表示しません。画面では「保存したファイル」と表記しています。
-
-HEIC の表示用サムネイルは Browser で作るため、HEIC を decode できない Browser（Chrome / Firefox）からは HEIC を追加できません。その場合は追加せずにその場で知らせます。詳しくは [D-030](docs/decisions.md) を参照してください。
+脅威モデルと秘密情報の扱いは [セキュリティ](docs/security.md) にあります。
 
 ## アーキテクチャ概要
 
@@ -90,11 +97,13 @@ metadata        originals / derivatives
 Web / Future Native -- presigned PUT/GET --> R2
 ```
 
-Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署名 URL の発行を担当します。
-
-写真バイナリは通常 Worker を経由しません。短命な presigned URL を使って、Client と private R2 の間で直接転送します。
+Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署名 URL の発行を担当します。写真バイナリは通常 Worker を経由しません。
 
 詳細は [アーキテクチャ](docs/architecture.md) を参照してください。
+
+### 設計上のトレードオフ
+
+EdgePhotos は任意のクラウドへ移せる抽象化を持たず、Cloudflare に寄せて作ります。デプロイと運用が 1 Worker で済む代わりに、Cloudflare への lock-in を受け入れます（[D-003](docs/decisions.md#d-003-cloudflare-native-の-1-worker-構成とする)）。
 
 ## 技術スタック
 
