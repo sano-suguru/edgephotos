@@ -36,7 +36,7 @@ VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカ�
 - 任意クラウドへの抽象化
 - 課金
 
-## Cloudflare にデプロイする
+## セットアップ
 
 必要なもの:
 
@@ -45,7 +45,15 @@ VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカ�
 
 リソースの作成、Access と R2 の設定、セットアップの確認までの手順は [運用・デプロイ・復元](docs/operations.md) にあります。
 
-EdgePhotos 自体は無料です。Cloudflare の plan と利用量に応じて、Cloudflare 側で費用が発生する場合があります。試用は Workers Free、継続して使うなら Workers Paid を推奨します（[セットアップの方針](docs/operations.md#1-セットアップの方針)）。
+### 費用
+
+EdgePhotos 自体は無料です。Cloudflare の料金は、保存容量と利用量で決まります。
+
+R2 Standard は月 10 GB まで無料で、超えた分は $0.015 / GB-month です（2026-09 時点）。目安は 100 GB で約 $1.35/月、500 GB で約 $7.35/月、1 TB で約 $14.85/月です。R2 の使用量には、写真本体に加えて表示用の derivative も含まれます。
+
+Workers Free でも試せます。数千枚以上のライブラリでは Free の CPU 上限に近づくため、継続して使うなら Workers Paid（最低 $5/月）を推奨します（[セットアップの方針](docs/operations.md#1-セットアップの方針)）。
+
+内訳は [R2 の保存容量と料金](docs/operations.md#r2-の保存容量と料金)、最新の料金は [Cloudflare の R2 料金ページ](https://developers.cloudflare.com/r2/pricing/) を確認してください。
 
 ## ローカルで開発する
 
@@ -61,15 +69,17 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 
 リポジトリ構成とテストの方針は [開発ガイド](docs/development.md) にあります。
 
-## original の扱い
+## 写真ファイルの保存
 
-EdgePhotos は受け取った写真を再エンコードせず、その byte 列を original として保存します。ブラウザや写真ピッカーがアップロード前に変換した場合は、変換後に受け取ったファイルが original になります。受け取っていないファイルを「保存した」とは表示しません（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
+EdgePhotos は、アップロード時に受け取った写真の byte 列を変更せず保存します。EdgePhotos 側で別の形式へ変換して置き換えることはありません。
+
+ブラウザや写真ピッカーが、EdgePhotos へ渡す前にファイル形式を変換することはあります。その場合は変換後のファイルを保存し、画面にもその形式を表示します。受け取っていないファイルを「保存した」とは表示しません（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
 
 ## セキュリティ
 
 - R2 bucket は private のまま使います
 - ライブラリへのアクセスは Cloudflare Access で保護します
-- 認証なしで写真を閲覧できるのは、明示的に作成した共有リンクからだけです。共有では original を配信しません
+- 認証なしで写真を閲覧できるのは、明示的に作成した共有リンクからだけです。共有で渡すのは表示用の画像だけで、保存した写真ファイルそのものは渡しません
 
 脅威モデルと秘密情報の扱いは [セキュリティ](docs/security.md) にあります。
 
@@ -90,7 +100,7 @@ Cloudflare Worker / Hono
 metadata        originals / derivatives
 
 写真本体:
-Web / Future Native -- presigned PUT/GET --> R2
+Web -- presigned PUT/GET --> R2
 ```
 
 Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署名 URL の発行を担当します。写真バイナリは通常 Worker を経由せず、有効期限の短い presigned URL でクライアントと R2 の間を直接流れます。

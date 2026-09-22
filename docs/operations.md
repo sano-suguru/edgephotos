@@ -21,6 +21,22 @@ Cloudflare の plan は、試用・評価なら Workers Free、継続して使�
 
 Free の CPU 上限は 1 request 10 ms です。数千枚以上の library では timeline や export が上限に近づきます（[benchmarks.md](benchmarks.md)）。Paid の上限は既定で 30 秒です。D1 の time travel も、Free の 7 日に対して Paid は 30 日です。
 
+### R2 の保存容量と料金
+
+R2 Standard は月 10 GB まで無料で、超えた分は $0.015 / GB-month です。インターネットへの egress は無料、Class A operation は月 100 万回、Class B operation は月 1000 万回まで無料です（2026-09 時点）。
+
+| R2 使用量 | ストレージ料金の目安 |
+| ---: | ---: |
+| 10 GB | $0 |
+| 100 GB | 約 $1.35 |
+| 500 GB | 約 $7.35 |
+| 1 TB | 約 $14.85 |
+| 2 TB | 約 $29.85 |
+
+無料枠の 10 GB を引いた概算です。操作の料金と、他の Cloudflare サービスの料金は含みません。R2 の使用量は写真本体だけでなく derivative も含みます。写真の枚数あたりの容量は測定していないため、枚数からの見積もりは出していません。
+
+最新の料金は [R2](https://developers.cloudflare.com/r2/pricing/) と [Workers](https://developers.cloudflare.com/workers/platform/pricing/) の料金ページを確認してください。
+
 ## 2. リソース作成とデプロイ
 
 環境ごとに D1・R2・Access application・R2 credential を分けます。以下は `remote-test` の例です。production は `--env` を外し、`wrangler.jsonc` の top-level 設定を使います。
