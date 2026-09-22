@@ -7,29 +7,13 @@ EdgePhotos は、あなた自身の Cloudflare アカウントへデプロイし
 VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカウントで管理したい人のために作っています。Google フォトの機能を全部そろえることは目指さず、写真の保存・閲覧・整理・共有と、データを自分で export / restore できることに範囲を絞ります。
 
 > [!WARNING]
-> 現在 **alpha** です（[段階の呼び方](docs/roadmap.md#段階の呼び方)）。EdgePhotos を写真の唯一の保存先にしないでください。
+> 現在 **alpha** です（[段階の呼び方](docs/roadmap.md#段階の呼び方)）。production 環境へのデプロイと、iPhone / Android 実機からの取り込みは未確認です。
 >
-> 別の場所に原本を残してください。定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[Backup と export](docs/operations.md#9-backup-と-export)）。
+> EdgePhotos を写真の唯一の保存先にしないでください。別の場所に原本を残し、定期的に `pnpm backup export` と `pnpm backup check` を実行してください（[Backup と export](docs/operations.md#9-backup-と-export)）。
 
 ![EdgePhotos のタイムライン画面。撮影月ごとに写真が並ぶ](docs/images/timeline.png)
 
-## 状態
-
-実 Cloudflare 環境（`remote-test`）で確認済み:
-
-- Cloudflare Access
-- private R2 への直接アップロード
-- 共有リンクの発行と失効
-- backup / restore
-
-未確認:
-
-- production 環境へのデプロイ
-- iPhone / Android 実機からの取り込み
-
-確認した内容と日付は [検証記録](docs/verification.md) にあります。
-
-自分のライブラリの保存内容と記録が食い違っていないかは、ライブラリ画面の「ストレージの点検」または `pnpm storage audit` で確認できます（[監視と点検](docs/operations.md#12-監視と点検)）。
+実 Cloudflare 環境で確認した範囲と、未確認の項目は [検証記録](docs/verification.md) にあります。
 
 ## できること
 
@@ -37,11 +21,9 @@ VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカ�
 - タイムライン
 - お気に入り
 - アルバム
-- 期限付き共有リンク
-- 共有の失効・再発行
 - ゴミ箱と完全削除
+- 期限付き共有リンクと、その失効・再発行
 - export / restore
-- schema migration を含む更新手順
 
 ## 初期版で扱わないもの
 
@@ -54,9 +36,18 @@ VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカ�
 - 任意クラウドへの抽象化
 - 課金
 
-## ローカルで試す
+## Cloudflare にデプロイする
 
-Node.js 22.18 以上と pnpm が必要です。
+必要なもの:
+
+- Cloudflare アカウントと、そこで使う Workers / D1 / R2 / Cloudflare Access
+- Node.js 22.18 以上と pnpm（wrangler を動かすため、デプロイにも開発にも必要です）
+
+リソースの作成、Access と R2 の設定、セットアップの確認までの手順は [運用・デプロイ・復元](docs/operations.md) にあります。
+
+EdgePhotos 自体は無料です。Cloudflare の plan と利用量に応じて、Cloudflare 側で費用が発生する場合があります。試用は Workers Free、継続して使うなら Workers Paid を推奨します（[セットアップの方針](docs/operations.md#1-セットアップの方針)）。
+
+## ローカルで開発する
 
 ```bash
 pnpm install
@@ -68,24 +59,17 @@ pnpm dev              # http://localhost:5173 （Access を模擬した househol
 pnpm check            # typecheck + lint + db:check + cli:check + test + build
 ```
 
-デプロイ手順と必要な設定は [運用・デプロイ・復元](docs/operations.md) を参照してください。
+リポジトリ構成とテストの方針は [開発ガイド](docs/development.md) にあります。
 
-## データの扱い
+## original の扱い
 
-### 「original」の意味
+EdgePhotos は受け取った写真を再エンコードせず、その byte 列を original として保存します。ブラウザや写真ピッカーがアップロード前に変換した場合は、変換後に受け取ったファイルが original になります。受け取っていないファイルを「保存した」とは表示しません（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
 
-original とは、EdgePhotos が受け取った byte 列そのものです。再エンコードも上書きもしません。HEIC / HEIF も、形式をファイルの中身から判定して、そのまま保存します。
+## セキュリティ
 
-写真ピッカーが選択時に別の形式へ変換することがあります（iPhone の Safari では HEIC が JPEG になることがあります）。その場合に保存されるのは変換後の byte 列で、画面にもその形式を表示します。受け取っていないファイルを「保存した」とは表示しません。
-
-HEIC をデコードできない環境からは HEIC を追加できません。その場合は追加せずにその場で知らせます（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
-
-### 写真の公開範囲
-
-- R2 bucket は private のままで、公開しません
-- ライブラリへのアクセスは Cloudflare Access を通ります
-- 写真本体は、有効期限の短い presigned URL でクライアントと R2 の間を直接流れます
-- ライブラリの写真を認証なしで閲覧できるのは、明示的に作った共有リンクからだけです。共有では original を配信しません
+- R2 bucket は private のまま使います
+- ライブラリへのアクセスは Cloudflare Access で保護します
+- 認証なしで写真を閲覧できるのは、明示的に作成した共有リンクからだけです。共有では original を配信しません
 
 脅威モデルと秘密情報の扱いは [セキュリティ](docs/security.md) にあります。
 
@@ -109,7 +93,7 @@ metadata        originals / derivatives
 Web / Future Native -- presigned PUT/GET --> R2
 ```
 
-Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署名 URL の発行を担当します。写真バイナリは通常 Worker を経由しません。
+Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署名 URL の発行を担当します。写真バイナリは通常 Worker を経由せず、有効期限の短い presigned URL でクライアントと R2 の間を直接流れます。
 
 詳細は [アーキテクチャ](docs/architecture.md) を参照してください。
 
@@ -117,7 +101,8 @@ Worker は認証・認可、API、D1 の状態管理、R2 の保存確認、署�
 
 EdgePhotos は任意のクラウドへ移せる抽象化を持たず、Cloudflare に寄せて作ります。アプリケーションのデプロイ単位を 1 Worker に保てる代わりに、Cloudflare への lock-in を受け入れます（[D-003](docs/decisions.md#d-003-cloudflare-native-の-1-worker-構成とする)）。
 
-## 技術スタック
+<details>
+<summary>技術スタック</summary>
 
 | 領域 | 採用 |
 | --- | --- |
@@ -130,12 +115,14 @@ EdgePhotos は任意のクラウドへ移せる抽象化を持たず、Cloudflar
 | Authentication | Cloudflare Access |
 | Deployment | 1 Worker + Static Assets + D1 + R2 |
 
+</details>
+
 ## ドキュメント
 
 - [アーキテクチャ](docs/architecture.md) — 現在採用している構造と境界
 - [セキュリティ](docs/security.md) — 認証・共有・秘密情報・データ保護
 - [開発ガイド](docs/development.md) — リポジトリ構成、テスト、CI、開発ルール
-- [運用・デプロイ・復元](docs/operations.md) — セットアップ、更新、backup / restore
+- [運用・デプロイ・復元](docs/operations.md) — セットアップ、更新、backup / restore、監視と点検
 - [設計判断](docs/decisions.md) — 重要な選択とその理由
 - [検証記録](docs/verification.md) — 実環境と Browser で確認した内容
 - [測定](docs/benchmarks.md) — scale と取り込み memory の数値
