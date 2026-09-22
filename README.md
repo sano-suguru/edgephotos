@@ -7,7 +7,7 @@ EdgePhotos は、あなた自身の Cloudflare アカウントへデプロイし
 VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカウントで管理したい人のために作っています。Google フォトの機能を全部そろえることは目指さず、写真の保存・閲覧・整理・共有と、データを自分で export / restore できることに範囲を絞ります。
 
 > [!WARNING]
-> 現在 **private alpha** です。EdgePhotos を写真の唯一の保存先にしないでください。
+> 現在 **alpha** です（[段階の呼び方](docs/roadmap.md#段階の呼び方)）。EdgePhotos を写真の唯一の保存先にしないでください。
 >
 > 別の場所に原本を残してください。定期的に `pnpm backup export`（2 回目からは差分）と `pnpm backup check` を実行してください（[Backup と export](docs/operations.md#9-backup-と-export)）。
 
