@@ -179,6 +179,23 @@ memory の目安になるのは、上の「Browser（10,000 件、`vite dev`）�
 
 同じ画面を実機で見る項目は [roadmap.md](roadmap.md) の Post-merge verification にあります。
 
+## bulk action（2026-09-22）
+
+選択した写真へ同じ操作をまとめて適用するとき、専用の endpoint を足さずに既存の単体 endpoint を並列に呼ぶ場合の server 側 cost です（[D-032](decisions.md)）。50 枚を 6 並列、中央値 3 回。
+
+| 操作（50 request / 6 並列） | 1,000 件 | 10,000 件 | request あたりの rows_read |
+| --- | --- | --- | --- |
+| album へ追加（すべて新規） | 55 ms | 51 ms | 1 + 1 |
+| album へ追加（すべて追加済み） | 48 ms | 46 ms | 1 + 1 |
+| お気に入りに追加 | 55 ms | 59 ms | 1 |
+| お気に入りを解除 | 60 ms | 52 ms | 1 |
+| ゴミ箱へ移動 | 33 ms | 39 ms | 1 |
+| ゴミ箱から復元 | 24 ms | 31 ms | 1 |
+
+どれも id で 1 行を引くだけなので、library の枚数で変わりません。50 枚ぶんの server 側 cost は 60 ms 未満です。
+
+この測定に往復の時間は含まれません（local workerd には network がありません）。実際の待ち時間はそちらが決めます。6 並列なら 50 枚は約 9 波なので、往復 100 ms で約 0.9 秒、200 ms で約 1.8 秒です。bulk endpoint が減らせるのはこの往復だけで、server 側の処理量は変わりません（[D-032](decisions.md)）。
+
 ## Browser（10,000 件、`vite dev`）
 
 | 項目 | Chromium | WebKit |
@@ -276,6 +293,7 @@ bundle: probe 用の HEIC fixture を埋め込んだ分だけ `app.js` が増え
 | 大きな album の page | 50,000 枚の album で 1 ページ 147,501 行、65 ms | 今回は変更しない。非正規化とデータ移行が要る。Free の rows read 上限で問題になった時点、または体感で遅くなった時点で行う |
 | storage cleanup の定期実行 | 手動の実行で件数を 0 にでき、写真の整合性に影響しない | Cron を入れない（[D-023](decisions.md)） |
 | 前処理の並列数 | 今回は測っていない（[D-020](decisions.md) の測定のまま） | 2 のまま |
+| bulk endpoint | 50 枚を既存の単体 endpoint で 6 並列に呼び、server 側 24〜60 ms・request あたり 1 行（上の表） | 追加しない。減らせるのは往復だけで、部分成功の契約が新しく増える（[D-032](decisions.md)） |
 
 ### plan に依存する注意
 

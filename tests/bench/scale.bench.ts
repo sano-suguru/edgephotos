@@ -18,6 +18,9 @@ const RUNS = 7
 const BIG_ALBUM = Number(env.BENCH_BIG_ALBUM ?? 5_000)
 const SMALL_ALBUMS = 20
 const SMALL_ALBUM_SIZE = 200
+// One selection of photos acted on together, and how many of its requests the client keeps in flight.
+const BULK_SELECTION = Number(env.BENCH_BULK_SELECTION ?? 50)
+const BULK_CONCURRENCY = Number(env.BENCH_BULK_CONCURRENCY ?? 6)
 
 type App = Awaited<ReturnType<typeof makeApp>>
 
@@ -299,6 +302,38 @@ describe('scale', () => {
       const member = ids[ids.length - 1]
       await measure(size, 'album add asset', `/api/v1/albums/${bigAlbum.id}/assets/${member}`, 'PUT')
       await measure(size, 'album remove asset', `/api/v1/albums/${bigAlbum.id}/assets/${member}`, 'DELETE')
+
+      // Bulk actions on a selection, as the client issues them: one existing single-asset request per photo,
+      // at most BULK_CONCURRENCY in flight (docs/decisions.md D-032). Local workerd has no network latency,
+      // so these are the server-side cost only; the round trips are modelled in docs/benchmarks.md.
+      // The seeded library trashes every 20th photo; a selection the reader could make holds none of them.
+      const selection = ids.filter((_, i) => i % 20 !== 7).slice(100, 100 + BULK_SELECTION)
+      const bulkAlbum = await callJson(signed, 'POST', '/api/v1/albums', {
+        token,
+        body: { title: 'bulk' },
+        expect: 201,
+      })
+      const fanOut = async (make: (id: string) => Promise<unknown>) => {
+        const queue = [...selection]
+        await Promise.all(
+          Array.from({ length: BULK_CONCURRENCY }, async () => {
+            for (let next = queue.shift(); next !== undefined; next = queue.shift()) await make(next)
+          }),
+        )
+      }
+      const bulk = async (label: string, make: (id: string) => Promise<unknown>) => {
+        recording.log.length = 0
+        const ms = await median(() => fanOut(make), 3)
+        report(size, label, `${ms.toFixed(1)} ms`, `${BULK_SELECTION} req / ${BULK_CONCURRENCY} in flight`)
+        await explain(`${size} ${label}`, [...recording.log])
+      }
+      await bulk('bulk album add (new)', (id) => req(`/api/v1/albums/${bulkAlbum.id}/assets/${id}`, 'PUT'))
+      await bulk('bulk album add (all already in)', (id) => req(`/api/v1/albums/${bulkAlbum.id}/assets/${id}`, 'PUT'))
+      await bulk('bulk favorite on', (id) => req(`/api/v1/assets/${id}`, 'PATCH', { isFavorite: true }))
+      await bulk('bulk favorite off', (id) => req(`/api/v1/assets/${id}`, 'PATCH', { isFavorite: false }))
+      await bulk('bulk trash', (id) => req(`/api/v1/assets/${id}/trash`, 'POST'))
+      await bulk('bulk restore', (id) => req(`/api/v1/assets/${id}/restore`, 'POST'))
+      await req(`/api/v1/albums/${bulkAlbum.id}`, 'DELETE')
 
       // Share
       const share = await callJson(signed, 'POST', `/api/v1/albums/${bigAlbum.id}/shares`, {
