@@ -25,7 +25,11 @@ export function SelectionBar(props: {
 }) {
   const disabled = props.busy || props.count === 0
   return (
-    <div class="sticky top-0 z-20 -mx-4 mb-3 flex items-center gap-1 border-b border-black/5 bg-background px-2 py-1 md:top-14">
+    <div
+      role="toolbar"
+      aria-label="選択した写真の操作"
+      class="sticky top-0 z-20 -mx-4 mb-3 flex items-center gap-1 border-b border-black/5 bg-background px-2 py-1 md:top-14"
+    >
       <button type="button" class={barButton} aria-label="選択を終了" title="選択を終了" onClick={props.onExit}>
         <Close />
       </button>

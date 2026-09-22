@@ -416,15 +416,14 @@ export function AssetGrid(props: AssetGridProps) {
               return (
                 <li key={asset.id} class="group relative aspect-square overflow-hidden bg-muted">
                   {/* While photos are being picked the tile is a checkbox and never opens the viewer, so a
-                      tap cannot open a photo by mistake. `data-asset-id` stays either way: the viewer
-                      returns focus to the photo it was showing. */}
+                      tap cannot open a photo by mistake. `data-asset-id` names the tile of a photo either
+                      way; on the button it is also what the viewer returns focus to. */}
                   {selecting ? (
-                    <label class="block h-full w-full">
+                    <label class="block h-full w-full" data-asset-id={asset.id}>
                       <input
                         type="checkbox"
                         class="peer sr-only"
                         checked={isPicked}
-                        data-asset-id={asset.id}
                         aria-label={asset.filename ?? '写真'}
                         onChange={() => picked.toggle(asset.id)}
                       />

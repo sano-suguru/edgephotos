@@ -195,3 +195,166 @@ test.describe('timeline month navigation', () => {
     await expect(headings(page).first()).toHaveText('2024年1月')
   })
 })
+
+// Picking several photos and acting on them together (docs/decisions.md D-032). What only a browser shows
+// is the mode itself: a tap that picks instead of opening the viewer, the count, a selection that survives
+// another page being loaded, and what is left picked when one photo failed. The API's own decisions are
+// fixed by tests/integration/bulk-actions.test.ts.
+const ALBUM = {
+  id: '11111111-1111-4111-8111-111111111111',
+  title: 'まとめ先アルバム',
+  assetCount: 0,
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: '2024-01-01T00:00:00.000Z',
+}
+
+// Records what the client actually sent, so a test can tell "asked for 3 photos" from "asked for the page".
+type Sent = { album: string[]; favorite: { id: string; isFavorite: boolean }[] }
+
+async function serveActions(page: Page, failFor: string | null = null): Promise<Sent> {
+  const sent: Sent = { album: [], favorite: [] }
+  const fail = (route: Parameters<Parameters<Page['route']>[1]>[0]) =>
+    route.fulfill({ status: 500, json: { error: { code: 'INTERNAL', message: 'Internal error.' } } })
+
+  await page.route('**/api/v1/albums**', async (route) => {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'GET' && url.pathname === '/api/v1/albums') {
+      return route.fulfill({ json: { items: [ALBUM] } })
+    }
+    const member = /^\/api\/v1\/albums\/[^/]+\/assets\/(.+)$/.exec(url.pathname)
+    if (route.request().method() === 'PUT' && member) {
+      sent.album.push(member[1])
+      return member[1] === failFor ? fail(route) : route.fulfill({ status: 204, body: '' })
+    }
+    return route.fallback()
+  })
+
+  // Registered after serveLibrary, so this handler is asked first; everything but PATCH falls through to it.
+  await page.route('**/api/v1/assets/**', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    const id = new URL(route.request().url()).pathname.split('/').pop() as string
+    const isFavorite = (route.request().postDataJSON() as { isFavorite: boolean }).isFavorite
+    sent.favorite.push({ id, isFavorite })
+    if (id === failFor) return fail(route)
+    const item = ITEMS.find((i) => i.id === id) as Item
+    return route.fulfill({ json: { ...summary(item), isFavorite, previewUrl: PIXEL } })
+  })
+  return sent
+}
+
+const checkboxes = (page: Page) => page.getByRole('checkbox')
+const pickTile = (page: Page, index: number) => page.locator('label[data-asset-id]').nth(index)
+
+async function startSelecting(page: Page) {
+  await page.getByRole('button', { name: '選択', exact: true }).click()
+  await expect(page.getByRole('toolbar', { name: '選択した写真の操作' })).toBeVisible()
+}
+
+test.describe('selecting several photos', () => {
+  test.beforeEach(async ({ page }) => {
+    await serveLibrary(page)
+  })
+
+  test('picks photos without opening the viewer, counts them and clears them', async ({ page }) => {
+    await serveActions(page)
+    await openApp(page)
+    // Before selection mode a tap opens the photo, as it always did.
+    await page.locator('button[data-asset-id]').first().click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toBeHidden()
+
+    await startSelecting(page)
+    for (const index of [0, 1, 2]) await pickTile(page, index).click()
+    // No viewer opened on the way.
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(page.getByText('3枚を選択中')).toBeVisible()
+    await expect(checkboxes(page).and(page.locator(':checked'))).toHaveCount(3)
+
+    await page.getByRole('button', { name: '全解除' }).click()
+    await expect(page.getByText('写真を選んでください')).toBeVisible()
+    await expect(checkboxes(page).and(page.locator(':checked'))).toHaveCount(0)
+  })
+
+  test('keeps the selection when a further page is loaded', async ({ page }) => {
+    await serveActions(page)
+    await openApp(page)
+    await startSelecting(page)
+    await pickTile(page, 0).click()
+    await pickTile(page, 1).click()
+    await expect(page.getByText('2枚を選択中')).toBeVisible()
+
+    // Scrolling loads the next page, as it does for a reader; the button below the grid moves while the
+    // observer works, so clicking it would be a race.
+    const before = await page.locator('label[data-asset-id]').count()
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    await expect.poll(() => page.locator('label[data-asset-id]').count()).toBeGreaterThan(before)
+    await expect(page.getByText('2枚を選択中')).toBeVisible()
+    await expect(checkboxes(page).and(page.locator(':checked'))).toHaveCount(2)
+  })
+
+  test('adds the picked photos to an album and ends the selection', async ({ page }) => {
+    const sent = await serveActions(page)
+    await openApp(page)
+    await startSelecting(page)
+    const ids: string[] = []
+    for (const index of [0, 1, 2]) {
+      ids.push((await pickTile(page, index).getAttribute('data-asset-id')) as string)
+      await pickTile(page, index).click()
+    }
+    await page.getByRole('button', { name: 'アルバムに追加' }).click()
+    await page.getByRole('menuitem', { name: ALBUM.title }).click()
+
+    await expect(page.getByText(`3枚を「${ALBUM.title}」に追加しました`)).toBeVisible()
+    expect(sent.album.sort()).toEqual([...ids].sort())
+    // Everything succeeded, so the mode is over and nothing is left picked.
+    await expect(page.getByRole('toolbar', { name: '選択した写真の操作' })).toBeHidden()
+    await expect(page.getByRole('button', { name: '選択', exact: true })).toBeVisible()
+  })
+
+  test('leaves only the photo that failed picked, and retries just that one', async ({ page }) => {
+    await openApp(page)
+    const failing = (await page.locator('button[data-asset-id]').nth(1).getAttribute('data-asset-id')) as string
+    const sent = await serveActions(page, failing)
+    await page.reload()
+    await startSelecting(page)
+    for (const index of [0, 1, 2]) await pickTile(page, index).click()
+
+    await page.getByRole('button', { name: 'お気に入りに追加' }).click()
+    await expect(page.getByText(/2枚をお気に入りに追加しました（1枚は失敗）/)).toBeVisible()
+    // The two that worked stay done; only the failed photo is still picked, so a retry is for it alone.
+    expect(sent.favorite).toHaveLength(3)
+    await expect(page.getByText('1枚を選択中')).toBeVisible()
+    await expect(checkboxes(page).and(page.locator(':checked'))).toHaveCount(1)
+
+    sent.favorite.length = 0
+    await page.getByRole('button', { name: '再試行' }).click()
+    await expect.poll(() => sent.favorite.map((f) => f.id)).toEqual([failing])
+  })
+
+  test('confirms a trash with the number of photos, and cancelling changes nothing', async ({ page }) => {
+    await serveActions(page)
+    await openApp(page)
+    await startSelecting(page)
+    for (const index of [0, 1]) await pickTile(page, index).click()
+    await page.getByRole('button', { name: 'ゴミ箱へ移動' }).click()
+    const confirm = page.getByRole('dialog', { name: '2枚をゴミ箱に移動しますか？' })
+    await expect(confirm).toBeVisible()
+    await confirm.getByRole('button', { name: 'キャンセル' }).click()
+    await expect(confirm).toBeHidden()
+    await expect(page.getByText('2枚を選択中')).toBeVisible()
+  })
+
+  test('ends the selection when another month is opened', async ({ page }) => {
+    await serveActions(page)
+    await openApp(page)
+    await startSelecting(page)
+    await pickTile(page, 0).click()
+    await expect(page.getByText('1枚を選択中')).toBeVisible()
+
+    await jumpTo(page, '2023-03')
+    await expect(headings(page).first()).toHaveText('2023年3月')
+    await expect(page.getByRole('toolbar', { name: '選択した写真の操作' })).toBeHidden()
+    await expect(page.getByRole('button', { name: '選択', exact: true })).toBeVisible()
+  })
+})
