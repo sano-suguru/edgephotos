@@ -304,6 +304,8 @@ Client が PUT 前に APP1 / APP13 を取り除きます（`src/web/lib/jpeg-met
 
 **同じ file では変わらない失敗に再試行を出さない。** 転送の失敗（network、5xx、期限切れ）と、file そのものへの拒否は別に扱います。finalize が `422 UPLOAD_OBJECT_INVALID` で original について `incomplete_file` / `structure_unverified` / `content_type_mismatch` だけを報告した場合と、reserve が `400 VALIDATION_FAILED` を返した場合は、同じ file を送り直しても同じ答えになるため、その行を再試行の対象から外して理由を出します（`src/web/features/uploads/batch.ts`）。size や checksum、derivative についての拒否は転送の問題なので、これまでどおり再試行できます。
 
+file ではなく画面そのものへの拒否（`403 FORBIDDEN`、`403 ORIGIN_NOT_ALLOWED`、`503 SERVER_MISCONFIGURED`）も対象から外します。答えは file に依らず、deployment を変えない限り変わりません。`401 UNAUTHENTICATED` だけは再試行を残します。この code には JWKS の取得失敗のような一時的な原因も含まれ（`src/worker/auth/access.ts`）、同じ request が次に通ることがあるためです。文面は「ページを再読み込みしてください」をやめます。再読み込みすると選んだ file を失い、選び直しになるためです。代わりに、別のタブでログインしてから再試行する手順を出します。Access の session が切れたときに 401 として届くかは実環境で確認していません。
+
 **進行中の upload を一覧から落とさない。** 一覧は `slice(0, 200)` で切っていたため、201 枚目以降が進行中の件数に入らず、未完了のまま完了表示になっていました。新しく選んだ項目と進行中の項目は常に残し、古い完了済みの項目だけを削ります（`src/web/features/uploads/upload-list.ts`）。
 
 **前処理の並列数は 2 のままにする。** 2 が最適だと示したわけではありません。desktop の Browser の測定では、変えるだけの根拠が得られませんでした。

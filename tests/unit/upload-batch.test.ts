@@ -75,7 +75,14 @@ function fakeServer() {
   }
 }
 
-type Fault = (call: { phase: 'prepare' | 'put' | 'finalize'; name: string; url?: string }) => unknown
+type Fault = (call: {
+  phase: 'prepare' | 'reserve' | 'put' | 'finalize'
+  name: string
+  url?: string
+  // Stores the object before the call fails, which is what storage taking the bytes and the answer being
+  // lost looks like from here.
+  store?: () => void
+}) => unknown
 
 function harness(fault: Fault = () => undefined, limit = 2) {
   const server = fakeServer()
@@ -112,11 +119,18 @@ function harness(fault: Fault = () => undefined, limit = 2) {
     prepare,
     reserve: async (file, photo) => {
       calls.reserve.push(file.name)
+      const thrown = fault({ phase: 'reserve', name: file.name })
+      if (thrown) throw thrown
       return server.reserve(photo.sha256)
     },
     put: async (target, _body) => {
       calls.put.push(target.url)
-      const thrown = fault({ phase: 'put', name: target.url.split('/')[1] ?? '', url: target.url })
+      const thrown = fault({
+        phase: 'put',
+        name: target.url.split('/')[1] ?? '',
+        url: target.url,
+        store: () => server.put(target.url),
+      })
       if (thrown) throw thrown
       server.put(target.url)
     },
@@ -230,6 +244,29 @@ describe('retrying a batch', () => {
     expect(h.server.assets.size).toBe(1)
   })
 
+  it('registers a photo whose bytes arrived but whose PUT answer was lost, without sending them again', async () => {
+    // Storage took the original and the answer never came back, so the row failed with every object in
+    // place. The retry asks the server first, finalize finds nothing missing, and no byte travels twice.
+    let lost = true
+    const h = harness(({ phase, store }) => {
+      if (!lost || phase !== 'put') return undefined
+      store?.()
+      return offline()
+    })
+    await h.batch.enqueue([photo('a')])
+    expect(h.batch.items.value[0]).toMatchObject({ state: 'error', retryable: true })
+
+    lost = false
+    for (const c of Object.values(h.calls)) c.length = 0
+    await h.batch.retry()
+    expect(h.batch.items.value[0].state).toBe('done')
+    expect(h.calls.prepare).toEqual([])
+    expect(h.calls.reserve).toEqual([])
+    expect(h.calls.put).toEqual([])
+    expect(h.calls.finalize).toEqual(['upload-1'])
+    expect(h.server.assets.size).toBe(1)
+  })
+
   it('finishes a photo the server already stored even when its file would no longer prepare', async () => {
     // The worst shape of a lost finalize: the objects are in storage and the server registered the photo,
     // but the answer never arrived. If the retry prepared the file first — a HEIC this browser can no
@@ -333,6 +370,38 @@ describe('failures the same file cannot get past', () => {
     expect(h.server.assets.size).toBe(0)
   })
 
+  it.each([
+    [new ApiRequestError(403, 'FORBIDDEN', 'x'), '権限がありません'],
+    [new ApiRequestError(403, 'ORIGIN_NOT_ALLOWED', 'x'), 'このアドレスからは'],
+    [new ApiRequestError(503, 'SERVER_MISCONFIGURED', 'x'), 'サーバーの設定'],
+  ])('offers no retry when the server refuses this screen rather than the photo (%o)', async (err, text) => {
+    // Nothing about the file, so a second attempt asks the same question of the same deployment. The
+    // button would read as "this may work", and it never will until someone changes the deployment.
+    const h = harness(({ phase }) => (phase === 'reserve' ? err : undefined))
+    await h.batch.enqueue([photo('a')])
+    expect(h.batch.items.value[0]).toMatchObject({ state: 'error', retryable: false })
+    expect(h.batch.items.value[0].message).toContain(text)
+    expect(h.server.assets.size).toBe(0)
+  })
+
+  it('still offers a retry when the sign-in could not be confirmed', async () => {
+    // A 401 also covers a key fetch that simply failed, so the same request may pass next time. Reloading
+    // this page would throw the selection away, so the row keeps its retry and says what to do first.
+    let unauthenticated = true
+    const h = harness(({ phase }) =>
+      unauthenticated && phase === 'reserve' ? new ApiRequestError(401, 'UNAUTHENTICATED', 'x') : undefined,
+    )
+    await h.batch.enqueue([photo('a')])
+    expect(h.batch.items.value[0]).toMatchObject({ state: 'error', retryable: true })
+    expect(h.batch.items.value[0].message).toContain('ログイン')
+    expect(h.batch.items.value[0].message).not.toContain('再読み込み')
+
+    unauthenticated = false
+    await h.batch.retry()
+    expect(h.batch.items.value[0].state).toBe('done')
+    expect(h.server.assets.size).toBe(1)
+  })
+
   it('still offers a retry when finalize refuses what was transferred, not the file', async () => {
     let bad = true
     const h = harness(({ phase }) =>
@@ -361,31 +430,38 @@ describe('a large selection', () => {
   })
 
   it('converges on one asset per photo when the batch mixes success, duplicates and failures', async () => {
-    // 60 distinct photos, 20 of them selected twice, and every fifth transfer failing once.
+    // 60 distinct photos, 20 of them selected twice, every fifth transfer failing once, and 6 files the
+    // browser can never read: created, duplicate, temporary failure and permanent failure in one batch.
     const distinct = Array.from({ length: 60 }, (_, i) => `photo-${i}`)
+    const undecodable = Array.from({ length: 6 }, (_, i) => photo(`bad${i}`))
     const files = [
       ...distinct.map((c, i) => photo(`a${i}`, c)),
       ...distinct.slice(0, 20).map((c, i) => photo(`b${i}`, c)),
+      ...undecodable,
     ]
     let broken = true
-    const h = harness(({ phase, url }) => {
+    const h = harness(({ phase, name, url }) => {
+      if (phase === 'prepare' && name.startsWith('bad')) return new ImageDecodeError('undecodable', 'image/jpeg')
       if (!broken || phase !== 'put' || !url) return undefined
       const n = Number(url.split('/')[0].replace('upload-', ''))
       return n % 5 === 0 ? offline() : undefined
     })
     await h.batch.enqueue(files)
     const afterFirst = countUploads(h.batch.items.value)
-    expect(afterFirst.failed).toBeGreaterThan(0)
-    expect(afterFirst.done + afterFirst.duplicate).toBe(80 - afterFirst.failed)
+    expect(afterFirst.failed).toBeGreaterThan(6)
+    expect(afterFirst.done + afterFirst.duplicate).toBe(86 - afterFirst.failed)
 
     broken = false
     await h.batch.retry()
     const final = countUploads(h.batch.items.value)
-    expect(final.failed).toBe(0)
+    // Only the permanent failures are left, and they are the ones the panel offers no retry for.
+    expect(final.failed).toBe(6)
+    expect(h.batch.items.value.filter((u) => u.state === 'error' && u.retryable)).toEqual([])
     expect(final.done + final.duplicate).toBe(80)
-    // 80 rows, 60 photos: every row settled, and the library holds each photo once.
+    // 86 rows, 60 photos: every row settled, and the library holds each photo once.
     expect(h.server.assets.size).toBe(60)
     expect(h.server.uploads.size).toBeGreaterThan(60)
+    expect(uploadHeadline(final)).toBe('60 枚を追加しました、20 枚は登録済み、6 枚は追加できませんでした')
   })
 })
 
