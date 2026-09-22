@@ -30,7 +30,7 @@ function library(): Item[] {
   return items.sort((a, b) => (a.takenAt < b.takenAt ? 1 : -1))
 }
 
-const ITEMS = library()
+const ALL_ITEMS = library()
 
 // The same shape the Worker returns. A cursor is the position above an item: the page that starts there
 // begins with it, and reading the other way ends just above it.
@@ -55,9 +55,15 @@ function summary(item: Item) {
   }
 }
 
+// Photos a test moved to the trash. The library answers without them from then on, so the grid has to
+// read the server again to be right (docs/decisions.md D-032). Empty for every other test.
+const gone = new Set<string>()
+
 async function serveLibrary(page: Page) {
+  gone.clear()
   await page.route('**/api/v1/assets**', async (route) => {
     const url = new URL(route.request().url())
+    const ITEMS = gone.size === 0 ? ALL_ITEMS : ALL_ITEMS.filter((i) => !gone.has(i.id))
     if (url.pathname.endsWith('/months')) {
       const counts = new Map<string, number>()
       for (const [index, item] of ITEMS.entries()) if (!counts.has(item.month)) counts.set(item.month, index)
@@ -152,7 +158,7 @@ test.describe('timeline month navigation', () => {
     // The photo the reader was on is still there, below the page that was added above it.
     expect(ids.indexOf(firstTile)).toBe(PAGE_SIZE)
     // Consecutive in the library's own order: nothing was skipped between the two pages.
-    const order = ITEMS.map((i) => i.id)
+    const order = ALL_ITEMS.map((i) => i.id)
     expect(ids).toEqual(order.slice(order.indexOf(ids[0]), order.indexOf(ids[0]) + ids.length))
   })
 
@@ -209,10 +215,17 @@ const ALBUM = {
 }
 
 // Records what the client actually sent, so a test can tell "asked for 3 photos" from "asked for the page".
-type Sent = { album: string[]; favorite: { id: string; isFavorite: boolean }[] }
+// `failing` is mutable: a photo that failed once can be made to succeed on the retry, which is what a
+// passing network looks like.
+type Sent = {
+  album: string[]
+  favorite: { id: string; isFavorite: boolean }[]
+  trash: string[]
+  failing: string | null
+}
 
 async function serveActions(page: Page, failFor: string | null = null): Promise<Sent> {
-  const sent: Sent = { album: [], favorite: [] }
+  const sent: Sent = { album: [], favorite: [], trash: [], failing: failFor }
   const fail = (route: Parameters<Parameters<Page['route']>[1]>[0]) =>
     route.fulfill({ status: 500, json: { error: { code: 'INTERNAL', message: 'Internal error.' } } })
 
@@ -224,19 +237,29 @@ async function serveActions(page: Page, failFor: string | null = null): Promise<
     const member = /^\/api\/v1\/albums\/[^/]+\/assets\/(.+)$/.exec(url.pathname)
     if (route.request().method() === 'PUT' && member) {
       sent.album.push(member[1])
-      return member[1] === failFor ? fail(route) : route.fulfill({ status: 204, body: '' })
+      return member[1] === sent.failing ? fail(route) : route.fulfill({ status: 204, body: '' })
     }
     return route.fallback()
   })
 
-  // Registered after serveLibrary, so this handler is asked first; everything but PATCH falls through to it.
+  // Registered after serveLibrary, so this handler is asked first; the rest falls through to it.
   await page.route('**/api/v1/assets/**', async (route) => {
+    const url = new URL(route.request().url())
+    const trashed = /^\/api\/v1\/assets\/(.+)\/trash$/.exec(url.pathname)
+    if (route.request().method() === 'POST' && trashed) {
+      sent.trash.push(trashed[1])
+      if (trashed[1] === sent.failing) return fail(route)
+      // The library answers without it from now on, as the real timeline does.
+      gone.add(trashed[1])
+      const item = ALL_ITEMS.find((i) => i.id === trashed[1]) as Item
+      return route.fulfill({ json: { ...summary(item), trashedAt: '2024-02-01T00:00:00.000Z', previewUrl: PIXEL } })
+    }
     if (route.request().method() !== 'PATCH') return route.fallback()
-    const id = new URL(route.request().url()).pathname.split('/').pop() as string
+    const id = url.pathname.split('/').pop() as string
     const isFavorite = (route.request().postDataJSON() as { isFavorite: boolean }).isFavorite
     sent.favorite.push({ id, isFavorite })
-    if (id === failFor) return fail(route)
-    const item = ITEMS.find((i) => i.id === id) as Item
+    if (id === sent.failing) return fail(route)
+    const item = ALL_ITEMS.find((i) => i.id === id) as Item
     return route.fulfill({ json: { ...summary(item), isFavorite, previewUrl: PIXEL } })
   })
   return sent
@@ -332,6 +355,47 @@ test.describe('selecting several photos', () => {
     await expect.poll(() => sent.favorite.map((f) => f.id)).toEqual([failing])
   })
 
+  test('a photo that failed once is done after the retry, and the selection ends', async ({ page }) => {
+    await openApp(page)
+    const failing = (await page.locator('button[data-asset-id]').nth(2).getAttribute('data-asset-id')) as string
+    const sent = await serveActions(page, failing)
+    await page.reload()
+    await startSelecting(page)
+    for (const index of [0, 1, 2]) await pickTile(page, index).click()
+    await page.getByRole('button', { name: 'アルバムに追加' }).click()
+    await page.getByRole('menuitem', { name: ALBUM.title }).click()
+    await expect(page.getByText(/2枚を「.+」に追加しました（1枚は失敗）/)).toBeVisible()
+
+    // The next attempt gets through, as a passing network would.
+    sent.failing = null
+    sent.album.length = 0
+    await page.getByRole('button', { name: '再試行' }).click()
+    await expect(page.getByText(`1枚を「${ALBUM.title}」に追加しました`)).toBeVisible()
+    expect(sent.album).toEqual([failing])
+    // Nothing is left over: the mode is finished and no photo stays picked.
+    await expect(page.getByRole('toolbar', { name: '選択した写真の操作' })).toBeHidden()
+    await expect(page.getByRole('button', { name: '選択', exact: true })).toBeVisible()
+  })
+
+  test('moves the confirmed photos to the trash and shows the timeline without them', async ({ page }) => {
+    const sent = await serveActions(page)
+    await openApp(page)
+    await startSelecting(page)
+    const ids: string[] = []
+    for (const index of [0, 1]) {
+      ids.push((await pickTile(page, index).getAttribute('data-asset-id')) as string)
+      await pickTile(page, index).click()
+    }
+    await page.getByRole('button', { name: 'ゴミ箱へ移動' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'ゴミ箱へ移動' }).click()
+
+    await expect(page.getByText('2枚をゴミ箱に移動しました')).toBeVisible()
+    expect(sent.trash.sort()).toEqual([...ids].sort())
+    // The grid read the server again, so the photos are off the timeline without a reload.
+    for (const id of ids) await expect(page.locator(`[data-asset-id="${id}"]`)).toHaveCount(0)
+    await expect(page.getByRole('toolbar', { name: '選択した写真の操作' })).toBeHidden()
+  })
+
   test('confirms a trash with the number of photos, and cancelling changes nothing', async ({ page }) => {
     await serveActions(page)
     await openApp(page)
@@ -342,6 +406,25 @@ test.describe('selecting several photos', () => {
     await expect(confirm).toBeVisible()
     await confirm.getByRole('button', { name: 'キャンセル' }).click()
     await expect(confirm).toBeHidden()
+    await expect(page.getByText('2枚を選択中')).toBeVisible()
+
+    // Escape closes what is on top, not the selection underneath it. Base UI moves the focus into a popup
+    // a frame after it appears, and answers Escape from there, so wait for that before pressing it.
+    const focusInside = (role: string) =>
+      expect.poll(() => page.evaluate((r) => !!document.activeElement?.closest(`[role="${r}"]`), role)).toBe(true)
+
+    await page.getByRole('button', { name: 'ゴミ箱へ移動' }).click()
+    await expect(confirm).toBeVisible()
+    await focusInside('dialog')
+    await page.keyboard.press('Escape')
+    await expect(confirm).toBeHidden()
+    await expect(page.getByText('2枚を選択中')).toBeVisible()
+
+    await page.getByRole('button', { name: 'アルバムに追加' }).click()
+    await expect(page.getByRole('menu')).toBeVisible()
+    await focusInside('menu')
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toBeHidden()
     await expect(page.getByText('2枚を選択中')).toBeVisible()
   })
 

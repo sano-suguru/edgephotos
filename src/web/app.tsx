@@ -89,6 +89,7 @@ function Page() {
           <AssetGrid
             key="timeline"
             selectable
+            startKey={timelineMonth.value}
             start={startFor(months.value, timelineMonth.value, monthsError.value !== null)}
             empty={
               <>

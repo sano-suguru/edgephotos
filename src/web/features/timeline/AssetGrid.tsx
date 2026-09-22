@@ -28,6 +28,10 @@ export type AssetGridProps = {
   // Offers picking several photos and acting on them together (docs/decisions.md D-032). Not the trash:
   // deleting permanently in bulk is deliberately not offered.
   selectable?: boolean
+  // What the reader chose as the starting point (the month, for the timeline). When this changes the
+  // reader moved, which ends a selection. `start` itself is not that signal: the month list is read again
+  // after photos are trashed, and the same month can then begin at another photo.
+  startKey?: string | null
 }
 
 type Group = { key: string; label: string; items: { asset: AssetSummary; index: number }[] }
@@ -76,7 +80,8 @@ export function AssetGrid(props: AssetGridProps) {
   const version = useSignal(0)
   // When the first loaded page arrived (performance.now(), so a wrong device clock does not matter).
   const loadedAt = useRef(0)
-  const refreshing = useRef(false)
+  // The read in flight, so a forced refresh can wait for it instead of stepping aside.
+  const refreshing = useRef<Promise<void> | null>(null)
   // A reload that arrived while the viewer was open; it would drop the photo being viewed.
   const reloadPending = useRef(false)
   // Thumbnails already on screen keep their (now expired) URL: the bytes are loaded, and a new URL would
@@ -96,12 +101,14 @@ export function AssetGrid(props: AssetGridProps) {
   const { items, cursor, topCursor, loading, loadingNewer, loaded, error, loadPage, loadNewer } = list.current
 
   useEffect(() => {
-    const next = props.start ?? null
-    // Moving to another month is a move, so it ends the selection rather than carrying picks the reader can
-    // no longer see into an action.
-    if (next !== start.peek()) picked.exit()
-    start.value = next
+    start.value = props.start ?? null
   }, [props.start])
+
+  // Moving to another month leaves the photos that were picked behind, rather than carrying them into an
+  // action the reader can no longer see.
+  useEffect(() => {
+    picked.exit()
+  }, [props.startKey])
 
   useSignalEffect(() => {
     // Refetch when uploads finish, when the parent asks for it, or when another month was chosen.
@@ -119,11 +126,19 @@ export function AssetGrid(props: AssetGridProps) {
   })
 
   // Escape leaves selection mode wherever the focus is. On the window, not on the grid, so it also works
-  // while the focus sits on the page around it; a dialog or a menu that is open answers first.
+  // while the focus sits on the page around it.
+  //
+  // Whatever is on top answers Escape first, so the key is ignored while any dialog or menu is open:
+  // cancelling the trash confirmation must not also throw the selection away. The test is whether one is
+  // open, not where the focus is. Base UI closes on its own listener without marking the event handled,
+  // and it moves the focus into a dialog a frame after opening it, so an Escape pressed straight away
+  // still reports the trigger as its target.
   useSignalEffect(() => {
     if (!picked.active.value) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) exitSelection()
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return
+      exitSelection()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -169,9 +184,23 @@ export function AssetGrid(props: AssetGridProps) {
   //   image can start too late. At most once a minute, so a page of broken images asks once.
   // - a bulk action that finished (`force`), which needs the list to show what the library now holds,
   //   including changes another member made meanwhile.
-  async function refreshItems(force = false) {
-    if (refreshing.current || (!force && performance.now() - loadedAt.current < 60_000)) return
-    refreshing.current = true
+  async function refreshItems(force = false): Promise<void> {
+    // A read already running was started before the action, so it cannot show what the action changed:
+    // a forced caller waits for it and then reads again. An unforced one simply steps aside.
+    if (refreshing.current) {
+      if (!force) return
+      await refreshing.current
+    } else if (!force && performance.now() - loadedAt.current < 60_000) return
+    const run = readAgain()
+    refreshing.current = run
+    try {
+      await run
+    } finally {
+      if (refreshing.current === run) refreshing.current = null
+    }
+  }
+
+  async function readAgain(): Promise<void> {
     try {
       // Reads exactly the pages this list was built from, so a list that starts at a month stays on it.
       const fresh = await list.current?.reloadRange()
@@ -188,8 +217,6 @@ export function AssetGrid(props: AssetGridProps) {
       picked.keep(fresh.items.map((a) => a.id))
     } catch {
       // Leave the broken images; the next image error retries.
-    } finally {
-      refreshing.current = false
     }
   }
 
