@@ -804,3 +804,63 @@ full text search、AI / semantic search、tag、場所、uploader での絞り�
 - month query の rows_read または時間が、実測で運用上の問題になったとき（式 index、あるいは維持する集計 table を候補に入れる）
 - 実測した DOM node 数・memory が問題になったとき（virtualization を候補に入れる）
 - `takenAt` の無い写真の月が、実際の利用で分かりにくいと分かったとき
+
+## D-032: まとめての操作は、既存の冪等な単体 API を並列に呼んで行う
+
+**状態:** 採用（2026-09-22）
+
+数十枚を選んで album へ入れる、まとめてゴミ箱へ送る、といった整理の操作を入れます。写真を 1 枚ずつ viewer から扱う必要をなくすためです。
+
+やり方は 2 つありました。bulk endpoint を足して asset ID の配列を受け取るか、既にある単体 endpoint をそのまま並列に呼ぶかです。先に測りました（[benchmarks.md](benchmarks.md)）。
+
+50 枚を 6 並列で呼んだときの server 側の cost は、album 追加・favorite・trash のいずれも 24〜60 ms で、request あたり読む行は 1 行です。1,000 件と 10,000 件で変わりません。既存の endpoint がどれも id で 1 行を引くだけだからです。
+
+そのため endpoint は追加しません。bulk endpoint が減らせるのは往復の回数だけで、server の処理量は同じです。household の端末から 50 枚なら、6 並列で約 9 波です。
+
+**1 枚 = 1 request = 1 つの結果とする。** batch は全体として失敗しません。10 枚のうち 1 枚が失敗しても、成功した 9 枚は成功のままです。失敗した asset だけを選び直して再試行できます。all-or-nothing にはしません。D1 と R2 をまたいで巻き戻す仕組みを作らないという既存の方針（[D-012](#d-012-finalize-の保存確認は存在サイズ形式派生画像-metadata-とする)、[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）と同じです。
+
+**結果の分類は HTTP status ではなく error code で行う。** 5 つに分けます。
+
+| 分類 | 何が起きたか | 再試行 |
+| --- | --- | --- |
+| ok | 望む状態になった（元からその状態だった場合を含む） | 不要 |
+| gone | `ASSET_NOT_FOUND`。別 member が完全に削除した | しない |
+| skipped | `ASSET_TRASHED`。その写真には適用しない | しない |
+| blocked | 操作そのものが成立していない | 出さない |
+| failed | それ以外 | 出す |
+
+`ALBUM_NOT_FOUND` は `ASSET_NOT_FOUND` と同じ 404 ですが、無いのは写真ではなく album です。写真 1 枚の問題として飲み込みません。同時に、同じ request をもう一度送っても album は戻らないので、再試行も出しません。`UNAUTHENTICATED` / `FORBIDDEN` / `ORIGIN_NOT_ALLOWED` / `VALIDATION_FAILED` / `SERVER_MISCONFIGURED` も同じ理由で blocked です。blocked のときは選択をそのまま残します。別の album を選び直せるようにするためです。
+
+この区別は upload の batch が既に持っているもの（`settledFailure`）と同じ考え方です。「もう一度送れば変わるか」で分けます。
+
+**favorite は toggle ではなく `true` / `false` を送る。** 再試行が状態を反転させないためです。server が 2xx を返した時点で望む状態になっているので、「変更した」と「既にその状態だった」を client は区別しません。
+
+**破壊的な操作は件数を含む確認を通す。** 1 枚の trash は undo 付きの toast ですが（`ConfirmDialog` の「元に戻せる操作は toast」）、50 枚では toast 1 つで 50 件を戻すことになり、失敗した一部だけを戻す形にもなりません。まとめてゴミ箱へ送るときだけ、件数を書いた確認を出します。original は削除しません。既存の trash / restore / purge のままです。完全削除のまとめ操作は入れません。
+
+**実行中は選択を凍結する。** 実行は開始時点の写真に対して行われます。その間に選択を変えられると、一度も送っていない写真が選択から消えたり、読者が外した写真が結果の書き戻しで戻ってきたりします。50 枚で 1〜2 秒なので、途中で選択を編集できる価値より、この race を無くす価値が上回ります。background job にはしません。
+
+凍結は入口ごとに掛けます。checkbox と bar の各操作に加え、選択を抜ける Escape も実行中は効きません。control だけを disabled にすると keyboard から同じ race に入れます。
+
+**album の一覧は選択を始めるたびに読み直す。** `ALBUM_NOT_FOUND` のときは選択を残して「別の album を選ぶ」で回復させるので、その menu が前回の一覧のままでは噛み合いません。cache を無効化する仕組みは作らず、選択の開始を読み直す契機にします。
+
+**selection は view ごとの一時 state とする。** URL にも IndexedDB にも書きません。grid は view ごとに作り直されるので、view を移ると選択は消えます。view をまたぐ manager は作りません。年月の jump も選択を解除します（別の場所へ移動する操作なので）。pagination で page を足したときは保持します。
+
+却下した案:
+
+- bulk endpoint を先に作る: 測定が必要性を示していない。増えるのは partial result の契約と上限値と validation で、減るのは往復だけ
+- client 側で重複排除してから送る: 別の member が同時に触るので、client の知識は必ず古くなりうる。album membership の uniqueness は既に server にある
+- 汎用の job queue / undo history: [将来要件を先回りしない](../AGENTS.md#6-将来要件を先回りしない)
+
+影響: 公開 API は変わりません。`pnpm bench` に bulk の測定が増えます。
+
+残るリスク:
+
+- 選択して操作するまでの間に別の member が写真を変えても、決めるのは server です。結果は写真ごとに `ASSET_NOT_FOUND` / `ASSET_TRASHED` として返り、件数で報告します。画面の選択が正しいことは前提にしていません
+- 同じ写真に対する操作が 2 人から同時に届いた場合、どちらも冪等なので最後の状態に落ち着きます。どちらが先だったかは記録しません
+- 失敗した写真が残ったまま画面を離れると、その選択は消えます。写真は操作前の状態のままで、もう一度選び直せます
+- 操作は成功したのに直後の読み直しが失敗した場合、画面には古い tile が残ります。toast がそう伝えるので、再読み込みで直せます
+
+再検討する条件:
+
+- 1 回の選択が数百枚に伸びたとき
+- 実機の往復時間で待ちが体感できるとき（先に測る。bulk endpoint はそのときの候補で、partial result の形は上のまま持ち込む）

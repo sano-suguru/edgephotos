@@ -88,6 +88,8 @@ function Page() {
           </div>
           <AssetGrid
             key="timeline"
+            selectable
+            startKey={timelineMonth.value}
             start={startFor(months.value, timelineMonth.value, monthsError.value !== null)}
             empty={
               <>
@@ -106,6 +108,7 @@ function Page() {
           <PageTitle>お気に入り</PageTitle>
           <AssetGrid
             key="favorites"
+            selectable
             empty={
               <>
                 <Star class="size-8 text-muted-foreground/50" />

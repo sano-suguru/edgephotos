@@ -13,6 +13,8 @@ declare global {
       BENCH_SIZES?: string
       BENCH_BACKUP_MAX?: string
       BENCH_BIG_ALBUM?: string
+      BENCH_BULK_SELECTION?: string
+      BENCH_BULK_CONCURRENCY?: string
     }
   }
 }

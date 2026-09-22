@@ -4,6 +4,24 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## 複数選択とまとめての操作（2026-09-22）
+
+timeline / favorites / album で写真を複数選び、album への追加・お気に入り・ゴミ箱への移動をまとめて行えるようにしました。写真を 1 枚ずつ viewer から扱う必要がなくなります。
+
+選択は明示的に始めます。通常の tap はこれまでどおり写真を開きます。選択中の tile は checkbox なので、tap でも keyboard（Tab と Space）でも選べ、viewer は開きません。選択件数・全解除・実行できる操作は画面上端に留まる bar に出ます。
+
+API は増やしていません。1 枚 = 1 request で、既にある冪等な endpoint を 6 並列で呼びます。50 枚ぶんの server 側 cost を測った上での判断です（[D-032](decisions.md)、[benchmarks.md](benchmarks.md)）。
+
+まとめての操作は全体としては失敗しません。10 枚のうち 1 枚が失敗しても、残りは成功したままです。終わったあとに選択へ残るのは、まだ読者の判断が要る写真だけです。別の member が消した写真（`ASSET_NOT_FOUND`）とゴミ箱にある写真（`ASSET_TRASHED`）は失敗ではなく、件数として報告します。
+
+再試行は「もう一度送れば変わるもの」にだけ出します。album が消えている場合のように、同じ request では変わらないものには出しません。その場合は選択を残すので、別の album を選び直せます。
+
+実行中は選択を凍結します。実行は開始時点の写真に対して行われるためです。
+
+ゴミ箱へまとめて移す操作は、件数を書いた確認を通します。original は削除せず、既存の trash / restore / purge のままです。完全削除のまとめ操作は入れていません。
+
+選択は view ごとの一時 state です。URL にも端末にも保存しません。page を足しても残り、年月を移るか別の view へ行くと終わります。
+
 ## timeline の年月 navigation（2026-09-22）
 
 写真が数千枚あっても、目的の時期へ直接移動できるようにしました。検索基盤は作っていません。

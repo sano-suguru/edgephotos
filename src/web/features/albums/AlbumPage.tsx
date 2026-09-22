@@ -100,6 +100,7 @@ export function AlbumPage({ id }: { id: string }) {
       <AssetGrid
         key={current.id}
         mode="album"
+        selectable
         albumId={current.id}
         empty={
           <>

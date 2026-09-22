@@ -104,3 +104,38 @@ test('photo viewer steps through photos from the keyboard', async ({ page }) => 
   await expect(viewer).toBeHidden()
   await expect(tile(page, order[1] as string)).toBeFocused()
 })
+
+// Picking photos from the keyboard: the way in is a button, each tile is a checkbox reached with Tab and
+// toggled with Space, and Escape leaves the mode (docs/decisions.md D-032).
+test('photos can be picked and the selection left from the keyboard', async ({ page }) => {
+  await openApp(page)
+  const names = [uniqueName('kb-sel-a'), uniqueName('kb-sel-b')].map((n) => `${n}.jpg`)
+  const files = []
+  for (const name of names) files.push({ name, mimeType: 'image/jpeg', buffer: await makeJpeg(page, 320, 240) })
+  await uploadFiles(page, files)
+  await page.reload()
+  for (const name of names) await expect(tile(page, name)).toBeVisible()
+
+  const enter = page.getByRole('button', { name: '選択', exact: true })
+  await enter.focus()
+  await page.keyboard.press('Enter')
+  const toolbar = page.getByRole('toolbar', { name: '選択した写真の操作' })
+  await expect(toolbar).toBeVisible()
+
+  // Tab from the last control of the bar reaches the photos; Space picks the one that has focus.
+  const first = page.getByRole('checkbox').first()
+  await first.focus()
+  await page.keyboard.press('Space')
+  await expect(first).toBeChecked()
+  await expect(page.getByText('1枚を選択中')).toBeVisible()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Space')
+  await expect(page.getByText('2枚を選択中')).toBeVisible()
+  // Space on a picked photo lets it go again.
+  await page.keyboard.press('Space')
+  await expect(page.getByText('1枚を選択中')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(toolbar).toBeHidden()
+  await expect(enter).toBeVisible()
+})

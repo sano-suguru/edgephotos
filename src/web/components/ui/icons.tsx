@@ -93,6 +93,17 @@ export const Library = (p: P) => (
     <path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5M3 12c0 1.7 4 3 9 3s9-1.3 9-3" />
   </Icon>
 )
+export const Check = (p: P) => (
+  <Icon {...p}>
+    <path d="m5 13 4 4L19 7" />
+  </Icon>
+)
+export const Select = (p: P) => (
+  <Icon {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="m8 12 3 3 5-6" />
+  </Icon>
+)
 export const Restore = (p: P) => (
   <Icon {...p}>
     <path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" />

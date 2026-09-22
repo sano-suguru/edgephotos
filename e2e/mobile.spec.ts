@@ -115,3 +115,38 @@ test('phone layout: navigation, viewer and share page fit and respond to taps', 
   expect(await noHorizontalScroll(guest)).toBe(true)
   await guestContext.close()
 })
+
+// Picking photos on a phone: the way in and every action are full touch targets, the bar stays on screen
+// while the grid scrolls, and a tap picks a photo instead of opening it (docs/decisions.md D-032).
+test('phone layout: photos are picked by tapping, and the actions stay in reach', async ({ page }) => {
+  await openApp(page)
+  const photo = `${uniqueName('phone-pick')}.jpg`
+  await uploadPhoto(page, photo, 900, 1600)
+  await expect(uploadPanel(page)).toBeHidden({ timeout: 10_000 })
+
+  const enter = page.getByRole('button', { name: '選択', exact: true })
+  const enterBox = await enter.boundingBox()
+  expect(enterBox?.height).toBeGreaterThanOrEqual(44)
+  await enter.tap()
+
+  const toolbar = page.getByRole('toolbar', { name: '選択した写真の操作' })
+  await expectInViewport(page, toolbar)
+  for (const name of ['選択を終了', '全解除', 'お気に入りに追加', 'アルバムに追加', 'ゴミ箱へ移動', 'その他の操作']) {
+    const box = await toolbar.getByRole('button', { name }).boundingBox()
+    expect(box?.height, name).toBeGreaterThanOrEqual(44)
+  }
+
+  // A tap picks the photo; the viewer stays closed.
+  await page.locator('label[data-asset-id]').first().tap()
+  await expect(page.getByText('1枚を選択中')).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(await noHorizontalScroll(page)).toBe(true)
+
+  // The bar keeps the top edge once the grid has scrolled.
+  await page.evaluate(() => window.scrollBy(0, 600))
+  await expect(toolbar).toBeInViewport()
+  await expect.poll(async () => (await toolbar.boundingBox())?.y).toBeLessThan(80)
+
+  await toolbar.getByRole('button', { name: '選択を終了' }).tap()
+  await expect(toolbar).toBeHidden()
+})
