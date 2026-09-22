@@ -4,7 +4,7 @@ import { ApiRequestError } from '../../src/web/lib/api/error'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
 
 const apiError = (status: number, code: string) => new ApiRequestError(status, code, code)
-const done = (ok: string[]) => ({ ok, gone: [], skipped: [], failed: [], message: null })
+const done = (ok: string[]) => ({ ok, gone: [], skipped: [], blocked: [], failed: [], message: null })
 
 describe('classifyBulkError', () => {
   it('treats a photo another member deleted as gone', () => {
@@ -16,10 +16,16 @@ describe('classifyBulkError', () => {
   })
 
   it('does not take an album that is gone for a photo that is gone', () => {
-    expect(classifyBulkError(apiError(404, 'ALBUM_NOT_FOUND'))).toBe('failed')
+    expect(classifyBulkError(apiError(404, 'ALBUM_NOT_FOUND'))).toBe('blocked')
   })
 
-  it('treats a server error as a failure', () => {
+  it('treats what sending the same request again cannot change as blocked', () => {
+    for (const code of ['UNAUTHENTICATED', 'FORBIDDEN', 'ORIGIN_NOT_ALLOWED', 'VALIDATION_FAILED']) {
+      expect(classifyBulkError(apiError(400, code)), code).toBe('blocked')
+    }
+  })
+
+  it('treats a server error as a failure worth another attempt', () => {
     expect(classifyBulkError(apiError(500, 'INTERNAL'))).toBe('failed')
   })
 
@@ -49,16 +55,37 @@ describe('runBulk', () => {
     expect(summary.message).toBeTruthy()
   })
 
-  it('separates photos that are gone or skipped from failures', async () => {
-    const summary = await runBulk(['a', 'b', 'c', 'd'], async (id) => {
+  it('reports an album that is gone as blocking the operation, not as the photos failing', async () => {
+    const summary = await runBulk(['a', 'b'], async () => {
+      throw apiError(404, 'ALBUM_NOT_FOUND')
+    })
+    expect(summary.blocked).toEqual(['a', 'b'])
+    expect(summary.failed).toEqual([])
+    expect(summary.gone).toEqual([])
+    expect(summary.message).toContain('アルバム')
+  })
+
+  it('says what is in the way before what may pass on another attempt', async () => {
+    const summary = await runBulk(['a', 'b'], async (id) => {
+      throw id === 'a' ? apiError(500, 'INTERNAL') : apiError(404, 'ALBUM_NOT_FOUND')
+    })
+    expect(summary.failed).toEqual(['a'])
+    expect(summary.blocked).toEqual(['b'])
+    expect(summary.message).toContain('アルバム')
+  })
+
+  it('separates photos that are gone, skipped or blocked from failures', async () => {
+    const summary = await runBulk(['a', 'b', 'c', 'd', 'e'], async (id) => {
       if (id === 'b') throw apiError(404, 'ASSET_NOT_FOUND')
       if (id === 'c') throw apiError(409, 'ASSET_TRASHED')
       if (id === 'd') throw apiError(503, 'SERVER_MISCONFIGURED')
+      if (id === 'e') throw apiError(500, 'INTERNAL')
     })
     expect(summary.ok).toEqual(['a'])
     expect(summary.gone).toEqual(['b'])
     expect(summary.skipped).toEqual(['c'])
-    expect(summary.failed).toEqual(['d'])
+    expect(summary.blocked).toEqual(['d'])
+    expect(summary.failed).toEqual(['e'])
   })
 
   it('reports the photos in the order they were selected', async () => {
@@ -114,7 +141,14 @@ describe('describeBulk', () => {
   })
 
   it('says what was done and what was not', () => {
-    const summary = { ok: ['a'], gone: ['b'], skipped: ['c'], failed: ['d'], message: 'サーバーで問題が発生しました。' }
+    const summary = {
+      ok: ['a'],
+      gone: ['b'],
+      skipped: ['c'],
+      blocked: [],
+      failed: ['d'],
+      message: 'サーバーで問題が発生しました。',
+    }
     const text = describeBulk('album-add', summary, '旅行')
     expect(text).toContain('1枚を「旅行」に追加しました')
     expect(text).toContain('1枚は見つかりません')
@@ -124,7 +158,7 @@ describe('describeBulk', () => {
   })
 
   it('leaves out the kinds that did not happen', () => {
-    const summary = { ok: ['a', 'b'], gone: [], skipped: [], failed: ['c'], message: 'だめでした' }
+    const summary = { ok: ['a', 'b'], gone: [], skipped: [], blocked: [], failed: ['c'], message: 'だめでした' }
     const text = describeBulk('trash', summary)
     expect(text).toContain('2枚をゴミ箱に移動しました')
     expect(text).toContain('1枚は失敗')
@@ -132,14 +166,28 @@ describe('describeBulk', () => {
   })
 
   it('does not claim anything was done when nothing succeeded', () => {
-    const summary = { ok: [], gone: [], skipped: [], failed: ['a', 'b'], message: 'だめでした' }
+    const summary = { ok: [], gone: [], skipped: [], blocked: [], failed: ['a', 'b'], message: 'だめでした' }
     expect(describeBulk('favorite-on', summary)).toBe(
       'どの写真もお気に入りに追加できませんでした（2枚は失敗） だめでした',
     )
   })
 
+  it('names the photos an album that is gone stopped', () => {
+    const summary = {
+      ok: [],
+      gone: [],
+      skipped: [],
+      blocked: ['a', 'b'],
+      failed: [],
+      message: 'アルバムが見つかりません。',
+    }
+    expect(describeBulk('album-add', summary, '旅行')).toBe(
+      'どの写真もアルバムに追加できませんでした（2枚は実行できません） アルバムが見つかりません。',
+    )
+  })
+
   it('says a photo is gone without calling it a failure', () => {
-    const summary = { ok: [], gone: ['a'], skipped: [], failed: [], message: null }
+    const summary = { ok: [], gone: ['a'], skipped: [], blocked: [], failed: [], message: null }
     expect(describeBulk('trash', summary)).toBe('どの写真もゴミ箱へ移動できませんでした（1枚は見つかりません）')
   })
 })

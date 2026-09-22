@@ -222,10 +222,17 @@ type Sent = {
   favorite: { id: string; isFavorite: boolean }[]
   trash: string[]
   failing: string | null
+  // Set to hold every request open, so a test can look at the screen while the action is still running.
+  hold: boolean
+  // Set to answer every album add as if the album had been deleted meanwhile.
+  albumGone: boolean
 }
 
 async function serveActions(page: Page, failFor: string | null = null): Promise<Sent> {
-  const sent: Sent = { album: [], favorite: [], trash: [], failing: failFor }
+  const sent: Sent = { album: [], favorite: [], trash: [], failing: failFor, hold: false, albumGone: false }
+  const held = async () => {
+    while (sent.hold) await new Promise((resolve) => setTimeout(resolve, 50))
+  }
   const fail = (route: Parameters<Parameters<Page['route']>[1]>[0]) =>
     route.fulfill({ status: 500, json: { error: { code: 'INTERNAL', message: 'Internal error.' } } })
 
@@ -237,6 +244,13 @@ async function serveActions(page: Page, failFor: string | null = null): Promise<
     const member = /^\/api\/v1\/albums\/[^/]+\/assets\/(.+)$/.exec(url.pathname)
     if (route.request().method() === 'PUT' && member) {
       sent.album.push(member[1])
+      await held()
+      if (sent.albumGone) {
+        return route.fulfill({
+          status: 404,
+          json: { error: { code: 'ALBUM_NOT_FOUND', message: 'Album not found.' } },
+        })
+      }
       return member[1] === sent.failing ? fail(route) : route.fulfill({ status: 204, body: '' })
     }
     return route.fallback()
@@ -258,6 +272,7 @@ async function serveActions(page: Page, failFor: string | null = null): Promise<
     const id = url.pathname.split('/').pop() as string
     const isFavorite = (route.request().postDataJSON() as { isFavorite: boolean }).isFavorite
     sent.favorite.push({ id, isFavorite })
+    await held()
     if (id === sent.failing) return fail(route)
     const item = ALL_ITEMS.find((i) => i.id === id) as Item
     return route.fulfill({ json: { ...summary(item), isFavorite, previewUrl: PIXEL } })
@@ -394,6 +409,68 @@ test.describe('selecting several photos', () => {
     // The grid read the server again, so the photos are off the timeline without a reload.
     for (const id of ids) await expect(page.locator(`[data-asset-id="${id}"]`)).toHaveCount(0)
     await expect(page.getByRole('toolbar', { name: '選択した写真の操作' })).toBeHidden()
+  })
+
+  test('freezes the selection while the action runs', async ({ page }) => {
+    const sent = await serveActions(page)
+    await openApp(page)
+    await startSelecting(page)
+    for (const index of [0, 1]) await pickTile(page, index).click()
+
+    sent.hold = true
+    await page.getByRole('button', { name: 'お気に入りに追加' }).click()
+    await expect.poll(() => sent.favorite.length).toBe(2)
+    // Nothing about the selection can change under a run that is acting on the photos it started with.
+    const toolbar = page.getByRole('toolbar', { name: '選択した写真の操作' })
+    await expect(toolbar.getByRole('button', { name: '選択を終了' })).toBeDisabled()
+    await expect(toolbar.getByRole('button', { name: '全解除' })).toBeDisabled()
+    await expect(toolbar.getByRole('button', { name: 'ゴミ箱へ移動' })).toBeDisabled()
+    await expect(page.getByRole('checkbox').first()).toBeDisabled()
+
+    sent.hold = false
+    await expect(page.getByText('2枚をお気に入りに追加しました')).toBeVisible()
+    // Exactly the two photos it started with, however many times the screen was poked meanwhile.
+    expect(sent.favorite).toHaveLength(2)
+    await expect(toolbar).toBeHidden()
+  })
+
+  test('offers no retry when the album is gone, and keeps the photos picked for another one', async ({ page }) => {
+    const sent = await serveActions(page)
+    await openApp(page)
+    await startSelecting(page)
+    for (const index of [0, 1]) await pickTile(page, index).click()
+
+    sent.albumGone = true
+    await page.getByRole('button', { name: 'アルバムに追加' }).click()
+    await page.getByRole('menuitem', { name: ALBUM.title }).click()
+
+    await expect(page.getByText(/2枚は実行できません/)).toBeVisible()
+    // Sending the same request again cannot bring the album back, so no retry is offered.
+    await expect(page.getByRole('button', { name: '再試行' })).toHaveCount(0)
+    // The photos stay picked, so another album can be chosen without selecting them again.
+    await expect(page.getByText('2枚を選択中')).toBeVisible()
+  })
+
+  test('does not keep a photo picked that another member deleted during the action', async ({ page }) => {
+    await openApp(page)
+    const failing = (await page.locator('button[data-asset-id]').nth(1).getAttribute('data-asset-id')) as string
+    const sent = await serveActions(page, failing)
+    await page.reload()
+    await startSelecting(page)
+    for (const index of [0, 1]) await pickTile(page, index).click()
+
+    // The request for this photo fails, and by the time the grid reads the server the other member has
+    // deleted it: it must not come back as a pick with no tile behind it.
+    sent.hold = true
+    await page.getByRole('button', { name: 'お気に入りに追加' }).click()
+    await expect.poll(() => sent.favorite.length).toBe(2)
+    gone.add(failing)
+    sent.hold = false
+
+    await expect(page.getByText(/1枚は失敗/)).toBeVisible()
+    await expect(page.locator(`[data-asset-id="${failing}"]`)).toHaveCount(0)
+    await expect(page.getByText('写真を選んでください')).toBeVisible()
+    await expect(page.getByText('1枚を選択中')).toHaveCount(0)
   })
 
   test('confirms a trash with the number of photos, and cancelling changes nothing', async ({ page }) => {

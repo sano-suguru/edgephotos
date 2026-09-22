@@ -73,6 +73,7 @@ export function AssetGrid(props: AssetGridProps) {
   selection.current ??= createSelection()
   const picked = selection.current
   const albums = useSignal<Album[]>([])
+  const albumsError = useSignal<string | null>(null)
   const busy = useSignal(false)
   const confirmingTrash = useSignal(false)
   // A prop, mirrored into a signal so the effect below reloads when the reader picks another month.
@@ -81,7 +82,7 @@ export function AssetGrid(props: AssetGridProps) {
   // When the first loaded page arrived (performance.now(), so a wrong device clock does not matter).
   const loadedAt = useRef(0)
   // The read in flight, so a forced refresh can wait for it instead of stepping aside.
-  const refreshing = useRef<Promise<void> | null>(null)
+  const refreshing = useRef<Promise<boolean> | null>(null)
   // A reload that arrived while the viewer was open; it would drop the photo being viewed.
   const reloadPending = useRef(false)
   // Thumbnails already on screen keep their (now expired) URL: the bytes are loaded, and a new URL would
@@ -144,15 +145,19 @@ export function AssetGrid(props: AssetGridProps) {
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
-  // The albums a selection can be added to. Read once selection mode starts, like the viewer does.
+  // The albums a selection can be added to. Read every time selection mode starts, so a list that could
+  // not be read is asked for again rather than staying empty for the rest of the visit.
   useSignalEffect(() => {
     if (!picked.active.value || albums.value.length > 0) return
     api
       .listAlbums()
       .then((r) => {
         albums.value = r.items
+        albumsError.value = null
       })
-      .catch(() => {})
+      .catch((err) => {
+        albumsError.value = userMessage(err)
+      })
   })
 
   // Reading up the timeline puts the newer photos at the top of the list, and the page moves to them: the
@@ -184,27 +189,30 @@ export function AssetGrid(props: AssetGridProps) {
   //   image can start too late. At most once a minute, so a page of broken images asks once.
   // - a bulk action that finished (`force`), which needs the list to show what the library now holds,
   //   including changes another member made meanwhile.
-  async function refreshItems(force = false): Promise<void> {
+  // Returns whether the list now shows what the server holds. An unforced caller does not use the answer;
+  // a forced one says so, because an action that worked with a stale grid behind it looks like it did not.
+  async function refreshItems(force = false): Promise<boolean> {
     // A read already running was started before the action, so it cannot show what the action changed:
     // a forced caller waits for it and then reads again. An unforced one simply steps aside.
     if (refreshing.current) {
-      if (!force) return
+      if (!force) return false
       await refreshing.current
-    } else if (!force && performance.now() - loadedAt.current < 60_000) return
+    } else if (!force && performance.now() - loadedAt.current < 60_000) return false
     const run = readAgain()
     refreshing.current = run
     try {
-      await run
+      return await run
     } finally {
       if (refreshing.current === run) refreshing.current = null
     }
   }
 
-  async function readAgain(): Promise<void> {
+  async function readAgain(): Promise<boolean> {
     try {
       // Reads exactly the pages this list was built from, so a list that starts at a month stays on it.
       const fresh = await list.current?.reloadRange()
-      if (!fresh) return
+      // Null after a reset: another read replaced the list, and it is that read's answer that counts.
+      if (!fresh) return true
       const previous = new Map(items.value.map((a) => [a.id, a]))
       items.value = fresh.items.map((a) => {
         const old = previous.get(a.id)
@@ -215,8 +223,10 @@ export function AssetGrid(props: AssetGridProps) {
       loadedAt.current = performance.now()
       // Photos the list no longer holds cannot stay picked.
       picked.keep(fresh.items.map((a) => a.id))
+      return true
     } catch {
       // Leave the broken images; the next image error retries.
+      return false
     }
   }
 
@@ -241,8 +251,12 @@ export function AssetGrid(props: AssetGridProps) {
   }
 
   // One request per photo, at most six at a time (docs/decisions.md D-032). The selection does not fail as
-  // a whole: what the server accepted stays, and only the photos that failed are left picked, so the retry
-  // is exactly those.
+  // a whole: what the server accepted stays, and what is left picked afterwards is exactly what still
+  // needs the reader.
+  //
+  // The selection is frozen while this runs (the grid and the bar both read `busy`). The run acts on the
+  // ids it started with, so letting the reader add or drop photos meanwhile would end with a photo that
+  // was never sent being dropped from the selection, or one the reader just dropped coming back.
   async function runAction(
     action: BulkAction,
     ids: readonly string[],
@@ -253,18 +267,23 @@ export function AssetGrid(props: AssetGridProps) {
     busy.value = true
     try {
       const summary = await runBulk(ids, call, bulkSlot)
+      // Photos that still need the reader: something in the way, or worth another attempt.
+      const remaining = [...summary.blocked, ...summary.failed]
+      // Set before reading the server again, so that read can drop what is no longer there. The other way
+      // round, a photo another member deleted during the action would come back as a pick with no tile.
+      if (remaining.length > 0) picked.set(remaining)
+      else picked.clear()
       // The server is the truth: this also picks up what another member changed while the action ran.
-      await refreshItems(true)
+      const shown = await refreshItems(true)
       // The month list counts what the timeline shows.
       if (action === 'trash') invalidateMonths()
-      if (summary.failed.length > 0) picked.set(summary.failed)
-      else exitSelection()
-      showToast(describeBulk(action, summary, albumTitle), {
-        tone: summary.failed.length > 0 ? 'error' : 'info',
-        action:
-          summary.failed.length > 0
-            ? { label: '再試行', run: () => runAction(action, summary.failed, call, albumTitle) }
-            : undefined,
+      if (remaining.length === 0) exitSelection()
+      // A retry sends the same request again, so it is offered only for what that can change.
+      const retry = summary.failed.length > 0 && summary.blocked.length === 0
+      const stale = shown ? '' : ' 画面の更新に失敗しました。再読み込みしてください。'
+      showToast(`${describeBulk(action, summary, albumTitle)}${stale}`, {
+        tone: remaining.length > 0 || !shown ? 'error' : 'info',
+        action: retry ? { label: '再試行', run: () => runAction(action, summary.failed, call, albumTitle) } : undefined,
       })
     } finally {
       busy.value = false
@@ -381,6 +400,7 @@ export function AssetGrid(props: AssetGridProps) {
           <SelectionBar
             count={picked.count.value}
             albums={albums.value}
+            albumsError={albumsError.value}
             busy={busy.value}
             onExit={exitSelection}
             onClear={picked.clear}
@@ -451,6 +471,7 @@ export function AssetGrid(props: AssetGridProps) {
                         type="checkbox"
                         class="peer sr-only"
                         checked={isPicked}
+                        disabled={busy.value}
                         aria-label={asset.filename ?? '写真'}
                         onChange={() => picked.toggle(asset.id)}
                       />

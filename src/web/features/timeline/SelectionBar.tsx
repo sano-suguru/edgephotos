@@ -16,6 +16,8 @@ const barButton =
 export function SelectionBar(props: {
   count: number
   albums: Album[]
+  // Set when the album list could not be read; shown in place of the albums.
+  albumsError: string | null
   busy: boolean
   onExit: () => void
   onClear: () => void
@@ -30,7 +32,16 @@ export function SelectionBar(props: {
       aria-label="選択した写真の操作"
       class="sticky top-0 z-20 -mx-4 mb-3 flex items-center gap-1 border-b border-black/5 bg-background px-2 py-1 md:top-14"
     >
-      <button type="button" class={barButton} aria-label="選択を終了" title="選択を終了" onClick={props.onExit}>
+      {/* Disabled while an action runs, like everything else here: the run acts on the photos it started
+          with, so leaving in the middle would end it with a selection nobody chose. */}
+      <button
+        type="button"
+        class={barButton}
+        disabled={props.busy}
+        aria-label="選択を終了"
+        title="選択を終了"
+        onClick={props.onExit}
+      >
         <Close />
       </button>
       <p class="min-w-0 flex-1 truncate px-1 text-sm font-medium" role="status">
@@ -54,7 +65,12 @@ export function SelectionBar(props: {
         ariaLabel="アルバムに追加"
         triggerClass={barButton}
         disabled={disabled}
-        items={props.albums.map((album) => ({ label: album.title, onSelect: () => props.onAddToAlbum(album) }))}
+        // A menu that could not be read says so. Empty and "could not read" look the same otherwise.
+        items={
+          props.albumsError
+            ? [{ label: props.albumsError, onSelect: () => {}, disabled: true }]
+            : props.albums.map((album) => ({ label: album.title, onSelect: () => props.onAddToAlbum(album) }))
+        }
       />
       <button
         type="button"
