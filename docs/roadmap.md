@@ -15,11 +15,11 @@
 ## 段階の呼び方
 
 - **alpha**（現在）: 実 Cloudflare 環境（`remote-test`）で境界を確認した段階。production 環境へのデプロイと、iPhone / Android 実機からの取り込みは未確認です。
-- **v1**: 「Release polish」の到達点をすべて満たした段階。
+- **v1**: 「Release polish」までの到達点をすべて満たした段階。
 
 beta は置いていません。alpha と v1 の間に別の呼び名が要る状況になったら、その時点で足します。
 
-repository は public です。library を household の member だけが見られることは製品の性質であり、段階の呼び方とは別です。
+repository は public です。ライブラリを household member だけが閲覧できることは製品の性質であり、開発段階の呼び方とは別です。
 
 ## Foundation
 
@@ -38,7 +38,7 @@ repository は public です。library を household の member だけが見ら�
 
 ## Remote integration verification
 
-コードではなく、実 Cloudflare 環境で境界を踏むための段階です。ここを通過するまで、alpha を「完成」とは扱いません。
+コードではなく、alpha で実 Cloudflare 環境の境界を確認するための段階です。
 
 到達点:
 
