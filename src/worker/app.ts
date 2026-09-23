@@ -44,7 +44,7 @@ import {
 import * as albums from './services/albums'
 import * as assets from './services/assets'
 import type { ServiceContext } from './services/context'
-import { diagnostics, exportAlbums, exportAssetsPage, exportMembershipsPage } from './services/export'
+import { diagnostics, exportAlbums, exportAssetsPage, exportMembershipsPage, recordExport } from './services/export'
 import { repairDerivatives } from './services/repair'
 import * as shares from './services/shares'
 import { auditStorage, cleanupUploads } from './services/storage-audit'
@@ -556,14 +556,30 @@ export function createApp(options: AppOptions) {
       tags: tag('export'),
       request: { query: ExportPageQuery.extend({ after: IdSchema.optional() }) },
       responses: {
-        200: json(ExportAssetPageSchema, 'Ready assets ordered by id. The last page records the export time.'),
+        200: json(ExportAssetPageSchema, 'Ready assets ordered by id'),
         ...errorResponses,
       },
     }),
     async (c) => {
       const q = c.req.valid('query')
-      return c.json(await exportAssetsPage(svc(c).db, now(), q.after, q.limit), 200)
+      return c.json(await exportAssetsPage(svc(c).db, q.after, q.limit), 200)
     },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/api/v1/export/complete',
+      tags: tag('export'),
+      responses: {
+        200: json(
+          z.object({ lastExportAt: z.string() }),
+          'Records that a whole backup was written. Sent by `pnpm backup export`; reading the export pages records nothing.',
+        ),
+        ...errorResponses,
+      },
+    }),
+    async (c) => c.json(await recordExport(svc(c).db, now()), 200),
   )
 
   app.openapi(

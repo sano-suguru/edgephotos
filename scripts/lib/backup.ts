@@ -211,6 +211,13 @@ export async function backupLibrary(client: ApiClient, store: BlobStore): Promis
   manifest.albums = fetched.albums.map((al) => ({ ...al, assetIds: al.assetIds.filter((id) => kept.has(id)) }))
   report.assets = manifest.assets.length
   await store.put(MANIFEST, new TextEncoder().encode(JSON.stringify(manifest, null, 2)))
+  // Only a backup with every photo in it counts as one (the CLI exits 1 otherwise). The backup is already
+  // on disk, so failing to record it is reported and does not fail the run (docs/decisions.md D-033).
+  if (report.failed.length === 0) {
+    await apiJson(client, '/api/v1/export/complete', { method: 'POST' }).catch((err) => {
+      client.log?.(`backup: written, but the library did not record it (${err instanceof Error ? err.message : err})`)
+    })
+  }
   return report
 }
 

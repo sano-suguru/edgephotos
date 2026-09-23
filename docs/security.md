@@ -154,7 +154,7 @@ X-Robots-Tag: noindex, nofollow, noarchive
 
 CSP は `self` を基準にし、third-party analytics、外部 font、不要な script を share page へ追加しません。
 
-private write API は GET で状態変更しません。例外は `GET /api/v1/export/assets` の最後のページで、最終 export 日時（`settings.last_export_at`）だけを記録します。写真・album・share には触れません。
+private API は GET で状態を変えません。例外はありません（最終 backup の記録も `POST` です。[D-033](decisions.md)）。
 
 Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま信用しません。
 

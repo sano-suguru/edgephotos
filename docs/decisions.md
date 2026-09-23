@@ -867,3 +867,40 @@ full text search、AI / semantic search、tag、場所、uploader での絞り�
 
 - 1 回の選択が数百枚に伸びたとき
 - 実機の往復時間で待ちが体感できるとき（先に測る。bulk endpoint はそのときの候補で、partial result の形は上のまま持ち込む）
+
+## D-033: 最終 backup の記録を export の GET から POST に分ける
+
+**状態:** 採用（2026-09-23）
+
+`GET /api/v1/export/assets` は、最後のページを返すときに `settings.last_export_at` を書いていました。これをやめ、`POST /api/v1/export/complete` を足します。送るのは `pnpm backup export` だけです。
+
+**GET に副作用を残さない。** private API は GET で状態を変えない（[HTTP / Browser](security.md#8-http--browser)）という規則に対して、この endpoint だけが例外でした。retry・prefetch・cache は GET に副作用が無い前提で書かれるので、例外はそこで事故になります。
+
+**記録の意味が正しくなる。** export のページは backup 以外からも最後まで読まれます。
+
+- `pnpm backup restore` は、書き込み先のライブラリが空かを確かめるため
+- `pnpm backup verify` は、backup と比べるため
+- ライブラリ画面は、manifest をダウンロードするため
+
+そのため記録は「最後に誰かが一覧を読み終えた時刻」でしかなく、restore 先のライブラリにも付いていました。画面はこれを「最終 manifest 取得」と呼び、backup の時刻ではないと注記していました。
+
+POST に分けると、backup CLI が backup を書き終えたときだけ記録できます。画面の表示は「最終 backup」に変えます。
+
+**すべての写真を取得できた run だけを記録する。** 取得できなかった写真がある run は、CLI が exit 1 で終えます。これを記録すると、揃っていない backup を完了とみなすことになります。
+
+**記録に失敗しても backup は失敗にしない。** `manifest.json` は既にディスクに書かれています。記録できなかったことだけを log に出します。
+
+却下した案:
+
+- 最後のページの GET に query（`?record=1` など）を付ける: GET が状態を変える点は変わらない
+- ライブラリ画面の manifest ダウンロードも記録する: manifest には写真のファイルが入らない。記録すると backup 済みに見える
+
+影響:
+
+- `last_export_at` の意味が「一覧を読み終えた時刻」から「backup を書き終えた時刻」に変わる。既存の値は残り、次の backup で上書きされる。migration は要らない
+- diagnostics の field 名 `lastExportAt` は変えない
+- 以前の CLI で backup を取っても記録されない。CLI は repository と一緒に更新する前提なので、互換の経路は置かない
+
+残るリスク:
+
+- 記録は backup を書いた時点のもので、その後に backup ディレクトリが壊れても変わらない。揃っているかは `pnpm backup check` が判断する

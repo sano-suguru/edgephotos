@@ -13,6 +13,7 @@ import {
   apiClient,
   call,
   callJson,
+  clock,
   heicFixture,
   makeApp,
   photo,
@@ -265,8 +266,11 @@ describe('export and restore to an empty environment', () => {
 
     // A backup does not stop at the damaged photo: the others are copied and the damaged one is named.
     const fresh = memoryStore()
+    const recorded = (await callJson(source, 'GET', '/api/v1/diagnostics')).lastExportAt
     const partial = await backupLibrary(apiClient(source), fresh)
     expect(partial.failed).toEqual([{ assetId: victim.id, sha256: victim.sha256, reason: 'checksum_mismatch' }])
+    // A backup missing a photo is not recorded as one (docs/decisions.md D-033).
+    expect((await callJson(source, 'GET', '/api/v1/diagnostics')).lastExportAt).toBe(recorded)
     expect(partial.downloaded).toBe(manifest.assets.length - 1)
     expect((await checkBackup(fresh)).problems).toEqual([
       `missing file originals/${victim.sha256}`,
@@ -281,6 +285,7 @@ describe('export and restore to an empty environment', () => {
 
   it('exports the library in pages that add up to the whole manifest', async () => {
     const app = await makeApp({ which: 'primary' })
+    const exportedBefore = (await callJson(app, 'GET', '/api/v1/diagnostics')).lastExportAt
     for (let i = 0; i < 5; i++) await uploadPhoto(app)
     const full = await fetchManifest(apiClient(app))
     const album = await callJson(app, 'POST', '/api/v1/albums', { body: { title: 'paged' }, expect: 201 })
@@ -323,7 +328,47 @@ describe('export and restore to an empty environment', () => {
     const inAlbum = manifest.albums.find((a) => a.id === album.id)
     expect(inAlbum?.assetIds.sort()).toEqual(members.map((a) => a.id).sort())
     expect(pairs.filter((p) => p.startsWith(album.id))).toHaveLength(4)
-    expect((await callJson(app, 'GET', '/api/v1/diagnostics')).lastExportAt).not.toBeNull()
+    // Reading every page is not an export: GET has no side effect (docs/decisions.md D-033).
+    expect((await callJson(app, 'GET', '/api/v1/diagnostics')).lastExportAt).toBe(exportedBefore)
+  })
+
+  it('records an export only when a whole backup is written, never on restore or verify', async () => {
+    const lastExportAt = async (app: Awaited<ReturnType<typeof makeApp>>) =>
+      (await callJson<{ lastExportAt: string | null }>(app, 'GET', '/api/v1/diagnostics')).lastExportAt
+    // Ahead of the backups earlier tests took of the same library, and frozen, so the recorded time is known.
+    const time = clock(Date.now() + 60_000)
+    const source = await makeApp({ which: 'primary', clock: time })
+    await uploadPhoto(source)
+    const before = await lastExportAt(source)
+    expect(before).not.toBe(time.now().toISOString())
+
+    // Reading the whole list, or comparing a library with it, is not an export.
+    const manifest = await fetchManifest(apiClient(source))
+    expect(await verifyLibrary(apiClient(source), manifest, { quick: true })).toMatchObject({ ok: true })
+    expect(await lastExportAt(source)).toBe(before)
+
+    const store = memoryStore()
+    expect((await backupLibrary(apiClient(source), store)).failed).toEqual([])
+    expect(store.files.has('manifest.json')).toBe(true)
+    expect(await lastExportAt(source)).toBe(time.now().toISOString())
+
+    // Restore reads the target library's whole list to check it is empty, then compares. That is not an export
+    // of the target.
+    await emptyRestoreEnvironment()
+    const target = await makeApp({ which: 'restore' })
+    await restoreLibrary(apiClient(target), store)
+    await verifyLibrary(apiClient(target), await readManifest(store))
+    expect(await lastExportAt(target)).toBeNull()
+
+    // A cross-site page cannot mark the library as backed up.
+    const forged = await call(source, 'POST', '/api/v1/export/complete', {
+      headers: { origin: 'https://evil.example' },
+    })
+    expect(forged.status).toBe(403)
+    time.advance(60_000)
+    const done = await callJson<{ lastExportAt: string }>(source, 'POST', '/api/v1/export/complete', { expect: 200 })
+    expect(done.lastExportAt).toBe(time.now().toISOString())
+    expect(await lastExportAt(source)).toBe(time.now().toISOString())
   })
 
   it('never refers to an asset that is not in the manifest when the library changes mid-export', async () => {

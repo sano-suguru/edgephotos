@@ -6,7 +6,7 @@ import { assetObjectKeys } from '../storage/keys'
 // Portable metadata export, one page at a time: assets, albums, membership, object manifest and expected hashes.
 // Contains no credentials, JWTs, share secrets or presigned URLs. Shares are not exported.
 
-export async function exportAssetsPage(db: Db, now: Date, after: string | undefined, limit: number) {
+export async function exportAssetsPage(db: Db, after: string | undefined, limit: number) {
   const rows = await db
     .select()
     .from(assets)
@@ -15,17 +15,6 @@ export async function exportAssetsPage(db: Db, now: Date, after: string | undefi
     .limit(limit + 1)
   const page = rows.slice(0, limit)
   const nextAfter = rows.length > limit ? page[page.length - 1].id : null
-  if (nextAfter === null) {
-    // The last page: record when the owner last took the whole list (docs/security.md §8).
-    const exportedAt = now.toISOString()
-    await db
-      .insert(settings)
-      .values({ key: 'last_export_at', value: exportedAt, updated_at: exportedAt })
-      .onConflictDoUpdate({
-        target: settings.key,
-        set: { value: sql`excluded.value`, updated_at: sql`excluded.updated_at` },
-      })
-  }
   return {
     items: page.map((a) => ({
       id: a.id,
@@ -43,6 +32,20 @@ export async function exportAssetsPage(db: Db, now: Date, after: string | undefi
     })),
     nextAfter,
   }
+}
+
+// Recorded by the backup CLI after it has written a whole backup (docs/decisions.md D-033). Reading the export
+// pages records nothing: restore and verify read them too, and neither is a backup of this library.
+export async function recordExport(db: Db, now: Date) {
+  const exportedAt = now.toISOString()
+  await db
+    .insert(settings)
+    .values({ key: 'last_export_at', value: exportedAt, updated_at: exportedAt })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value: sql`excluded.value`, updated_at: sql`excluded.updated_at` },
+    })
+  return { lastExportAt: exportedAt }
 }
 
 export async function exportAlbums(db: Db) {
