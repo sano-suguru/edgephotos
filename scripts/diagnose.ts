@@ -44,16 +44,24 @@ async function guarded(name: string, fn: () => Promise<Check | Check[]>): Promis
   }
 }
 
+// Anything not understood stops here: a bare `--env`, `--env=name` or a typo must not quietly fall back
+// to the top-level (production) configuration.
 function parseArgs() {
-  const args = process.argv.slice(2)
-  const envIndex = args.indexOf('--env')
-  const env = envIndex >= 0 ? args[envIndex + 1] : undefined
-  // A bare `--env` must not quietly fall back to the top-level (production) configuration.
-  if (envIndex >= 0 && (!env || env.startsWith('--'))) {
+  const usage = (): never => {
     console.error('usage: pnpm diagnose [--env <name>] [--offline]')
     process.exit(2)
   }
-  return { env, offline: args.includes('--offline') }
+  const args = process.argv.slice(2)
+  let env: string | undefined
+  let offline = false
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--offline' && !offline) offline = true
+    else if (args[i] === '--env' && env === undefined) {
+      env = args[++i]
+      if (!env || env.startsWith('-')) usage()
+    } else usage()
+  }
+  return { env, offline }
 }
 
 async function accountId(): Promise<string> {

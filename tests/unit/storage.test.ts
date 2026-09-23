@@ -78,12 +78,22 @@ describe('image inspection', () => {
 
   // A header policy, but not a pass for bytes that are no image at all.
   it('requires a frame header before the scan', () => {
-    const soiEoi = new Uint8Array([0xff, 0xd8, 0xff, 0xd9, 0, 0])
-    expect(scanJpegForMetadata(soiEoi)).toEqual({ ok: false, reason: 'not_jpeg' })
-    const withoutFrame = syntheticJpeg()
-    // Turn the SOF0 marker into DQT: still a well-formed segment, but no frame header.
-    withoutFrame[withoutFrame.indexOf(0xc0, 20)] = 0xdb
-    expect(scanJpegForMetadata(withoutFrame)).toEqual({ ok: false, reason: 'not_jpeg' })
+    expect(scanJpegForMetadata(syntheticJpeg({ frame: false }))).toEqual({ ok: false, reason: 'not_jpeg' })
+  })
+
+  it('refuses an image that ends before any scan', () => {
+    expect(scanJpegForMetadata(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]))).toEqual({ ok: false, reason: 'not_jpeg' })
+  })
+
+  // Every cut through the header, the SOS segment included, is `truncated`; only a complete SOS passes.
+  it('reports a derivative cut anywhere before the end of the SOS segment as truncated', () => {
+    const jpeg = syntheticJpeg()
+    const sos = jpeg.findIndex((b, i) => b === 0xff && jpeg[i + 1] === 0xda)
+    const sosEnd = sos + 2 + ((jpeg[sos + 2] << 8) | jpeg[sos + 3])
+    for (let cut = 3; cut < sosEnd; cut++) {
+      expect(scanJpegForMetadata(jpeg.subarray(0, cut)), `cut at ${cut}`).toEqual({ ok: false, reason: 'truncated' })
+    }
+    expect(scanJpegForMetadata(jpeg.subarray(0, sosEnd))).toEqual({ ok: true })
   })
 })
 

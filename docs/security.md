@@ -200,7 +200,7 @@ Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま�
 - `Origin` がなく `Sec-Fetch-Site` が `same-origin` / `none` 以外の場合も拒否します。
 - どちらの header もない request（Native client、CLI）は Access assertion の検証だけで判定します。
 
-CLI（`pnpm backup` / `storage` / `diagnose`）は Access token を header で送るため、`EDGEPHOTOS_URL` に `https://` の origin（path、query、fragment、認証情報なし）を要求します。`http://` は localhost だけ受け付けます。
+CLI（`pnpm backup` / `storage` / `diagnose`）は Access token を header で送るため、`EDGEPHOTOS_URL` に `https://` の origin（path、query、fragment、認証情報なし）を要求します。`http://` は loopback（`localhost`、`127.0.0.1`、`[::1]`）だけ受け付けます。
 
 共有ページの CSP は `default-src 'self'` を基準にし、`img-src` だけ R2 の S3 endpoint を追加で許可します。
 

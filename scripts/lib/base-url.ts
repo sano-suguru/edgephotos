@@ -1,6 +1,6 @@
 // EDGEPHOTOS_URL is the app's origin (the APP_ORIGIN) and receives the Access token in a header, so it
 // must be an https origin: no path, query, fragment or credentials. Plain http is allowed only for a
-// Worker on this machine (`pnpm dev`, `wrangler dev`), where the token never leaves the host.
+// loopback host (`pnpm dev`, `wrangler dev` on this machine), where the token never leaves the host.
 export function parseBaseUrl(value: string | undefined): string | null {
   if (!value) return null
   let url: URL
@@ -18,4 +18,4 @@ export function parseBaseUrl(value: string | undefined): string | null {
 }
 
 export const BASE_URL_HINT =
-  'EDGEPHOTOS_URL must be an https origin (e.g. https://photos.example.com); http only for localhost'
+  'EDGEPHOTOS_URL must be an https origin (e.g. https://photos.example.com); http only for loopback'

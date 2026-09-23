@@ -4,8 +4,8 @@
 // An allowlist of fixed-format segments, not a list of known metadata segments: EXIF/XMP (APP1) and IPTC
 // (APP13) are the usual carriers, but COM, APP2 (ICC profiles, MPF), APP11 (JUMBF) and any other APPn can
 // hold free text or whole embedded images. Allowed are the coding tables and frame header (SOFn, DHT, DQT,
-// DRI) and two APP segments whose layout leaves no room for extra bytes. The contents of the tables are not
-// validated; like the scan data itself, they are image data, not metadata.
+// DRI) and two APP segments with fixed-length layouts (no room for trailing bytes; the fields themselves
+// are not validated). The contents of the tables are not validated either.
 //
 // Derivatives are drawn on a default (sRGB) canvas, so dropping an ICC profile does not change their colours.
 
