@@ -77,6 +77,19 @@ describe('setup diagnostics', () => {
       'access-control-allow-headers': 'content-type, if-none-match, x-if-match-extra, x-amz-checksum-sha256',
     }
     expect((await checkCorsPreflight(preflight(lookalike), 'https://r2/x', origin)).status).toBe('fail')
+    // A store may refuse the whole preflight when one requested header is not allowed, rather than answer with
+    // a shorter list. The report must still name the header, not blame the origin.
+    const refusesIfMatch: Fetch = async (_url, init) => {
+      const asked = new Headers(init?.headers).get('access-control-request-headers') ?? ''
+      if (asked.split(',').includes('if-match')) return new Response(null, { status: 403 })
+      return new Response(null, { status: 204, headers: noIfMatch })
+    }
+    const refused = await checkCorsPreflight(refusesIfMatch, 'https://r2/x', origin)
+    expect(refused.status).toBe('fail')
+    expect(refused.detail).toBe('AllowedHeaders lacks: if-match')
+    // A wrong origin is refused whatever is asked, and is still reported as the origin.
+    const wrongOrigin = await checkCorsPreflight(preflight({}, 403), 'https://r2/x', origin)
+    expect(wrongOrigin.detail).toContain(`no CORS rule allows ${origin}`)
     const noChecksum = { ...ok, 'access-control-allow-headers': 'content-type, if-none-match, if-match' }
     expect((await checkCorsPreflight(preflight(noChecksum), 'https://r2/x', origin)).detail).toContain(
       'x-amz-checksum-sha256',

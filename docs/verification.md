@@ -620,7 +620,7 @@ remote-test への deploy と Access login（対話操作）が要ります。pr
 - 作り直した derivative の PUT（`Content-Type` + `If-None-Match: *`）が通り、同じ URL への 2 回目が `412` になること
 - 実 R2 の `head().checksums.sha256` を使った original の照合が、作り直しの入口で期待どおり働くこと（`409 REPAIR_SOURCE_UNUSABLE`）
 - **`If-Match` 付き presigned PUT**（この経路で初めて使う条件）: 検査した ETag なら `200`、古い ETag なら `412`、先に保存された bytes が残ること
-- `pnpm diagnose` の `r2: CORS` が remote-test の bucket で PASS すること（`if-match` を加える前は FAIL になる）
+- `pnpm diagnose` の `r2: CORS` が remote-test の bucket で PASS すること。`if-match` を加える前に一度実行し、FAIL の message が `AllowedHeaders lacks: if-match` になるかも記録する（実 R2 が preflight 全体を拒否するか、短い `Allow-Headers` で答えるかは未確認。どちらでも header を名指しするよう作ってある）
 - 確認に使った asset は trash へ移動する（この文書の他の項目と同じ扱い）
 
 表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。

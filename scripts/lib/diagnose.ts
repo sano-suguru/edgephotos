@@ -91,18 +91,29 @@ export function checkPublicAccess(devUrlOutput: string, domainOutput: string): C
 // GET is checked too: the derivative repair reads the original with `fetch()` rather than an `<img>`, so it
 // needs the response to carry `Access-Control-Allow-Origin` (docs/decisions.md D-026). Displaying photos does
 // not, which is why a PUT-only rule can look healthy until a repair is attempted.
+const preflightPut = (fetch: Fetch, objectUrl: string, origin: string, headers: readonly string[]) =>
+  fetch(objectUrl, {
+    method: 'OPTIONS',
+    headers: { origin, 'access-control-request-method': 'PUT', 'access-control-request-headers': headers.join(',') },
+  })
+
+// A store may refuse the whole preflight when one requested header is not allowed, instead of answering with a
+// shorter Allow-Headers. Ask for each header alone: the ones refused are what the rule lacks. When every one is
+// refused, the problem is the origin (or no rule at all), and that is what gets reported.
+async function refusedHeaders(fetch: Fetch, objectUrl: string, origin: string): Promise<string[]> {
+  const refused: string[] = []
+  for (const h of PUT_HEADERS) {
+    const res = await preflightPut(fetch, objectUrl, origin, [h]).catch(() => null)
+    if (!res?.ok || res.headers.get('access-control-allow-origin') !== origin) refused.push(h)
+  }
+  return refused.length < PUT_HEADERS.length ? refused : []
+}
+
 export async function checkCorsPreflight(fetch: Fetch, objectUrl: string, origin: string): Promise<Check> {
   const name = 'r2: CORS'
   let res: Response
   try {
-    res = await fetch(objectUrl, {
-      method: 'OPTIONS',
-      headers: {
-        origin,
-        'access-control-request-method': 'PUT',
-        'access-control-request-headers': PUT_HEADERS.join(','),
-      },
-    })
+    res = await preflightPut(fetch, objectUrl, origin, PUT_HEADERS)
   } catch {
     return check(name, 'fail', 'preflight request failed (network)')
   }
@@ -112,6 +123,8 @@ export async function checkCorsPreflight(fetch: Fetch, objectUrl: string, origin
     (res.headers.get('access-control-allow-headers') ?? '').split(',').map((h) => h.trim().toLowerCase()),
   )
   if (!res.ok || !allowOrigin) {
+    const refused = await refusedHeaders(fetch, objectUrl, origin)
+    if (refused.length > 0) return check(name, 'fail', `AllowedHeaders lacks: ${refused.join(', ')}`)
     return check(name, 'fail', `no CORS rule allows ${origin} (preflight ${res.status}); see docs/operations.md §6`)
   }
   if (allowOrigin === '*') return check(name, 'fail', 'AllowedOrigins is "*"; restrict it to APP_ORIGIN')

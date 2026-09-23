@@ -12,7 +12,7 @@ v1 までに残っている作業だけを管理します。終わった段階�
 ## 段階の呼び方
 
 - **alpha**（現在）: remote-test で主要な外部境界を確認し、v1 に向けて production と実機での確認、Release polish を進める段階
-- **v1**: この文書の段階をすべて終えた段階
+- **v1**: Production、Post-merge verification、Release polish をすべて終えた段階
 
 beta は置いていません。alpha と v1 の間に別の呼び名が要る状況になったら、その時点で足します。
 
