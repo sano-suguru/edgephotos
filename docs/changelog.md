@@ -2,7 +2,7 @@
 
 完了した実装段階を新しい順に並べます。見出しの日付は、その段階を終えた日です。
 
-書くのは、利用者から見える挙動と範囲、更新時に要る作業、まだ残っている外部での確認です。実装の方法・判断の理由・測定値は持ちません。
+書くのは、その段階で完了した挙動と範囲、更新時に要る作業、まだ残っている外部での確認です。個々の実装方法・判断の理由・測定値の詳細は持ちません。
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
@@ -24,7 +24,7 @@ timeline / favorites / album で写真を複数選び、album への追加・お
 
 ## timeline の年月 navigation（2026-09-22）
 
-写真が数千枚あっても、目的の時期へ直接移動できるようにしました。検索基盤は作っていません。
+timeline から、目的の時期へ直接移動できるようにしました。検索機能は追加していません。
 
 timeline に写真のある年月と件数の一覧を出し、選んだ月の最も新しい写真から表示します。移動したあとは上へも下へも読め、同じ写真が二重に出ることも、間を飛ばすこともありません。
 
@@ -32,7 +32,7 @@ timeline に写真のある年月と件数の一覧を出し、選んだ月の�
 
 選んだ年月は `?m=YYYY-MM` として URL に残ります。back / forward と reload で同じ月へ戻れます。
 
-月の決め方は「記録した撮影時刻の digits、無ければ upload 時刻（UTC）」です。並び順は変えていません。
+月には、写真に記録された撮影日時の年月を使います。撮影日時が無ければ upload 時刻（UTC）を使います。並び順は変えていません。
 
 判断は [D-031](decisions.md)、測定値は [benchmarks.md](benchmarks.md)。数千枚の timeline を実機で scroll したときの memory と滑らかさの確認は、[roadmap.md](roadmap.md) の Post-merge verification に残しています。
 
@@ -44,15 +44,15 @@ batch の終わりに、追加した枚数・登録済みだった枚数・追�
 
 同じ file では変わらない失敗（100MB 超、途中で切れた file、decode できない HEIC、server が original そのものを拒否した場合）は再試行の対象から外し、理由を出します。権限や設定のように、画面そのものが拒否された場合も同じ扱いです。ログインを確認できなかった場合だけは再試行を残し、選んだ写真を失わずに続けられる手順を出します。duplicate は失敗ではなく通常の結果のままです。
 
-保存は終わっていて応答だけを失った写真は、再試行ですぐ確定し、転送も前処理もやり直しません。前処理でしか起きない失敗（memory 不足、decode 失敗）が、保存済みの写真を失敗として見せることもなくなりました。storage が前の予約の PUT を拒否したときは、新しい予約からやり直すので、同じ拒否を繰り返しません。
+保存は終わっていて応答だけを失った写真は、再試行ですぐ確定し、転送も前処理もやり直しません。前処理でしか起きない失敗（memory 不足、decode 失敗）が、保存済みの写真を失敗として見せることもなくなりました。
 
-保証するのは画面を開いている間だけです。reload や tab を閉じたあとは選び直しになります（閉じる前に確認を出します）。完成した asset が二重に作られることはなく、finalize されなかった upload の残りは storage cleanup が片付けます。
+保証するのは画面を開いている間だけです。reload や tab を閉じたあとは選び直しになります（閉じる前に確認を出します）。完成した asset が二重に作られることはありません。完了しなかった upload の残りは、ライブラリ画面の「ストレージの点検」で片付けられます。
 
 判断は [D-020](decisions.md)、確認内容は [verification.md](verification.md)。
 
 ## HEIC / HEIF の original 保存（2026-09-22）
 
-HEIC / HEIF を original として受け付けるようにしました。受け取った byte 列は変更せず保存し、timeline や share で使う thumbnail / preview は今までどおり Browser で作る JPEG です。HEIC を JPEG へ変換して original と呼ぶことはしません。
+HEIC / HEIF を original として受け付けるようにしました。受け取った byte 列は変更せず保存し、timeline や share で使う thumbnail / preview は今までどおり JPEG です。HEIC を JPEG へ変換して original と呼ぶことはしません。
 
 受け入れるのは静止画だけです。image sequence と AVIF は拒否します。
 
@@ -68,7 +68,7 @@ backup manifest は v2 になりました。v1 の backup も引き続き restor
 
 private API を使える identity を 1 つの `OWNER_EMAIL` から `HOUSEHOLD_EMAILS`（email の comma 区切り）へ広げました。設定した member はすべて対等で、1 つの library を共同利用します。片方が upload した写真を、もう片方が同じ timeline から見て、favorite・album・share・trash・restore まで同じように扱えます。
 
-D1 の schema は変えていないので、migration はありません。
+DB の migration はありません。
 
 判断は [D-028](decisions.md)。2 人が実機で 1 つの library を使う確認は [roadmap.md](roadmap.md) の Release polish に残しています。
 
