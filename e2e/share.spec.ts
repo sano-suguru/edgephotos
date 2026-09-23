@@ -141,3 +141,29 @@ test('a guest opens a shared album and loses access after revoke', async ({ page
   await expect(guest.getByText('このリンクは無効か、期限切れです。')).toBeVisible()
   await guestContext.close()
 })
+
+// An album title is member input shown to anyone holding the link. It must reach the guest as text: nothing in
+// it may become markup or run (docs/security.md, share).
+test('a guest sees a markup-looking album title as plain text', async ({ page, browser }) => {
+  await openApp(page)
+  const title = `<img src=x onerror="window.__xss=1">${uniqueName('t')}`
+  await page.getByRole('link', { name: 'アルバム' }).click()
+  await page.getByRole('button', { name: '新規アルバム' }).click()
+  await page.getByRole('dialog', { name: '新規アルバム' }).getByLabel('タイトル').fill(title)
+  await page.getByRole('button', { name: '作成' }).click()
+  await expect(page.getByRole('heading', { name: title })).toBeVisible()
+
+  await page.getByRole('button', { name: '共有' }).click()
+  const sharing = page.getByRole('dialog', { name: '共有リンク' })
+  await sharing.getByRole('button', { name: 'リンクを発行' }).click()
+  const url = await sharing.getByLabel('共有リンク').inputValue()
+
+  const guestContext = await browser.newContext()
+  const guest = await guestContext.newPage()
+  await guest.goto(url)
+  const heading = guest.getByRole('heading', { level: 1 })
+  await expect(heading).toHaveText(title)
+  await expect(heading.locator('img')).toHaveCount(0)
+  expect(await guest.evaluate(() => (window as { __xss?: number }).__xss)).toBeUndefined()
+  await guestContext.close()
+})

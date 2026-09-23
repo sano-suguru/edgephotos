@@ -361,7 +361,7 @@ Remote の破壊操作を通常の test command に含めません。CI は Clou
 
 実環境や Browser で確かめた結果は [verification.md](verification.md)、性能と memory の数値は [benchmarks.md](benchmarks.md) に書きます。operations / decisions / roadmap / README には検証の詳しい経過や測定値を重複して書かず、状態や判断に必要な短い要約とリンクだけを置きます。
 
-完了した実装段階の記録は [changelog.md](changelog.md)、これからの作業は [roadmap.md](roadmap.md) に書きます。
+完了した実装段階の記録は [changelog.md](changelog.md)、これからの作業は [roadmap.md](roadmap.md)、v1 の完成条件に含めない制約は [limitations.md](limitations.md) に書きます。roadmap には終わった作業を残しません。
 
 ### 文章と表記
 

@@ -190,6 +190,10 @@ describe('one shared library for every household member', () => {
     expect(await timelineIds(app, MEMBER_A)).toContain(id)
     // The one member holds the same library; the other address is simply not part of the household.
     expect((await call(app, 'GET', '/api/v1/assets', { token: await memberToken(MEMBER_B) })).status).toBe(403)
+    // Nor can it mark the library as backed up, and neither can a request without Access.
+    const outsider = await call(app, 'POST', '/api/v1/backup/complete', { token: await memberToken(MEMBER_B) })
+    expect(outsider.status).toBe(403)
+    expect((await call(app, 'POST', '/api/v1/backup/complete', { token: null })).status).toBe(401)
   })
 })
 

@@ -85,8 +85,9 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 - R2 bucket は private のまま使います
 - ライブラリへのアクセスは Cloudflare Access で保護します
 - 認証なしで写真を閲覧できるのは、明示的に作成した共有リンクからだけです。共有で渡すのは表示用の画像だけで、保存した写真ファイルそのものは渡しません
+- household member の間に権限の区別はありません。どの member もライブラリ全体を削除・export できます
 
-脅威モデルと秘密情報の扱いは [セキュリティ](docs/security.md) にあります。
+脅威モデルと秘密情報の扱いは [セキュリティ](docs/security.md) にあります。脆弱性の報告は [SECURITY.md](SECURITY.md) を参照してください。
 
 ## アーキテクチャ概要
 
@@ -141,7 +142,8 @@ EdgePhotos は任意のクラウドへ移せる抽象化を持たず、Cloudflar
 - [設計判断](docs/decisions.md) — 重要な選択とその理由
 - [検証記録](docs/verification.md) — 実環境と Browser で確認した内容
 - [測定](docs/benchmarks.md) — scale と取り込み memory の数値
-- [ロードマップ](docs/roadmap.md) — これからの実装順序と到達点
+- [ロードマップ](docs/roadmap.md) — v1 までに残っている作業
+- [既知の制約](docs/limitations.md) — v1 の完成条件に含めない制約
 - [変更の記録](docs/changelog.md) — 完了した実装段階
 - [AGENTS.md](AGENTS.md) — AI / 開発支援ツール向けの作業ガードレール
 

@@ -109,7 +109,7 @@ export const api = {
   diagnostics: () =>
     request<{
       counts: Record<string, number>
-      lastExportAt: string | null
+      lastBackupAt: string | null
       latestMigration: string | null
       purgingAssetIds: string[]
     }>('GET', '/api/v1/diagnostics'),

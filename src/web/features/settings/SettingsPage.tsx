@@ -221,9 +221,9 @@ export function SettingsPage() {
                   `${diag.value.counts.pendingUploads}${diag.value.counts.expiredUploads > 0 ? `（うち期限切れ ${diag.value.counts.expiredUploads}）` : ''}`,
                 ],
                 ['削除処理中', diag.value.counts.purging],
-                // manifest を読んだ時刻であって、写真が backup された時刻ではない。ここを「最終 export」と
-                // 呼ぶと、manifest のダウンロードや `pnpm backup verify` のあとに backup 済みだと読める。
-                ['最終 manifest 取得', diag.value.lastExportAt ?? '未実施'],
+                // `pnpm backup export` が失敗なく manifest.json を書き終えたときだけ記録される（docs/decisions.md
+                // D-033）。backup の中身が揃っていることまでは示さない。それは `pnpm backup check` が見る。
+                ['最終 backup export', diag.value.lastBackupAt ?? '未実施'],
                 ['Migration', diag.value.latestMigration ?? '—'],
               ] as const
             ).map(([label, value]) => (
@@ -234,10 +234,11 @@ export function SettingsPage() {
             ))}
           </dl>
           <p class="mt-3 text-sm text-muted-foreground">
-            「最終 manifest 取得」は metadata を最後まで読んだ時刻です。写真のファイルが保存された時刻ではありません（
-            <code>pnpm backup verify</code> など、manifest を読むだけの操作でも更新されます）。元ファイルを含む backup
-            をいつ取ったかは、この画面では分かりません。backup ディレクトリの <code>manifest.json</code> にある{' '}
-            <code>exportedAt</code> と、<code>pnpm backup check</code> の結果で確認してください。
+            「最終 backup export」は、<code>pnpm backup export</code> が失敗なく <code>manifest.json</code>{' '}
+            を書き終えた時刻です。取得できなかった写真がある回は記録しません。下の「manifest
+            をダウンロード」でも変わりません。
+            {/* JSX drops the line break here, so no space is added between the sentences. */}
+            backup の中身が揃っているかは <code>pnpm backup check</code> で確認してください。
           </p>
           {diag.value.counts.expiredUploads > 0 && (
             <p class="mt-3 text-sm text-muted-foreground">

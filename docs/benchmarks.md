@@ -62,7 +62,7 @@ remote-test の往復時間（中央値、東京から）:
 
 **修正後に最初に劣化するのは、大きな album です。** album の page・件数・共有ページが、album の枚数に比例して読みます（50,000 枚で 1 ページ約 15 万行、65〜111 ms）。Workers Free の D1 上限（1 日 500 万行）なら、このページを 1 日 34 回開くと上限に達します。
 
-直すには `album_assets` に `sort_at` を持たせる非正規化とデータ移行が要るため、今回は見送りました（[roadmap.md](roadmap.md) の既知の制約）。
+直すには `album_assets` に `sort_at` を持たせる非正規化とデータ移行が要るため、今回は見送りました（[limitations.md](limitations.md)）。
 
 **storage audit の最初のページが遅いのは、Miniflare の事情です。** layout 外の key を探す `delimiter` 付きの list が、Miniflare では bucket 全体を走査します。2 ページ目以降は list 2〜3 回と D1 2 回です。R2 の list は I/O で、Worker の CPU はほとんど使いません。実 R2 での時間は未測定です。
 

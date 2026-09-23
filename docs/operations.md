@@ -19,7 +19,7 @@ Deploy to Cloudflare ボタンは Release polish の範囲です（[roadmap.md](
 
 Cloudflare の plan は、試用・評価なら Workers Free、継続して使うなら Workers Paid（月 $5 から）を推奨します。
 
-Free の CPU 上限は 1 request 10 ms です。数千枚以上の library では timeline や export が上限に近づきます（[benchmarks.md](benchmarks.md)）。Paid の上限は既定で 30 秒です。D1 の time travel も、Free の 7 日に対して Paid は 30 日です。
+Free の CPU 上限は 1 request 10 ms です。現在の測定では、EdgePhotos がこの上限に安定して収まることを確認できていません（[plan に依存する注意](benchmarks.md#plan-に依存する注意)）。Paid の上限は既定で 30 秒です。D1 の time travel も、Free の 7 日に対して Paid は 30 日です。
 
 ### R2 の保存容量と料金
 
@@ -180,6 +180,7 @@ Custom domain は v1 の必須条件ではありません。custom domain を追
 Browser は presigned URL に対して次を送ります。
 
 - `PUT`（upload）: `Content-Type` と `If-None-Match` header 付き（[D-013](decisions.md)）。original はさらに `x-amz-checksum-sha256` 付き（[D-018](decisions.md)）
+- `PUT`（使えない derivative の置き換え）: `If-None-Match` の代わりに `If-Match` header 付き（[D-026](decisions.md)）
 - `GET`: `<img>` による表示、original の取得、derivative の作り直しが `fetch()` で読む original
 
 `AllowedMethods` に `GET` が無くても、写真の表示（`<img>`）と upload は動きます。失敗するのは derivative の作り直しだけです。`fetch()` が応答を読むには `Access-Control-Allow-Origin` が要るためです（[D-026](decisions.md)）。`pnpm diagnose` の `r2: CORS` が `GET` と `PUT` の両方を検査します。
@@ -193,7 +194,7 @@ wrangler の `--file` は Dashboard 表示とは別形式です。`rules` 配列
       "allowed": {
         "origins": ["https://photos.example.com"],
         "methods": ["GET", "PUT"],
-        "headers": ["content-type", "if-none-match", "x-amz-checksum-sha256"]
+        "headers": ["content-type", "if-none-match", "if-match", "x-amz-checksum-sha256"]
       },
       "maxAgeSeconds": 600
     }
@@ -208,9 +209,11 @@ pnpm wrangler r2 bucket cors list edgephotos-remote-test
 
 `*` は使いません。
 
-`exposeHeaders` は設定しません。`If-None-Match: *` と `x-amz-checksum-sha256` は署名に含める request header であり（[D-013](decisions.md)、[D-018](decisions.md)）、client は PUT 応答の `ETag` や checksum を読みません。client が応答 header を読む必要が生じた時点で追加します。
+`exposeHeaders` は設定しません。`If-None-Match: *`、`If-Match`、`x-amz-checksum-sha256` は署名に含める request header であり（[D-013](decisions.md)、[D-018](decisions.md)、[D-026](decisions.md)）、client は PUT 応答の `ETag` や checksum を読みません。client が応答 header を読む必要が生じた時点で追加します。
 
 D-018 より前に CORS を設定した bucket は、`x-amz-checksum-sha256` を追加して `cors set` し直してください。追加しないと Browser の preflight で original の PUT が失敗します（CLI の `pnpm backup restore` は CORS の影響を受けません）。
+
+`if-match` の無い CORS を設定済みの bucket も、追加して `cors set` し直してください。upload と表示はそのまま動き、使えない derivative の置き換えだけが preflight で失敗します。欠けた derivative の作成は `If-None-Match` なので影響を受けません。`pnpm diagnose` の `r2: CORS` は `if-match` の有無も検査します。
 
 ## 7. セットアップの確認
 
@@ -428,16 +431,18 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 - asset / trash / album 件数
 - 未完了 upload（`pending`）件数と、そのうち期限切れ（`expires_at` を過ぎた = 中断した）件数
 - 削除処理中（`purging`）件数と、その asset ID（ライブラリ画面の「削除を再開」で完了できる）
-- 最終 manifest 取得日時
+- 最終 backup export 日時
 - 適用済み migration
 
-### 「最終 manifest 取得日時」は backup の日時ではない
+### 「最終 backup export」の意味
 
-これは manifest を最後まで組み立てた時刻です。ライブラリ画面のダウンロードと、`pnpm backup` の export / verify / restore を含みます。**写真のファイルが backup された時刻ではありません。**
+`pnpm backup export` が失敗なく `manifest.json` を書き終えた時刻です。CLI が最後に `POST /api/v1/backup/complete` を送って記録します（[D-033](decisions.md)）。
 
-manifest を読むだけの操作でも更新されるので、これを backup 済みの根拠に使わないでください。
+取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の manifest ダウンロードと、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
 
-元ファイルを含む backup をいつ取ったかは、backup ディレクトリの `manifest.json` にある `exportedAt` で分かります。`pnpm backup export` は写真をすべて処理し終えてから manifest を書くため、途中で止まった run では前回の値が残ります。その backup が実際に揃っているかは `pnpm backup check` が判断します。
+server は backup ディレクトリを見られないので、この日時は CLI が「終わった」と送った記録です。backup の中身が揃っていることは示しません。backup export は差分で、既にあるファイルは size だけを見て再利用します。揃っているかは `pnpm backup check` で確認してください。
+
+D-033 より前の版から更新した直後は「未実施」と表示されます。以前の記録（`last_export_at`）は verify などでも書かれていたため、読み継ぎません。
 
 Worker のエラーログは request ID・route・例外名だけを出し、header・token・URL・body を出しません。
 

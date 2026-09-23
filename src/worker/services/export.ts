@@ -6,7 +6,7 @@ import { assetObjectKeys } from '../storage/keys'
 // Portable metadata export, one page at a time: assets, albums, membership, object manifest and expected hashes.
 // Contains no credentials, JWTs, share secrets or presigned URLs. Shares are not exported.
 
-export async function exportAssetsPage(db: Db, now: Date, after: string | undefined, limit: number) {
+export async function exportAssetsPage(db: Db, after: string | undefined, limit: number) {
   const rows = await db
     .select()
     .from(assets)
@@ -15,17 +15,6 @@ export async function exportAssetsPage(db: Db, now: Date, after: string | undefi
     .limit(limit + 1)
   const page = rows.slice(0, limit)
   const nextAfter = rows.length > limit ? page[page.length - 1].id : null
-  if (nextAfter === null) {
-    // The last page: record when the owner last took the whole list (docs/security.md §8).
-    const exportedAt = now.toISOString()
-    await db
-      .insert(settings)
-      .values({ key: 'last_export_at', value: exportedAt, updated_at: exportedAt })
-      .onConflictDoUpdate({
-        target: settings.key,
-        set: { value: sql`excluded.value`, updated_at: sql`excluded.updated_at` },
-      })
-  }
   return {
     items: page.map((a) => ({
       id: a.id,
@@ -43,6 +32,21 @@ export async function exportAssetsPage(db: Db, now: Date, after: string | undefi
     })),
     nextAfter,
   }
+}
+
+// Recorded by `pnpm backup export` when a run finishes without a failed photo (docs/decisions.md D-033).
+// Reading the export pages records nothing: restore and verify read them too, and neither is a backup.
+// A new key on purpose: `last_export_at` from before D-033 was written by any full read, so it is never read.
+export async function recordBackup(db: Db, now: Date) {
+  const backedUpAt = now.toISOString()
+  await db
+    .insert(settings)
+    .values({ key: 'last_backup_at', value: backedUpAt, updated_at: backedUpAt })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value: sql`excluded.value`, updated_at: sql`excluded.updated_at` },
+    })
+  return { lastBackupAt: backedUpAt }
 }
 
 export async function exportAlbums(db: Db) {
@@ -81,7 +85,7 @@ export async function diagnostics(db: Db, now: Date) {
         pending_uploads: number
         expired_uploads: number
         albums: number
-        last_export_at: string | null
+        last_backup_at: string | null
       }
     | undefined
   >(
@@ -93,7 +97,7 @@ export async function diagnostics(db: Db, now: Date) {
         (SELECT COUNT(*) FROM uploads WHERE status = 'pending') AS pending_uploads,
         (SELECT COUNT(*) FROM uploads WHERE status = 'pending' AND expires_at < ${now.toISOString()}) AS expired_uploads,
         (SELECT COUNT(*) FROM albums) AS albums,
-        (SELECT value FROM settings WHERE key = 'last_export_at') AS last_export_at`,
+        (SELECT value FROM settings WHERE key = 'last_backup_at') AS last_backup_at`,
   )
   // d1_migrations is owned by wrangler and is not part of the Drizzle schema.
   const migration = await db
@@ -111,7 +115,7 @@ export async function diagnostics(db: Db, now: Date) {
       expiredUploads: row?.expired_uploads ?? 0,
       albums: row?.albums ?? 0,
     },
-    lastExportAt: row?.last_export_at ?? null,
+    lastBackupAt: row?.last_backup_at ?? null,
     latestMigration: migration?.name ?? null,
     purgingAssetIds: purging.map((r) => r.id),
   }

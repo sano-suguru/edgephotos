@@ -328,7 +328,7 @@ restore の入口: 壊れた manifest と壊れた `restore-state.json` は、�
 取り込み結果が Browser で変わりうる点:
 
 - derivative の画素（縮小の実装と JPEG encoder の違い）。content identity には使わないので許容する
-- WebP の orientation と、途中で切れた JPEG（[roadmap.md](roadmap.md) の既知の制約のまま）
+- WebP の orientation と、途中で切れた JPEG（[limitations.md](limitations.md) のまま）
 - 撮影日時は JS の `exifr` で読むので engine に依存しない
 
 元ファイルの形式は、今回から中身の先頭 byte で決める（finalize と同じ関数）。Browser が拡張子から推測する `type` の違いに左右されない。
@@ -362,6 +362,8 @@ restore の入口: 壊れた manifest と壊れた `restore-state.json` は、�
 - 別 origin（`https://evil.example`）からの同じ preflight は `403` で、CORS header を返さない（「`APP_ORIGIN` に限定する」。セキュリティの [presigned URL](security.md#6-presigned-url)）
 
 **Browser から実際に壊れた写真を作り直す往復は未実施**（下の「未検証」）。
+
+追記（2026-09-23）: 上の「作り直しのための設定変更は不要だった」は、欠けた derivative を作る経路（`If-None-Match`）についてだけ正しい。使えない derivative を置き換える経路は Browser が `If-Match` を送るため、`allowed_headers` に `if-match` が要る。この bucket の設定のままでは、その PUT は preflight で失敗する。運用の CORS 例と `pnpm diagnose` の検査に `if-match` を加えた（[D-026](decisions.md)）。remote-test の bucket はまだ `cors set` し直していない。
 
 ## CI の時間制限（2026-09-21）
 
@@ -607,6 +609,8 @@ Android: 上と同じ項目のうち該当するもの（HEIF 設定の端末を
 
 bucket の CORS 設定と実 R2 の preflight までは確認済みです（上）。Browser からの往復は未実施です（[D-026](decisions.md)）。
 
+先に remote-test の bucket の CORS へ `if-match` を加えて `cors set` し直します（[R2 CORS](operations.md#6-r2-cors)）。今の設定のままでは、下の `If-Match` の項目は preflight で失敗します。
+
 remote-test への deploy と Access login（対話操作）が要ります。presigned URL の署名には Worker secret の R2 credential が要るため、`wrangler` だけでは代用できません（`wrangler r2 object put` に条件付きの option はありません）。
 
 確認する項目:
@@ -616,7 +620,22 @@ remote-test への deploy と Access login（対話操作）が要ります。pr
 - 作り直した derivative の PUT（`Content-Type` + `If-None-Match: *`）が通り、同じ URL への 2 回目が `412` になること
 - 実 R2 の `head().checksums.sha256` を使った original の照合が、作り直しの入口で期待どおり働くこと（`409 REPAIR_SOURCE_UNUSABLE`）
 - **`If-Match` 付き presigned PUT**（この経路で初めて使う条件）: 検査した ETag なら `200`、古い ETag なら `412`、先に保存された bytes が残ること
-- `pnpm diagnose` の `r2: CORS` が remote-test の bucket で PASS すること
+- `pnpm diagnose` の `r2: CORS` が remote-test の bucket で PASS すること。`if-match` を加える前に一度実行し、FAIL の message が `AllowedHeaders lacks: if-match` になるかも記録する（実 R2 が preflight 全体を拒否するか、短い `Allow-Headers` で答えるかは未確認。どちらでも header を名指しするよう作ってある）
 - 確認に使った asset は trash へ移動する（この文書の他の項目と同じ扱い）
 
 表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。
+
+### 2 人の household での利用
+
+Worker 側の household 判定は test で担保しています（`tests/integration/household.test.ts`）。実環境でしか分からないのは、Access policy の Allow 一覧と `HOUSEHOLD_EMAILS` が揃っているか、そして 2 人が日常の操作で困らないかです（[D-028](decisions.md)、[Cloudflare Access](operations.md#4-cloudflare-access)）。
+
+remote-test に 2 アカウントを設定し、実機 2 台で次を確認します。
+
+- 1 人目が写真を 5 枚 upload し、2 人目が login してその 5 枚を見る
+- 2 人目が別の 5 枚を upload し、1 人目の timeline に出る
+- 同じ写真を双方から upload したとき、duplicate の表示で迷わない
+- 2 人目が album を作り、1 人目がそこへ写真を追加する
+- original を双方から開く
+- 片方が trash し、もう片方が restore する
+- logout / login しても続きから使える
+- 許可していない 3 つ目のアカウントは入れない
