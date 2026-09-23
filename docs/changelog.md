@@ -8,9 +8,9 @@
 
 ## derivative 検査の allowlist 化と CLI の https 必須化（2026-09-23）
 
-finalize は derivative の header segment を allowlist で検査します。decode に要る segment 以外（COM、MPF、JUMBF など）を含む thumbnail / preview は `422` です。Client は PUT 前に同じ規則で取り除くため、正規の upload と作り直しの結果は変わりません。
+finalize は derivative の header segment を allowlist で検査します。allowlist 外の segment（COM、ICC profile、MPF、JUMBF など）を含む thumbnail / preview と、SOF の無い bytes は `422` です。APP0 / APP14 は決まった形の JFIF / Adobe だけを受け付けます。Client は PUT 前に同じ判定関数で取り除くため、正規の upload と作り直しは通ります。
 
-CLI（`backup` / `storage` / `diagnose`）は `EDGEPHOTOS_URL` に `https://` を要求します。`http://` は localhost だけです。`pnpm diagnose --env` の後に環境名が無い場合は、production へ進まずに usage を出して止まります。
+CLI（`backup` / `storage` / `diagnose`）は `EDGEPHOTOS_URL` に `https://` の origin を要求します。`http://` は localhost だけです。`pnpm diagnose --env` の後に環境名が無い場合は、production へ進まずに usage を出して止まります。
 
 Access の設定のうち diagnose で見えない項目（Allow policy と `HOUSEHOLD_EMAILS` の一致、session duration など）を、運用の [セットアップの確認](operations.md#7-セットアップの確認) に手順として足しました。production での確認はまだです。
 

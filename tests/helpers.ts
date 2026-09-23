@@ -175,6 +175,8 @@ export function syntheticJpeg(
   }
   for (const [marker, payload] of opts.segments ?? []) parts.push(segment(marker, new TextEncoder().encode(payload)))
   parts.push(segment(0xdb, new Uint8Array(65).fill(seed & 0xff)))
+  // SOF0: 8-bit, 16x16, one component.
+  parts.push(segment(0xc0, new Uint8Array([8, 0, 16, 0, 16, 1, 1, 0x11, 0])))
   parts.push(segment(0xda, new Uint8Array([1, 1, 0, 0, 63, 0])))
   parts.push(new Uint8Array(opts.padding ?? 32).map((_, i) => (seed * 31 + i) & 0x7f))
   parts.push(new Uint8Array([0xff, 0xd9]))

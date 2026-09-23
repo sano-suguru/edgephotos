@@ -161,7 +161,13 @@ share へ返す metadata は allowlist 方式とし、次を返しません。
 
 thumbnail / preview は metadata をコピーせず生成します。HEIC / HEIF の original でも同じです。derivative は decode した bitmap から canvas で描き直した JPEG で、original の EXIF は写りません。
 
-finalize は derivative の header segment を allowlist で検査します。decode に要る segment（SOF、DHT、DQT、DRI、APP0 の JFIF、APP2 の ICC profile、APP14 の Adobe）以外を含む derivative は受け付けません。EXIF / XMP（APP1）や IPTC（APP13）だけでなく、文字列や別の画像を運べる COM、MPF、JUMBF も拒否します。Client は PUT 前に同じ規則で segment を取り除きます。最初の scan より後ろは検査しません（[limitations.md](limitations.md)）。
+finalize は、derivative の最初の scan（SOS）までの header segment を allowlist で検査します。
+
+- 受け付ける segment: SOF、DHT、DQT、DRI、APP0（thumbnail を持たない 16 byte の JFIF だけ）、APP14（14 byte の Adobe だけ）
+- 上記以外の segment（APP1 の EXIF / XMP、APP13 の IPTC、COM、APP2 の ICC profile と MPF、APP11 の JUMBF など）を含む derivative は `422` で拒否する
+- SOS の前に SOF が無い bytes も拒否する
+
+検査するのは segment の種類と、APP0 / APP14 の形だけです。SOF / DHT / DQT / DRI の中身、最初の scan より後ろ、EOI の後ろは検査しません（[limitations.md](limitations.md#8-derivative-の検査は-header-segment-の種類まで)）。Client は PUT 前に、同じ判定関数（`src/contracts/jpeg-segments.ts`）で許可されない segment を取り除きます。
 
 ### 画像を解析する箇所
 
@@ -194,7 +200,7 @@ Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま�
 - `Origin` がなく `Sec-Fetch-Site` が `same-origin` / `none` 以外の場合も拒否します。
 - どちらの header もない request（Native client、CLI）は Access assertion の検証だけで判定します。
 
-CLI（`pnpm backup` / `storage` / `diagnose`）は Access token を header で送るため、`EDGEPHOTOS_URL` に `https://` を要求します。`http://` は localhost だけ受け付けます。
+CLI（`pnpm backup` / `storage` / `diagnose`）は Access token を header で送るため、`EDGEPHOTOS_URL` に `https://` の origin（path、query、fragment、認証情報なし）を要求します。`http://` は localhost だけ受け付けます。
 
 共有ページの CSP は `default-src 'self'` を基準にし、`img-src` だけ R2 の S3 endpoint を追加で許可します。
 

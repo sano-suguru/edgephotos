@@ -41,12 +41,24 @@ describe('image inspection', () => {
     expect(scanJpegForMetadata(syntheticJpeg().slice(0, 12))).toEqual({ ok: false, reason: 'truncated' })
   })
 
-  // Header segments are an allowlist: anything that can carry text or an embedded image is refused.
+  // Header segments are an allowlist of fixed-format segments: anything that can carry text or an
+  // embedded image is refused, including APP0 / APP14 that do not have the exact JFIF / Adobe layout.
   it.each([
     ['COM', 0xfe, 'GPS 0.000N 0.000E fictional'],
+    ['APP2 ICC profile', 0xe2, 'ICC_PROFILE\u0000\u0001\u0001fictional'],
     ['APP2 MPF', 0xe2, 'MPF\u0000fictional'],
     ['APP11 JUMBF', 0xeb, 'JP\u0000fictional'],
     ['APP3', 0xe3, 'fictional'],
+    ['APP0 that is not JFIF', 0xe0, 'GPS 0.000N 0.000E fictional'],
+    [
+      'APP0 JFIF with trailing bytes',
+      0xe0,
+      'JFIF\u0000\u0001\u0001\u0000\u0000\u0001\u0000\u0001\u0000\u0000fictional',
+    ],
+    ['APP0 JFIF with a thumbnail', 0xe0, 'JFIF\u0000\u0001\u0001\u0000\u0000\u0001\u0000\u0001\u0001\u0001xyz'],
+    ['APP0 JFXX', 0xe0, 'JFXX\u0000\u0010fictional'],
+    ['APP14 that is not Adobe', 0xee, 'fictional!!!'],
+    ['APP14 Adobe with trailing bytes', 0xee, 'Adobe\u0000\u0064\u0000\u0000\u0000\u0000\u0001fictional'],
   ])('rejects a derivative carrying %s', (_, marker, payload) => {
     expect(scanJpegForMetadata(syntheticJpeg({ segments: [[marker, payload]] }))).toEqual({
       ok: false,
@@ -54,16 +66,24 @@ describe('image inspection', () => {
     })
   })
 
-  it('accepts the segments needed to decode: ICC profile, Adobe, DRI, SOF', () => {
+  it('accepts the fixed-format segments: Adobe APP14 and DRI', () => {
     const jpeg = syntheticJpeg({
       segments: [
-        [0xe2, 'ICC_PROFILE\u0000\u0001\u0001fictional'],
         [0xee, 'Adobe\u0000\u0064\u0000\u0000\u0000\u0000\u0001'],
         [0xdd, '\u0000\u0010'],
-        [0xc0, '\u0008\u0000\u0010\u0000\u0010\u0001\u0001\u0011\u0000'],
       ],
     })
     expect(scanJpegForMetadata(jpeg)).toEqual({ ok: true })
+  })
+
+  // A header policy, but not a pass for bytes that are no image at all.
+  it('requires a frame header before the scan', () => {
+    const soiEoi = new Uint8Array([0xff, 0xd8, 0xff, 0xd9, 0, 0])
+    expect(scanJpegForMetadata(soiEoi)).toEqual({ ok: false, reason: 'not_jpeg' })
+    const withoutFrame = syntheticJpeg()
+    // Turn the SOF0 marker into DQT: still a well-formed segment, but no frame header.
+    withoutFrame[withoutFrame.indexOf(0xc0, 20)] = 0xdb
+    expect(scanJpegForMetadata(withoutFrame)).toEqual({ ok: false, reason: 'not_jpeg' })
   })
 })
 

@@ -45,11 +45,16 @@ album の中身を撮影日時順に返すため、album の全 member を読ん
 
 WebP の `takenAt` は常に `null` です。EXIF orientation は WebKit では適用され、Chromium では適用されないため、同じ WebP でも Browser によって width / height と derivative の向きが変わります。
 
-## 8. derivative の最初の scan より後ろは検査しない
+## 8. derivative の検査は header segment の種類まで
 
-finalize が見るのは derivative の先頭 256 KiB のうち、最初の scan（SOS）までの header segment です。progressive JPEG の scan の間に挟んだ segment や、EOI の後ろに付けたデータは検査しません。
+finalize が derivative について保証するのは、先頭 256 KiB のうち最初の scan（SOS）までに現れる segment が allowlist に入っていること、APP0 / APP14 が決まった形であること、SOF があることだけです（[security.md](security.md#7-metadata-の漏れ防止)）。次は検査しません。
 
-canvas の encoder はこうした JPEG を出さないため、正規の client の derivative には現れません。household member が細工した bytes を直接 PUT した場合だけ、share 閲覧者へ届く derivative に残ります。
+- SOF / DHT / DQT / DRI の中身
+- progressive JPEG の scan の間に挟んだ segment
+- EOI の後ろに付けたデータ
+- 画素そのもの
+
+canvas の encoder はこうした場所に情報を書かないため、正規の client の derivative には現れません。household member が細工した bytes を直接 PUT した場合は、上の場所に載せた情報が share 閲覧者へ届く derivative に残ります。
 
 ## 9. 途中で切れた JPEG の扱いが Browser で違う
 

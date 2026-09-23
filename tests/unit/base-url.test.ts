@@ -19,6 +19,11 @@ describe('CLI base URL', () => {
     'http://photos.example.test',
     'http://localhost.example.test',
     'ftp://photos.example.test',
+    'https://photos.example.test/foo',
+    'https://photos.example.test/?x=1',
+    'https://photos.example.test/#x',
+    'https://photos.example.test?',
+    'https://user:pass@photos.example.test',
   ])('refuses %s', (value) => {
     expect(parseBaseUrl(value)).toBeNull()
   })
