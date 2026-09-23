@@ -211,10 +211,11 @@ export async function backupLibrary(client: ApiClient, store: BlobStore): Promis
   manifest.albums = fetched.albums.map((al) => ({ ...al, assetIds: al.assetIds.filter((id) => kept.has(id)) }))
   report.assets = manifest.assets.length
   await store.put(MANIFEST, new TextEncoder().encode(JSON.stringify(manifest, null, 2)))
-  // Only a backup with every photo in it counts as one (the CLI exits 1 otherwise). The backup is already
-  // on disk, so failing to record it is reported and does not fail the run (docs/decisions.md D-033).
+  // Only a run with no failed photo is recorded (the CLI exits 1 otherwise). It says the run finished, not that
+  // the directory is intact: files already present were reused by size, and `pnpm backup check` is what
+  // re-hashes them. The backup is already on disk, so failing to record it does not fail the run (D-033).
   if (report.failed.length === 0) {
-    await apiJson(client, '/api/v1/export/complete', { method: 'POST' }).catch((err) => {
+    await apiJson(client, '/api/v1/backup/complete', { method: 'POST' }).catch((err) => {
       client.log?.(`backup: written, but the library did not record it (${err instanceof Error ? err.message : err})`)
     })
   }

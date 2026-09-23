@@ -44,7 +44,7 @@ import {
 import * as albums from './services/albums'
 import * as assets from './services/assets'
 import type { ServiceContext } from './services/context'
-import { diagnostics, exportAlbums, exportAssetsPage, exportMembershipsPage, recordExport } from './services/export'
+import { diagnostics, exportAlbums, exportAssetsPage, exportMembershipsPage, recordBackup } from './services/export'
 import { repairDerivatives } from './services/repair'
 import * as shares from './services/shares'
 import { auditStorage, cleanupUploads } from './services/storage-audit'
@@ -569,17 +569,17 @@ export function createApp(options: AppOptions) {
   app.openapi(
     createRoute({
       method: 'post',
-      path: '/api/v1/export/complete',
+      path: '/api/v1/backup/complete',
       tags: tag('export'),
       responses: {
         200: json(
-          z.object({ lastExportAt: z.string() }),
-          'Records that a whole backup was written. Sent by `pnpm backup export`; reading the export pages records nothing.',
+          z.object({ lastBackupAt: z.string() }),
+          'Records that `pnpm backup export` finished without a failed photo. Reading the export pages records nothing.',
         ),
         ...errorResponses,
       },
     }),
-    async (c) => c.json(await recordExport(svc(c).db, now()), 200),
+    async (c) => c.json(await recordBackup(svc(c).db, now()), 200),
   )
 
   app.openapi(
@@ -633,7 +633,7 @@ export function createApp(options: AppOptions) {
               expiredUploads: z.number(),
               albums: z.number(),
             }),
-            lastExportAt: z.string().nullable(),
+            lastBackupAt: z.string().nullable(),
             latestMigration: z.string().nullable(),
             // Permanent deletes that did not finish (oldest first, at most 100). DELETE each to resume.
             purgingAssetIds: z.array(IdSchema),

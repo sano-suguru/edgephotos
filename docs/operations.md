@@ -431,16 +431,18 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 - asset / trash / album 件数
 - 未完了 upload（`pending`）件数と、そのうち期限切れ（`expires_at` を過ぎた = 中断した）件数
 - 削除処理中（`purging`）件数と、その asset ID（ライブラリ画面の「削除を再開」で完了できる）
-- 最終 backup 日時
+- 最終 backup export 日時
 - 適用済み migration
 
-### 「最終 backup」の意味
+### 「最終 backup export」の意味
 
-`pnpm backup export` がすべての写真を取得し、`manifest.json` を書き終えた時刻です。CLI が最後に `POST /api/v1/export/complete` を送って記録します（[D-033](decisions.md)）。
+`pnpm backup export` が失敗なく `manifest.json` を書き終えた時刻です。CLI が最後に `POST /api/v1/backup/complete` を送って記録します（[D-033](decisions.md)）。
 
 取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の manifest ダウンロードと、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
 
-記録された backup が今も揃っているかは、この日時からは分かりません。backup ディレクトリを `pnpm backup check` で確認してください。
+この日時は backup の中身が揃っていることを示しません。backup export は差分で、既にあるファイルは size だけを見て再利用します。揃っているかは `pnpm backup check` で確認してください。
+
+D-033 より前の版から更新した直後は「未実施」と表示されます。以前の記録（`last_export_at`）は verify などでも書かれていたため、読み継ぎません。
 
 Worker のエラーログは request ID・route・例外名だけを出し、header・token・URL・body を出しません。
 

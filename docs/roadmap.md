@@ -19,7 +19,8 @@ beta は置いていません。alpha と v1 の間に別の呼び名が要る�
 ## Production
 
 - ⬜ production 環境を作成して deploy し、`pnpm diagnose` と写真 1 枚の upload まで通す（[リソース作成とデプロイ](operations.md#2-リソース作成とデプロイ)）
-- ⬜ [運用・デプロイ・復元](operations.md) の setup / update / uninstall を production で上から実走し、初見のセットアップで足りない手順を直す
+- ⬜ [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す
+- ⬜ uninstall は、写真を置いていない使い捨ての環境で実走する。production では行わない
 
 ## Post-merge verification
 

@@ -189,7 +189,7 @@ describe('private API authentication', () => {
         '/api/v1/albums/{albumId}/assets/{assetId}',
         '/api/v1/shares/{shareId}/revoke',
         '/api/v1/export/assets',
-        '/api/v1/export/complete',
+        '/api/v1/backup/complete',
         '/share/api/v1/shares/{shareId}',
         '/share/api/v1/shares/{shareId}/assets/{assetId}/{variant}',
       ]),

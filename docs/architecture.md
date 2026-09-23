@@ -169,7 +169,7 @@ PUT|DELETE /api/v1/albums/{albumId}/assets/{assetId}   idempotent
 GET|POST /api/v1/albums/{albumId}/shares
 POST   /api/v1/shares/{shareId}/revoke | /regenerate   regenerate は有効な share のみ
 GET    /api/v1/export/assets | /albums | /album-assets   manifest pages (after, limit)
-POST   /api/v1/export/complete              record a finished backup (D-033)
+POST   /api/v1/backup/complete              record a backup export that finished without failures (D-033)
 GET    /api/v1/diagnostics                      non-sensitive counts, unfinished purge ids
 GET    /api/v1/storage/audit?after&limit&deep   D1 / R2 comparison (read-only)
 POST   /api/v1/storage/cleanup                  resolve interrupted uploads (D-023)
@@ -370,7 +370,7 @@ share から発行する URL の期限は 300 秒以下で、share の残り期�
 
 ## 9. Export と restore
 
-export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/album-assets`）です。どれも読むだけで、状態を変えません。`pnpm backup export` は、すべての写真を取得して `manifest.json` を書き終えたあとに `POST /api/v1/export/complete` を送り、最終 backup の時刻を記録します（[D-033](decisions.md)）。
+export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/album-assets`）です。どれも読むだけで、状態を変えません。`pnpm backup export` は、失敗なく `manifest.json` を書き終えたあとに `POST /api/v1/backup/complete` を送り、最終 backup export の時刻を記録します（[D-033](decisions.md)）。
 
 Client は `src/contracts/export-manifest.ts` で manifest に組み立てます。asset metadata・album 構成・object manifest・期待 SHA-256 を持つ format 1 の manifest です。1 response にまとめないのは、10 万枚で Worker の memory 上限に近づくためです（[D-024](decisions.md)）。
 

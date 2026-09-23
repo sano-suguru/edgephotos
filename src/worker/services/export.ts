@@ -34,18 +34,19 @@ export async function exportAssetsPage(db: Db, after: string | undefined, limit:
   }
 }
 
-// Recorded by the backup CLI after it has written a whole backup (docs/decisions.md D-033). Reading the export
-// pages records nothing: restore and verify read them too, and neither is a backup of this library.
-export async function recordExport(db: Db, now: Date) {
-  const exportedAt = now.toISOString()
+// Recorded by `pnpm backup export` when a run finishes without a failed photo (docs/decisions.md D-033).
+// Reading the export pages records nothing: restore and verify read them too, and neither is a backup.
+// A new key on purpose: `last_export_at` from before D-033 was written by any full read, so it is never read.
+export async function recordBackup(db: Db, now: Date) {
+  const backedUpAt = now.toISOString()
   await db
     .insert(settings)
-    .values({ key: 'last_export_at', value: exportedAt, updated_at: exportedAt })
+    .values({ key: 'last_backup_at', value: backedUpAt, updated_at: backedUpAt })
     .onConflictDoUpdate({
       target: settings.key,
       set: { value: sql`excluded.value`, updated_at: sql`excluded.updated_at` },
     })
-  return { lastExportAt: exportedAt }
+  return { lastBackupAt: backedUpAt }
 }
 
 export async function exportAlbums(db: Db) {
@@ -84,7 +85,7 @@ export async function diagnostics(db: Db, now: Date) {
         pending_uploads: number
         expired_uploads: number
         albums: number
-        last_export_at: string | null
+        last_backup_at: string | null
       }
     | undefined
   >(
@@ -96,7 +97,7 @@ export async function diagnostics(db: Db, now: Date) {
         (SELECT COUNT(*) FROM uploads WHERE status = 'pending') AS pending_uploads,
         (SELECT COUNT(*) FROM uploads WHERE status = 'pending' AND expires_at < ${now.toISOString()}) AS expired_uploads,
         (SELECT COUNT(*) FROM albums) AS albums,
-        (SELECT value FROM settings WHERE key = 'last_export_at') AS last_export_at`,
+        (SELECT value FROM settings WHERE key = 'last_backup_at') AS last_backup_at`,
   )
   // d1_migrations is owned by wrangler and is not part of the Drizzle schema.
   const migration = await db
@@ -114,7 +115,7 @@ export async function diagnostics(db: Db, now: Date) {
       expiredUploads: row?.expired_uploads ?? 0,
       albums: row?.albums ?? 0,
     },
-    lastExportAt: row?.last_export_at ?? null,
+    lastBackupAt: row?.last_backup_at ?? null,
     latestMigration: migration?.name ?? null,
     purgingAssetIds: purging.map((r) => r.id),
   }
