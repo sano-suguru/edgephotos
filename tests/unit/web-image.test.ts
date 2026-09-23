@@ -104,6 +104,17 @@ describe('derivative JPEG metadata stripping', () => {
     expect(scanJpegForMetadata(stripJpegMetadata(syntheticJpeg({ exif: true })))).toEqual({ ok: true })
   })
 
+  it('removes every segment finalize would refuse and keeps the ICC profile', () => {
+    const icc: [number, string] = [0xe2, 'ICC_PROFILE\u0000\u0001\u0001fictional']
+    const noisy = syntheticJpeg({
+      seed: 7,
+      segments: [[0xfe, 'GPS 0.000N 0.000E fictional'], icc, [0xe2, 'MPF\u0000fictional'], [0xeb, 'JP\u0000x']],
+    })
+    const stripped = stripJpegMetadata(noisy)
+    expect(scanJpegForMetadata(stripped)).toEqual({ ok: true })
+    expect(stripped).toEqual(syntheticJpeg({ seed: 7, segments: [icc] }))
+  })
+
   it('returns metadata-free input unchanged', () => {
     const plain = syntheticJpeg()
     expect(stripJpegMetadata(plain)).toBe(plain)

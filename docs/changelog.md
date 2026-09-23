@@ -6,6 +6,14 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## derivative 検査の allowlist 化と CLI の https 必須化（2026-09-23）
+
+finalize は derivative の header segment を allowlist で検査します。decode に要る segment 以外（COM、MPF、JUMBF など）を含む thumbnail / preview は `422` です。Client は PUT 前に同じ規則で取り除くため、正規の upload と作り直しの結果は変わりません。
+
+CLI（`backup` / `storage` / `diagnose`）は `EDGEPHOTOS_URL` に `https://` を要求します。`http://` は localhost だけです。`pnpm diagnose --env` の後に環境名が無い場合は、production へ進まずに usage を出して止まります。
+
+Access の設定のうち diagnose で見えない項目（Allow policy と `HOUSEHOLD_EMAILS` の一致、session duration など）を、運用の [セットアップの確認](operations.md#7-セットアップの確認) に手順として足しました。production での確認はまだです。
+
 ## 画面の型の統一（2026-09-23）
 
 全画面の見た目を 1 つの規則に揃えました（[design.md](design.md)）。機能・情報設計・API・文言は変えていません。

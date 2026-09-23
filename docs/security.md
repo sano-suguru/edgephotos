@@ -161,6 +161,8 @@ share へ返す metadata は allowlist 方式とし、次を返しません。
 
 thumbnail / preview は metadata をコピーせず生成します。HEIC / HEIF の original でも同じです。derivative は decode した bitmap から canvas で描き直した JPEG で、original の EXIF は写りません。
 
+finalize は derivative の header segment を allowlist で検査します。decode に要る segment（SOF、DHT、DQT、DRI、APP0 の JFIF、APP2 の ICC profile、APP14 の Adobe）以外を含む derivative は受け付けません。EXIF / XMP（APP1）や IPTC（APP13）だけでなく、文字列や別の画像を運べる COM、MPF、JUMBF も拒否します。Client は PUT 前に同じ規則で segment を取り除きます。最初の scan より後ろは検査しません（[limitations.md](limitations.md)）。
+
 ### 画像を解析する箇所
 
 Worker は画像を decode しません。Worker が読むのは、形式判定のための先頭 1024 byte までと、derivative の JPEG segment だけです。
@@ -191,6 +193,8 @@ Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま�
 - `Origin` がある書き込み request は、`APP_ORIGIN` と完全一致しなければ `403 ORIGIN_NOT_ALLOWED` とします。
 - `Origin` がなく `Sec-Fetch-Site` が `same-origin` / `none` 以外の場合も拒否します。
 - どちらの header もない request（Native client、CLI）は Access assertion の検証だけで判定します。
+
+CLI（`pnpm backup` / `storage` / `diagnose`）は Access token を header で送るため、`EDGEPHOTOS_URL` に `https://` を要求します。`http://` は localhost だけ受け付けます。
 
 共有ページの CSP は `default-src 'self'` を基準にし、`img-src` だけ R2 の S3 endpoint を追加で許可します。
 
@@ -260,15 +264,15 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - storage audit が何も書き込まない。
 - derivative の作り直しが original を削除・変更しない。作り直しの前後で original の SHA-256、asset ID、album membership、favorite、trash、`createdAt` / `takenAt` が変わらない（[D-026](decisions.md)）。
 - 作り直しの対象 object key を client が指定できない（request は asset ID だけ）。
-- 作り直した derivative も、EXIF / XMP / IPTC segment を含むものは受け付けない（upload と同じ検査）。
+- 作り直した derivative も、allowlist 外の header segment を含むものは受け付けない（upload と同じ検査）。
 - original が壊れている写真へ作り直しの URL を発行しない。
 - 作り直しが object を削除しない。古い repair の target が、新しい repair の直した derivative を上書き・削除できない（`If-Match` で `412`）。
 
 上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。
 
-ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Chromium と WebKit で確認しています。WebKit の encoder が付ける APP1 / APP13（撮影 metadata は含まない）は、Client が PUT 前に取り除きます。
+ただし「preview / thumbnail から GPS が除去される」は二段構えです。canvas による再エンコードは Chromium と WebKit で確認しています。WebKit の encoder が付ける APP1 / APP13（撮影 metadata は含まない）など allowlist 外の segment は、Client が PUT 前に取り除きます。
 
-自動テストの対象は、その除去処理と Worker の finalize 検査（EXIF / XMP / IPTC segment を含む derivative の拒否）です。Server 側の保証は変わりません（[D-020](decisions.md)）。
+自動テストの対象は、その除去処理と Worker の finalize 検査（allowlist 外の segment を含む derivative の拒否）です。Server 側の保証は変わりません（[D-020](decisions.md)）。
 
 ## 12. ローカル開発用の模擬機構
 

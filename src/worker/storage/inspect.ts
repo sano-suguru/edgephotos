@@ -3,11 +3,13 @@
 export { type ContentType, scanIsoBmffBoxes, sniffImageType } from '../../contracts/image-type'
 
 import { sniffImageType } from '../../contracts/image-type'
+import { isAllowedJpegHeaderSegment } from '../../contracts/jpeg-segments'
 
 export type JpegMetadataScan = { ok: true } | { ok: false; reason: 'not_jpeg' | 'metadata_segment' | 'truncated' }
 
-// Derivatives must be plain JPEGs without EXIF/XMP (APP1) or IPTC (APP13) segments,
-// so GPS and other capture metadata cannot leak through thumbnails/previews.
+// Derivatives must be plain JPEGs whose header holds only the segments needed to decode them
+// (contracts/jpeg-segments), so GPS and other capture metadata cannot leak through thumbnails/previews.
+// Segments after the first scan are not inspected (docs/limitations.md).
 export function scanJpegForMetadata(head: Uint8Array): JpegMetadataScan {
   if (sniffImageType(head) !== 'image/jpeg') return { ok: false, reason: 'not_jpeg' }
   let offset = 2
@@ -25,7 +27,7 @@ export function scanJpegForMetadata(head: Uint8Array): JpegMetadataScan {
       offset += 2
       continue
     }
-    if (marker === 0xe1 || marker === 0xed) return { ok: false, reason: 'metadata_segment' }
+    if (!isAllowedJpegHeaderSegment(head, offset)) return { ok: false, reason: 'metadata_segment' }
     const length = (head[offset + 2] << 8) | head[offset + 3]
     if (length < 2) return { ok: false, reason: 'not_jpeg' }
     offset += 2 + length

@@ -40,6 +40,31 @@ describe('image inspection', () => {
     expect(scanJpegForMetadata(syntheticPng()).ok).toBe(false)
     expect(scanJpegForMetadata(syntheticJpeg().slice(0, 12))).toEqual({ ok: false, reason: 'truncated' })
   })
+
+  // Header segments are an allowlist: anything that can carry text or an embedded image is refused.
+  it.each([
+    ['COM', 0xfe, 'GPS 0.000N 0.000E fictional'],
+    ['APP2 MPF', 0xe2, 'MPF\u0000fictional'],
+    ['APP11 JUMBF', 0xeb, 'JP\u0000fictional'],
+    ['APP3', 0xe3, 'fictional'],
+  ])('rejects a derivative carrying %s', (_, marker, payload) => {
+    expect(scanJpegForMetadata(syntheticJpeg({ segments: [[marker, payload]] }))).toEqual({
+      ok: false,
+      reason: 'metadata_segment',
+    })
+  })
+
+  it('accepts the segments needed to decode: ICC profile, Adobe, DRI, SOF', () => {
+    const jpeg = syntheticJpeg({
+      segments: [
+        [0xe2, 'ICC_PROFILE\u0000\u0001\u0001fictional'],
+        [0xee, 'Adobe\u0000\u0064\u0000\u0000\u0000\u0000\u0001'],
+        [0xdd, '\u0000\u0010'],
+        [0xc0, '\u0008\u0000\u0010\u0000\u0010\u0001\u0001\u0011\u0000'],
+      ],
+    })
+    expect(scanJpegForMetadata(jpeg)).toEqual({ ok: true })
+  })
 })
 
 describe('R2 presigner', () => {
