@@ -1,6 +1,7 @@
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { cn } from './button'
+import { Close } from './icons'
 
 export type ToastAction = { label: string; run: () => void | Promise<void> }
 type Toast = { id: number; message: string; tone: 'info' | 'error'; action?: ToastAction }
@@ -39,8 +40,8 @@ function ToastItem({ toast }: { toast: Toast }) {
   return (
     <div
       class={cn(
-        'pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-xl px-4 py-3 text-sm shadow-md motion-safe:animate-[toast-in_160ms_ease-out]',
-        toast.tone === 'error' ? 'bg-destructive text-white' : 'bg-neutral-900 text-white',
+        'pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-surface px-4 py-3 text-sm shadow-md motion-safe:animate-[toast-in_180ms_var(--ease-out)]',
+        toast.tone === 'error' ? 'bg-destructive text-destructive-foreground' : 'bg-stage-raised text-on-stage',
       )}
     >
       <span class="flex-1">{toast.message}</span>
@@ -49,7 +50,7 @@ function ToastItem({ toast }: { toast: Toast }) {
       {toast.action && (
         <button
           type="button"
-          class="-my-3 min-h-11 shrink-0 rounded px-3 font-semibold text-white underline underline-offset-4 hover:bg-white/10"
+          class="-my-3 min-h-11 shrink-0 rounded-control px-3 font-semibold underline underline-offset-4 hover:bg-stage-hover active:bg-stage-hover"
           onClick={() => {
             const action = toast.action
             dismiss(toast.id)
@@ -62,10 +63,10 @@ function ToastItem({ toast }: { toast: Toast }) {
       <button
         type="button"
         aria-label="通知を閉じる"
-        class="-my-3 -mr-2 ml-2 inline-flex size-11 shrink-0 items-center justify-center rounded text-white/70 hover:bg-white/10"
+        class="-my-3 -mr-2 ml-2 inline-flex size-11 shrink-0 items-center justify-center rounded-control opacity-70 hover:bg-stage-hover hover:opacity-100"
         onClick={() => dismiss(toast.id)}
       >
-        ✕
+        <Close class="size-4" />
       </button>
     </div>
   )

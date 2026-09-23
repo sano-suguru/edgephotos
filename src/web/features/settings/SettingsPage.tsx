@@ -1,6 +1,7 @@
 import { useSignal, useSignalEffect } from '@preact/signals'
 import { Button } from '../../components/ui/button'
 import { Trash } from '../../components/ui/icons'
+import { PageHeader } from '../../components/ui/page'
 import { api } from '../../lib/api/client'
 import { userMessage } from '../../lib/errors'
 import { navigate } from '../../state/router'
@@ -70,7 +71,7 @@ function StorageCheck(props: { onChanged: () => void }) {
   const repairable = summary.value?.repairable.length ?? 0
   return (
     <div class="mt-10 space-y-3 text-sm">
-      <h2 class="font-semibold">ストレージの点検</h2>
+      <h2 class="text-heading">ストレージの点検</h2>
       <p class="text-muted-foreground">
         写真の記録（D1）と保存されたファイル（R2）を突き合わせます。点検は読み取りだけで、何も変更しません。
       </p>
@@ -187,7 +188,7 @@ export function SettingsPage() {
 
   return (
     <section class="max-w-2xl">
-      <h1 class="mb-6 text-2xl font-semibold tracking-tight">ライブラリ</h1>
+      <PageHeader>ライブラリ</PageHeader>
       {error.value && (
         <p role="alert" class="mb-4 text-sm text-destructive">
           {error.value}
@@ -199,17 +200,18 @@ export function SettingsPage() {
           e.preventDefault()
           navigate('/trash')
         }}
-        class="-mx-3 flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm hover:bg-muted"
+        class="-mx-3 flex min-h-12 items-center gap-3 rounded-surface px-3 text-sm transition-colors hover:bg-muted active:bg-border"
       >
         <Trash class="size-5 text-muted-foreground" />
         <span class="flex-1 font-medium">ゴミ箱</span>
         <span class="text-muted-foreground">
-          {diag.value ? `${diag.value.counts.trashed} 枚` : ''} <span aria-hidden="true">›</span>
+          <span class="tabular-nums">{diag.value ? `${diag.value.counts.trashed} 枚` : ''}</span>{' '}
+          <span aria-hidden="true">›</span>
         </span>
       </a>
       {diag.value && (
         <div class="mt-10">
-          <h2 class="mb-2 text-sm font-semibold">状態</h2>
+          <h2 class="mb-2 text-heading">状態</h2>
           <dl class="divide-y divide-border text-sm">
             {(
               [
@@ -249,22 +251,18 @@ export function SettingsPage() {
       )}
       {diag.value && diag.value.purgingAssetIds.length > 0 && (
         <div class="mt-10 space-y-3 text-sm">
-          <h2 class="font-semibold text-destructive">中断した完全削除</h2>
+          <h2 class="text-heading text-destructive">中断した完全削除</h2>
           <p class="text-muted-foreground">
             {`完全削除が途中で止まった写真が ${diag.value.counts.purging} 枚あります。どの画面にも表示されず、元に戻せません。削除を最後まで実行します。${diag.value.purgingAssetIds.length < diag.value.counts.purging ? `1 回に処理するのは古い順に ${diag.value.purgingAssetIds.length} 枚までです。残りは、終わったあとにもう一度押してください。` : ''}`}
           </p>
-          <Button
-            variant="destructive"
-            disabled={resuming.value}
-            onClick={() => resume(diag.value?.purgingAssetIds ?? [])}
-          >
+          <Button variant="destructive" busy={resuming.value} onClick={() => resume(diag.value?.purgingAssetIds ?? [])}>
             削除を再開
           </Button>
         </div>
       )}
       <StorageCheck onChanged={() => void load()} />
       <div class="mt-10 space-y-3 text-sm">
-        <h2 class="font-semibold">Export</h2>
+        <h2 class="text-heading">Export</h2>
         <p class="text-muted-foreground">
           metadata・アルバム構成・元ファイルの SHA-256 を含む manifest
           を保存します。写真のファイルは含みません。元ファイルを含む backup は <code>pnpm backup export</code> で取り、

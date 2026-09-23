@@ -83,7 +83,7 @@ export function SharePanel({ albumId }: { albumId: string }) {
             max={365}
             value={days.value}
             onInput={(e) => (days.value = Number((e.currentTarget as HTMLInputElement).value))}
-            class="h-9 w-24 rounded-lg bg-muted px-3 text-base text-foreground md:text-sm"
+            class="h-11 w-24 rounded-control bg-muted px-3 text-base text-foreground tabular-nums md:h-9 md:text-sm"
           />
         </label>
         <Button type="submit">リンクを発行</Button>
@@ -97,7 +97,7 @@ export function SharePanel({ albumId }: { albumId: string }) {
               readOnly
               value={fresh.value.url}
               aria-label="共有リンク"
-              class="h-9 min-w-0 flex-1 rounded-lg bg-muted px-3 text-base md:text-sm"
+              class="h-11 min-w-0 flex-1 rounded-control bg-muted px-3 text-base md:h-9 md:text-sm"
             />
             <Button
               variant="secondary"
@@ -123,7 +123,7 @@ export function SharePanel({ albumId }: { albumId: string }) {
           <li key={share.id} class="flex items-center justify-between gap-2 py-2.5">
             <div>
               <div>{STATUS[share.status]}</div>
-              <div class="text-muted-foreground">期限 {new Date(share.expiresAt).toLocaleString()}</div>
+              <div class="text-muted-foreground tabular-nums">期限 {new Date(share.expiresAt).toLocaleString()}</div>
             </div>
             {share.status === 'active' && (
               <div class="flex shrink-0 gap-1">

@@ -1,5 +1,5 @@
 import type { Album } from '../../../contracts/schemas'
-import { Button, cn } from '../../components/ui/button'
+import { Button, cn, Spinner } from '../../components/ui/button'
 import { AlbumPlus, Close, More, Star, Trash } from '../../components/ui/icons'
 import { DropdownMenu } from '../../components/ui/menu'
 
@@ -11,7 +11,7 @@ import { DropdownMenu } from '../../components/ui/menu'
 // no drag: the way into selection mode is the button above the grid (docs/decisions.md D-032).
 
 const barButton =
-  'inline-flex size-11 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40'
+  'inline-flex size-11 items-center justify-center rounded-full text-foreground transition hover:bg-muted active:bg-border motion-safe:active:scale-95 disabled:pointer-events-none disabled:opacity-40'
 
 export function SelectionBar(props: {
   count: number
@@ -30,7 +30,7 @@ export function SelectionBar(props: {
     <div
       role="toolbar"
       aria-label="選択した写真の操作"
-      class="sticky top-0 z-20 -mx-4 mb-3 flex items-center gap-1 border-b border-black/5 bg-background px-2 py-1 md:top-14"
+      class="sticky top-0 z-20 -mx-4 mb-3 flex items-center gap-1 border-b border-border bg-background px-2 py-1 md:top-14"
     >
       {/* Disabled while an action runs, like everything else here: the run acts on the photos it started
           with, so leaving in the middle would end it with a selection nobody chose. */}
@@ -44,7 +44,8 @@ export function SelectionBar(props: {
       >
         <Close />
       </button>
-      <p class="min-w-0 flex-1 truncate px-1 text-sm font-medium" role="status">
+      {props.busy && <Spinner class="ml-1" />}
+      <p class="min-w-0 flex-1 truncate px-1 text-sm font-medium tabular-nums" role="status">
         {props.count > 0 ? `${props.count}枚を選択中` : '写真を選んでください'}
       </p>
       <Button variant="ghost" size="sm" class="min-h-11" disabled={disabled} onClick={props.onClear}>
