@@ -2,7 +2,7 @@
 
 ## 1. セキュリティ契約
 
-EdgePhotos は写真と metadata を扱うため、MVP でも以下を妥協しません。
+EdgePhotos は写真と metadata を扱うため、次を security invariant とします。
 
 - private R2 を維持する。
 - private API は fail-closed とする。
@@ -23,7 +23,37 @@ EdgePhotos は写真と metadata を扱うため、MVP でも以下を妥協し�
 - R2 signing credential
 - Access configuration
 
-Cloudflare アカウントの完全侵害、利用端末の完全侵害、Cloudflare からも内容を隠す E2EE は、v1 の保証範囲外です。
+### 信頼するもの・しないもの
+
+EdgePhotos が信頼するもの（これが侵害されると写真を守れません）:
+
+- Cloudflare。Worker の実行、D1 / R2 の保管、Access の認証を任せています。EdgePhotos は Cloudflare からも内容を隠す E2EE を持ちません。自分の Cloudflare アカウントに置くことは、Cloudflare が読めないことを意味しません
+- Cloudflare アカウントの管理者
+- household member 全員と、その端末（[member 間の信頼](#member-間の信頼)）
+- backup ディレクトリを置く場所（下の「backup ディレクトリ」）
+
+EdgePhotos が信頼しないもの:
+
+- 認証されていないインターネット上の利用者。到達できるのは `/share/*` だけで、それ以外は Access で止まります
+- 共有リンクを持たない第三者
+- 共有リンクの受け取り手。渡すのは、その album の表示用画像だけです（[公開共有（share）](#4-公開共有share)）
+- client から届く値。object key は受け取らず、ファイルの中身と metadata は untrusted input として検査します
+
+Cloudflare アカウントの完全侵害と、利用端末の完全侵害は v1 の保証範囲外です。
+
+### backup ディレクトリ
+
+`pnpm backup export` が書くディレクトリには、original（EXIF の位置情報を含みうる）、derivative、`manifest.json`（元のファイル名・撮影日時・album 名）が平文で入ります。EdgePhotos は backup を暗号化しません。
+
+置き場所のアクセス制御と暗号化（ディスクの暗号化など）は利用者が行います。`manifest.json` に credential、JWT、share secret、presigned URL は入りません（`tests/integration/export-restore.test.ts` で検査しています）。
+
+### 大量の request
+
+`/share/*` は認証なしで到達できます。share secret は 256 bit なので、総当たりで写真を取り出すことは現実的ではありません。
+
+一方、無効な share ID への request を大量に送れば、Worker の request と D1 の読み取りを消費させられます。Workers Paid では利用料が増え、Workers Free では 1 日の上限に達したあと、正当な利用者も使えなくなります。
+
+v1 は rate limiting を持たず、この種の可用性・費用への攻撃は保証範囲外です。Cloudflare の利用状況で `/share/api` への想定外の request が観測された場合に、Cloudflare の WAF / rate limiting rules を候補にして検討します（[将来要件を先回りしない](../AGENTS.md#6-将来要件を先回りしない)）。
 
 ## 3. private API の認証と認可
 
@@ -139,7 +169,7 @@ EdgePhotos が足した parser は ISO BMFF の box header を読む 1 つです
 
 metadata の読み取り（`exifr`）は、untrusted なファイルに対して最も無防備な処理です。壊れた HEIC で返ってこなくなる例を実測したため、decode に成功したファイルだけに渡します（[verification.md](verification.md)）。
 
-HEIC の decode 自体は browser / OS の decoder が行います。EdgePhotos はそれを呼ぶだけで、攻撃面は Client の sandbox 内に閉じます。
+HEIC の decode は browser / OS の decoder に任せ、Worker では decode しません。そのため HEIC decoder 固有の攻撃面を server 側に足しません。browser / OS の decoder 自体の脆弱性は、EdgePhotos からは制御できません。
 
 ## 8. HTTP / Browser
 
@@ -163,6 +193,10 @@ Origin は明示した `APP_ORIGIN` と比較し、受信 Host をそのまま�
 - どちらの header もない request（Native client、CLI）は Access assertion の検証だけで判定します。
 
 共有ページの CSP は `default-src 'self'` を基準にし、`img-src` だけ R2 の S3 endpoint を追加で許可します。
+
+private app（Access の内側の SPA）には、現在 CSP を付けていません。private app で script を実行されると、その member ができること（library 全体の削除・export）をすべてできます。
+
+そのため、利用者の入力（album 名、ファイル名）は JSX の text として描画し、`innerHTML` / `dangerouslySetInnerHTML` を使いません。外部の script・analytics・font も読み込みません。private app への CSP は Release polish で検討します（[roadmap.md](roadmap.md)）。
 
 ## 9. ログ
 
@@ -213,6 +247,7 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - Access 設定異常時に private data を返さない。
 - share secret 不正 / expired / revoked を拒否する。
 - 別 album の asset を share から取得できない。
+- 共有ページで album 名が markup として解釈されない（`e2e/share.spec.ts`）。
 - share から original を取得できない。
 - preview / thumbnail から GPS が除去される。
 - upload finalize 再送で重複 asset が生じない。

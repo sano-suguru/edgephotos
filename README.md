@@ -85,8 +85,9 @@ EdgePhotos は、アップロード時に受け取った写真の byte 列を変
 - R2 bucket は private のまま使います
 - ライブラリへのアクセスは Cloudflare Access で保護します
 - 認証なしで写真を閲覧できるのは、明示的に作成した共有リンクからだけです。共有で渡すのは表示用の画像だけで、保存した写真ファイルそのものは渡しません
+- household member の間に権限の区別はありません。どの member もライブラリ全体を削除・export できます
 
-脅威モデルと秘密情報の扱いは [セキュリティ](docs/security.md) にあります。
+脅威モデルと秘密情報の扱いは [セキュリティ](docs/security.md) にあります。脆弱性の報告は [SECURITY.md](SECURITY.md) を参照してください。
 
 ## アーキテクチャ概要
 
