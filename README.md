@@ -142,7 +142,8 @@ EdgePhotos は任意のクラウドへ移せる抽象化を持たず、Cloudflar
 - [設計判断](docs/decisions.md) — 重要な選択とその理由
 - [検証記録](docs/verification.md) — 実環境と Browser で確認した内容
 - [測定](docs/benchmarks.md) — scale と取り込み memory の数値
-- [ロードマップ](docs/roadmap.md) — これからの実装順序と到達点
+- [ロードマップ](docs/roadmap.md) — v1 までに残っている作業
+- [既知の制約](docs/limitations.md) — v1 の完成条件に含めない制約
 - [変更の記録](docs/changelog.md) — 完了した実装段階
 - [AGENTS.md](AGENTS.md) — AI / 開発支援ツール向けの作業ガードレール
 

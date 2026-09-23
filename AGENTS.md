@@ -109,6 +109,7 @@ D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>`
 | 開発フロー、test、CI、repository layout | `docs/development.md` |
 | デプロイ、migration、backup / restore | `docs/operations.md` |
 | 優先順位や feature scope | `docs/roadmap.md` |
+| v1 の完成条件に含めない制約 | `docs/limitations.md` |
 | 実環境や Browser で確かめた結果 | `docs/verification.md`（性能と memory の数値は `docs/benchmarks.md`） |
 | 完了した実装段階 | `docs/changelog.md` |
 

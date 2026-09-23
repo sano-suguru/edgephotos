@@ -19,7 +19,7 @@ Deploy to Cloudflare ボタンは Release polish の範囲です（[roadmap.md](
 
 Cloudflare の plan は、試用・評価なら Workers Free、継続して使うなら Workers Paid（月 $5 から）を推奨します。
 
-Free の CPU 上限は 1 request 10 ms です。数千枚以上の library では timeline や export が上限に近づきます（[benchmarks.md](benchmarks.md)）。Paid の上限は既定で 30 秒です。D1 の time travel も、Free の 7 日に対して Paid は 30 日です。
+Free の CPU 上限は 1 request 10 ms です。現在の測定では、EdgePhotos がこの上限に安定して収まることを確認できていません（[plan に依存する注意](benchmarks.md#plan-に依存する注意)）。Paid の上限は既定で 30 秒です。D1 の time travel も、Free の 7 日に対して Paid は 30 日です。
 
 ### R2 の保存容量と料金
 

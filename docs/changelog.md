@@ -96,6 +96,27 @@ D1 の schema は変えていません。asset に所有者を持たないため
 
 判断は [D-014](decisions.md)、[D-020](decisions.md)、[D-021](decisions.md)。手順は [operations.md](operations.md)、確認内容は [verification.md](verification.md)。
 
+## Foundation と実環境の境界確認（2026-09-17）
+
+以後の feature を載せる共通基盤と、実 Cloudflare 環境（`remote-test`）で境界を踏む確認です。2026-09-23 に roadmap から移しました。
+
+完了条件:
+
+- Web / Worker が同一 deployable unit として起動できる
+- private API の認証と household authorization が機能する
+- D1 migration と private R2 binding が利用できる（local）
+- OpenAPI を生成できる（`/api/v1/openapi.json`）
+- 実 Access で `/*` が許可外の identity を拒否し、`/share/*` の Bypass が公開経路として機能する
+- 実 R2 への presigned PUT / GET が Browser の CORS 越しに成立する（`Content-Type` と `If-None-Match` を含む）
+- original の checksum 付き PUT が実 R2 で機能する（[D-018](decisions.md)）
+
+Post-merge verification のうち、次の 2 つもこの時点で終えています。
+
+- 共有リンクを private window で開き、revoke 後に閲覧できないことを確認する
+- remote で backup export → verify → 別の空環境への restore を 1 回成功させる
+
+残っていた production 環境の作成、Dialog / Menu の touch 操作、スマートフォンで撮った写真での確認は、roadmap の Production と Post-merge verification へ移しました。
+
 ## v1 の機能（Feature 1〜5）
 
 この 5 段階の完了をもって、外部 alpha の前提が揃いました。
