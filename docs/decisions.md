@@ -892,6 +892,8 @@ POST に分けると、backup CLI が backup export を終えたときだけ記�
 
 **記録に失敗しても backup は失敗にしない。** `manifest.json` は既にディスクに書かれています。記録できなかったことだけを log に出します。
 
+**記録は CLI の申告であって、server の検証ではない。** server は backup ディレクトリを見られないので、backup が存在するかを確かめません。認証済みの household member（CLI）が「終わった」と送ったことを記録するだけです。member は信頼境界の内側にいる（[信頼するもの・しないもの](security.md#信頼するものしないもの)）ので、それで足ります。この日時を「server が確かめた backup」として扱う機能は作りません。
+
 **新しい key と名前で持ち、古い値を読み継がない。** 記録は `settings.last_backup_at`、diagnostics の field は `lastBackupAt` です。`last_export_at` には、verify や restore の確認で書かれた値が残っています。これを読み継ぐと、一度も backup export を終えていないライブラリでも、更新直後に verify の時刻が「最終 backup export」と表示されます。古い row は読まず、消しもしません。
 
 却下した案:

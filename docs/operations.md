@@ -440,7 +440,7 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 
 取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の manifest ダウンロードと、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
 
-この日時は backup の中身が揃っていることを示しません。backup export は差分で、既にあるファイルは size だけを見て再利用します。揃っているかは `pnpm backup check` で確認してください。
+server は backup ディレクトリを見られないので、この日時は CLI が「終わった」と送った記録です。backup の中身が揃っていることは示しません。backup export は差分で、既にあるファイルは size だけを見て再利用します。揃っているかは `pnpm backup check` で確認してください。
 
 D-033 より前の版から更新した直後は「未実施」と表示されます。以前の記録（`last_export_at`）は verify などでも書かれていたため、読み継ぎません。
 
