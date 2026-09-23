@@ -1,7 +1,7 @@
 import { useComputed } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { Button, buttonClass, cn } from '../../components/ui/button'
-import { Close, Upload } from '../../components/ui/icons'
+import { Check, Close, Upload } from '../../components/ui/icons'
 import { SUPPORTED_TYPES } from '../../lib/image'
 import { activeUploads, clearFinishedUploads, enqueueFiles, retryUploads, type UploadItem, uploads } from './upload'
 import { canAutoDismissUploads, countUploads, uploadHeadline } from './upload-list'
@@ -80,7 +80,10 @@ export function UploadList() {
 
   return (
     <div
-      class={cn('mb-4 flex items-start rounded-xl text-sm', s.failed > 0 && !active ? 'bg-destructive/10' : 'bg-muted')}
+      class={cn(
+        'mb-4 flex items-start rounded-surface text-sm',
+        s.failed > 0 && !active ? 'bg-destructive/10' : 'bg-muted',
+      )}
     >
       <details class="min-w-0 flex-1" open={active || s.failed > 0}>
         <summary class="flex min-h-11 cursor-pointer select-none items-center gap-3 px-4">
@@ -92,7 +95,7 @@ export function UploadList() {
         {active && (
           <div class="space-y-1 px-4">
             <div
-              class="h-1 overflow-hidden rounded-full bg-black/10"
+              class="h-1 overflow-hidden rounded-full bg-foreground/10"
               role="progressbar"
               aria-label="完了した枚数"
               aria-valuemin={0}
@@ -116,8 +119,17 @@ export function UploadList() {
             <li key={u.id} class="flex justify-between gap-3">
               <span class="min-w-0 truncate">{u.name}</span>
               <span
-                class={cn('min-w-0 text-right', u.state === 'error' ? 'text-destructive' : 'text-muted-foreground')}
+                class={cn(
+                  'inline-flex min-w-0 items-baseline gap-1 text-right',
+                  u.state === 'error'
+                    ? 'text-destructive'
+                    : u.state === 'done'
+                      ? 'text-foreground'
+                      : 'text-muted-foreground',
+                )}
               >
+                {/* A finished photo reads as settled; everything else, including a duplicate, stays quiet. */}
+                {u.state === 'done' && <Check class="size-3.5 shrink-0 self-center" />}
                 {LABELS[u.state]}
                 {u.message ? ` — ${u.message}` : ''}
               </span>
@@ -136,7 +148,7 @@ export function UploadList() {
         <button
           type="button"
           aria-label="アップロード状況を消す"
-          class={cn(buttonClass('ghost', 'icon'), 'm-1 shrink-0 text-muted-foreground hover:bg-black/5')}
+          class={cn(buttonClass('ghost', 'icon'), 'm-0.5 size-11 shrink-0 text-muted-foreground hover:bg-foreground/5')}
           onClick={clearFinishedUploads}
         >
           <Close class="size-4" />

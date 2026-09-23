@@ -208,21 +208,31 @@ Playwright（Chromium / WebKit iPhone 13 相当）で確認した。各 spec は
 
 機能・情報設計・API は変えず、色・枠・影・ボタンの強弱だけを見直した。
 
-変更の内容:
-
-- token は無彩色にした
-- 塗りのボタンは、header のアップロード（desktop）と各画面の主操作に限る
-- pill 形は header 行の操作だけ。form と dialog のボタンは角丸の長方形
-- header と phone のタブは不透明
-- accent は現在地・focus・進捗に限る
-- 入れ子の確認 dialog では外側の dialog を暗くする
-- phone では黒塗りのアップロードが写真より先に目に入ったため、phone だけ塗りのないアイコンにした
+このとき決めた規則は [design.md](design.md) に移した。
 
 確認方法: local の `vite dev`（使い捨ての `EDGEPHOTOS_STATE_DIR`）に合成 JPEG 18 枚と album 2 件を入れた。Playwright で desktop Chromium（1440×900）と WebKit iPhone 13 相当の timeline・album・共有 dialog・確認 dialog・ライブラリ・viewer を、変更前後で撮って比べた。彩度の低い合成画像 24 枚でも timeline を撮った。
 
 共有ページだけは `vite build` + `vite preview` で share API を mock して確認した。`vite dev` では CSP（`style-src 'self'`）が inline style を拒否し、CSS が当たらないため。
 
 `pnpm check` と `pnpm test:e2e`（13 件）が通った。
+
+## 画面の型の統一（2026-09-23）
+
+機能・情報設計・API・文言は変えず、見た目の規則を [design.md](design.md) にまとめて全画面に当てた。token 外の色を stage token と `border` に置き換え、見出し・空状態・角丸・押下と処理中の状態・44px の操作を揃えた。新しく出す情報は timeline の月の枚数だけ。
+
+確認方法: local の `pnpm dev` を Playwright（Chromium）で開き、375px で timeline・viewer と info sheet・album 一覧・album の共有 dialog・ライブラリを、1280px で timeline を撮って見た。375px では、見たどの画面にも横スクロールは無かった。320 / 414 / 768px では timeline・favorites・albums・ゴミ箱・ライブラリの `scrollWidth` を測り、どれも画面幅を超えなかった。
+
+reduced motion: build した CSS で、dialog・menu・ボタン押下の scale が `prefers-reduced-motion: no-preference` の中にだけあることを確かめた。Browser で emulate しての確認はしていない。
+
+`pnpm test:e2e`（54 件）が通った。途中で 1 件、phone の info sheet の位置の検査が落ちた。sheet が下から入ってくる途中の位置を測っていたので、sheet の入り方を fade だけにした。
+
+「年月で移動」と「選択」を 1 行にした直後は、選択中に「年月で移動」が消え、`e2e/timeline.spec.ts` の「別の月を開くと選択が終わる」が落ちた。選択中は選択 bar の上に残すように直した。
+
+最初の suite 実行で、`e2e/upload.spec.ts` の HEIC のサムネイル読み込み（mobile-webkit）が 1 回だけ 5 秒以内に読み込まれず落ちた。その後の suite 3 回と、単独で 5 回繰り返した実行では通った。原因は調べていない。
+
+`e2e/mobile.spec.ts` の「選択 bar が上端に残る」は、単独で実行すると変更前の `main` でも落ちる。写真が 1 枚だけだと、600px スクロールできるほど page が長くならないため。suite 全体の順序では通る。
+
+共有ページは stage token と見出しの class だけを変えた。inline style は足していないので、CSP 下の確認（`vite build` + `vite preview`）は今回はしていない。
 
 ## 長期保管の整合性（2026-09-17）
 

@@ -3,7 +3,9 @@ import { useEffect, useRef } from 'preact/hooks'
 import type { AlbumListItem } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { Dialog } from '../../components/ui/dialog'
+import { EmptyState } from '../../components/ui/empty'
 import { Albums } from '../../components/ui/icons'
+import { PageHeader } from '../../components/ui/page'
 import { api } from '../../lib/api/client'
 import { userMessage } from '../../lib/errors'
 import { navigate } from '../../state/router'
@@ -19,7 +21,7 @@ function AlbumCover(props: { album: AlbumListItem; onExpired: () => boolean }) {
   }, [url])
 
   return (
-    <div class="relative aspect-square overflow-hidden rounded-lg bg-muted">
+    <div class="relative aspect-square overflow-hidden rounded-surface bg-muted">
       {url && !failed.value ? (
         <img
           src={url}
@@ -88,12 +90,15 @@ export function AlbumsPage() {
 
   return (
     <section>
-      <div class="mb-6 flex items-center justify-between gap-3">
-        <h1 class="text-2xl font-semibold tracking-tight">アルバム</h1>
-        <Button variant="secondary" pill onClick={() => (creating.value = true)}>
-          新規アルバム
-        </Button>
-      </div>
+      <PageHeader
+        actions={
+          <Button variant="secondary" pill onClick={() => (creating.value = true)}>
+            新規アルバム
+          </Button>
+        }
+      >
+        アルバム
+      </PageHeader>
       {error.value && (
         <div role="alert" class="mb-3 flex items-center gap-3 text-sm">
           <p class="text-destructive">アルバムを読み込めませんでした。{error.value}</p>
@@ -107,18 +112,18 @@ export function AlbumsPage() {
           <span class="sr-only">読み込み中…</span>
           {Array.from({ length: 5 }, (_, i) => (
             <div key={i}>
-              <div class="aspect-square rounded-lg bg-muted motion-safe:animate-pulse" />
-              <div class="mt-2 h-4 w-2/3 rounded bg-muted motion-safe:animate-pulse" />
+              <div class="aspect-square rounded-surface bg-muted motion-safe:animate-pulse" />
+              <div class="mt-2.5 h-4 w-2/3 rounded-control bg-muted motion-safe:animate-pulse" />
             </div>
           ))}
         </div>
       )}
       {albums.value?.length === 0 && (
-        <div class="flex flex-col items-center gap-3 py-20 text-center text-sm text-muted-foreground">
-          <Albums class="size-8 text-muted-foreground/50" />
-          <p>アルバムはまだありません。</p>
-          <p>「新規アルバム」で作成し、写真を開いてアルバムに追加できます。</p>
-        </div>
+        <EmptyState
+          icon={<Albums />}
+          title="アルバムはまだありません。"
+          hint="「新規アルバム」で作成し、写真を開いてアルバムに追加できます。"
+        />
       )}
       <ul class="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
         {albums.value?.map((album) => (
@@ -129,10 +134,10 @@ export function AlbumsPage() {
                 e.preventDefault()
                 navigate(`/albums/${album.id}`)
               }}
-              class="group block rounded-lg"
+              class="group block rounded-surface"
             >
               <AlbumCover album={album} onExpired={refreshExpired} />
-              <div class="mt-2 truncate text-sm font-medium">{album.title}</div>
+              <div class="mt-2.5 truncate text-sm font-medium">{album.title}</div>
               <div class="text-xs text-muted-foreground tabular-nums">{album.assetCount} 枚</div>
             </a>
           </li>
@@ -149,7 +154,7 @@ export function AlbumsPage() {
             maxLength={200}
             value={title.value}
             onInput={(e) => (title.value = (e.currentTarget as HTMLInputElement).value)}
-            class="h-10 rounded-lg bg-muted px-3"
+            class="h-11 rounded-control bg-muted px-3 text-base md:h-10 md:text-sm"
           />
           {createError.value && (
             <p role="alert" class="text-sm text-destructive">

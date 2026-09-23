@@ -24,19 +24,22 @@ export function Dialog(props: {
   return (
     <BaseDialog.Root open={props.open} onOpenChange={(open) => props.onOpenChange(open)}>
       <BaseDialog.Portal>
-        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black/40" />
+        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-stage/40 transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <BaseDialog.Popup
           finalFocus={props.finalFocus ? () => props.finalFocus?.() ?? true : undefined}
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl bg-background p-6 shadow-lg outline-none',
+            'fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-surface bg-background p-6 shadow-lg outline-none',
+            // Opens and closes with a short fade and a slight scale; with reduced motion, the fade only.
+            'transition-[opacity,scale,filter] duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
+            'motion-safe:data-[ending-style]:scale-[0.98] motion-safe:data-[starting-style]:scale-[0.98]',
             // A confirmation opened on top has no backdrop of its own; dim this dialog so the top one stands out.
-            'transition-[filter] data-[nested-dialog-open]:brightness-60',
+            'data-[nested-dialog-open]:brightness-60',
             props.wide ? 'max-w-5xl' : 'max-w-md',
           )}
         >
           <div class="mb-5 flex items-start justify-between gap-4">
             <div>
-              <BaseDialog.Title id={`${id.current}-title`} className="text-lg font-semibold">
+              <BaseDialog.Title id={`${id.current}-title`} className="text-heading">
                 {props.title}
               </BaseDialog.Title>
               {props.description && (
@@ -46,7 +49,7 @@ export function Dialog(props: {
               )}
             </div>
             <BaseDialog.Close
-              className={cn(buttonClass('ghost', 'icon'), '-mr-2 -mt-1 shrink-0 text-muted-foreground')}
+              className={cn(buttonClass('ghost', 'icon'), '-mr-2 -mt-1 size-11 shrink-0 text-muted-foreground')}
               aria-label="閉じる"
             >
               <Close class="size-4" />
@@ -71,9 +74,9 @@ export function FullscreenDialog(props: {
   return (
     <BaseDialog.Root open onOpenChange={(open) => !open && props.onClose()}>
       <BaseDialog.Portal>
-        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black" />
+        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-stage" />
         <BaseDialog.Popup
-          className="fixed inset-0 z-50 flex bg-black text-white outline-none"
+          className="fixed inset-0 z-50 flex bg-stage text-on-stage outline-none"
           // Base UI types come from React; preact/compat passes the handler through unchanged.
           onKeyDown={props.onKeyDown as never}
           finalFocus={props.finalFocus ? () => props.finalFocus?.() ?? true : undefined}
@@ -111,7 +114,7 @@ export function ConfirmDialog(props: {
         <Button variant="ghost" onClick={() => props.onOpenChange(false)}>
           キャンセル
         </Button>
-        <Button variant="destructive" disabled={props.busy} onClick={props.onConfirm}>
+        <Button variant="destructive" busy={props.busy} onClick={props.onConfirm}>
           {props.confirmLabel}
         </Button>
       </div>

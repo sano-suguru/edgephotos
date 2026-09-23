@@ -2,8 +2,10 @@ import { useSignal, useSignalEffect } from '@preact/signals'
 import type { Album } from '../../../contracts/schemas'
 import { Button } from '../../components/ui/button'
 import { ConfirmDialog, Dialog } from '../../components/ui/dialog'
+import { EmptyState } from '../../components/ui/empty'
 import { Albums, More } from '../../components/ui/icons'
 import { DropdownMenu } from '../../components/ui/menu'
+import { PageHeader } from '../../components/ui/page'
 import { showToast } from '../../components/ui/toast'
 import { api } from '../../lib/api/client'
 import { userMessage } from '../../lib/errors'
@@ -47,7 +49,7 @@ export function AlbumPage({ id }: { id: string }) {
     return (
       <div aria-busy="true">
         <span class="sr-only">読み込み中…</span>
-        <div class="mb-6 h-14 w-48 rounded-lg bg-muted motion-safe:animate-pulse" />
+        <div class="mb-6 h-16 w-48 rounded-control bg-muted motion-safe:animate-pulse" />
       </div>
     )
   }
@@ -55,47 +57,39 @@ export function AlbumPage({ id }: { id: string }) {
 
   return (
     <section>
-      <div class="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <a
-            href="/albums"
-            class="text-sm text-muted-foreground hover:underline"
-            onClick={(e) => {
-              e.preventDefault()
-              navigate('/albums')
-            }}
-          >
-            ← アルバム
-          </a>
-          <h1 class="text-2xl font-semibold tracking-tight">{current.title}</h1>
-        </div>
-        <div class="flex gap-1">
-          <Button variant="secondary" pill onClick={() => (sharing.value = true)}>
-            共有
-          </Button>
-          <DropdownMenu
-            label={<More />}
-            ariaLabel="アルバムの操作"
-            items={[
-              {
-                label: '名前を変更',
-                onSelect: () => {
-                  draft.value = current.title
-                  renameError.value = null
-                  renaming.value = true
+      <PageHeader
+        back={{ to: '/albums', label: 'アルバム', always: true }}
+        actions={
+          <>
+            <Button variant="secondary" pill onClick={() => (sharing.value = true)}>
+              共有
+            </Button>
+            <DropdownMenu
+              label={<More />}
+              ariaLabel="アルバムの操作"
+              items={[
+                {
+                  label: '名前を変更',
+                  onSelect: () => {
+                    draft.value = current.title
+                    renameError.value = null
+                    renaming.value = true
+                  },
                 },
-              },
-              {
-                label: 'アルバムを削除',
-                destructive: true,
-                onSelect: () => {
-                  deleting.value = true
+                {
+                  label: 'アルバムを削除',
+                  destructive: true,
+                  onSelect: () => {
+                    deleting.value = true
+                  },
                 },
-              },
-            ]}
-          />
-        </div>
-      </div>
+              ]}
+            />
+          </>
+        }
+      >
+        {current.title}
+      </PageHeader>
 
       <AssetGrid
         key={current.id}
@@ -103,11 +97,11 @@ export function AlbumPage({ id }: { id: string }) {
         selectable
         albumId={current.id}
         empty={
-          <>
-            <Albums class="size-8 text-muted-foreground/50" />
-            <p>このアルバムにはまだ写真がありません。</p>
-            <p>タイムラインで写真を開き、「アルバムに追加」から追加できます。</p>
-          </>
+          <EmptyState
+            icon={<Albums />}
+            title="このアルバムにはまだ写真がありません。"
+            hint="タイムラインで写真を開き、「アルバムに追加」から追加できます。"
+          />
         }
         load={(cursor) => api.albumAssets(current.id, cursor)}
       />
@@ -132,7 +126,7 @@ export function AlbumPage({ id }: { id: string }) {
             maxLength={200}
             value={draft.value}
             onInput={(e) => (draft.value = (e.currentTarget as HTMLInputElement).value)}
-            class="h-10 rounded-lg bg-muted px-3"
+            class="h-11 rounded-control bg-muted px-3 text-base md:h-10 md:text-sm"
           />
           {renameError.value && (
             <p role="alert" class="text-sm text-destructive">

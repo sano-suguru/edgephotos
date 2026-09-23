@@ -1,6 +1,6 @@
 import { Menu as BaseMenu } from '@base-ui/react/menu'
 import type { ComponentChildren } from 'preact'
-import { buttonClass } from './button'
+import { buttonClass, cn } from './button'
 
 export type MenuEntry = { label: string; onSelect: () => void; disabled?: boolean; destructive?: boolean }
 
@@ -25,16 +25,20 @@ export function DropdownMenu(props: {
         {/* Above the full-screen viewer (z-50). */}
         <BaseMenu.Positioner sideOffset={4} className="z-[60]">
           {/* A long list (many albums) scrolls inside the space left in the viewport instead of running off it. */}
-          <BaseMenu.Popup className="max-h-[var(--available-height)] min-w-44 overflow-y-auto overscroll-contain rounded-xl bg-background p-1 text-foreground shadow-md ring-1 ring-black/5 outline-none">
+          <BaseMenu.Popup className="max-h-[var(--available-height)] min-w-44 origin-[var(--transform-origin)] overflow-y-auto overscroll-contain rounded-surface border border-border bg-background p-1 text-foreground shadow-md outline-none transition-[opacity,scale] duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 motion-safe:data-[ending-style]:scale-[0.98] motion-safe:data-[starting-style]:scale-[0.98]">
             {props.items.length === 0 && <div class="px-3 py-2 text-sm text-muted-foreground">項目がありません</div>}
             {props.items.map((item) => (
               <BaseMenu.Item
                 key={item.label}
                 disabled={item.disabled}
                 onClick={item.onSelect}
-                className={`cursor-default rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-muted data-[disabled]:opacity-50 ${
-                  item.destructive ? 'text-destructive' : ''
-                }`}
+                className={cn(
+                  // 44px rows on phones, where the menu is tapped; compact rows on desktop.
+                  'flex cursor-default items-center rounded-control px-3 py-2 text-sm outline-none max-md:min-h-11 data-[disabled]:opacity-50',
+                  item.destructive
+                    ? 'text-destructive data-[highlighted]:bg-destructive/10'
+                    : 'data-[highlighted]:bg-muted',
+                )}
               >
                 {item.label}
               </BaseMenu.Item>

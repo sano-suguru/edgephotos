@@ -103,7 +103,7 @@ function PhotoOverlay(props: { id: string; url: string | null }) {
       role="dialog"
       aria-modal="true"
       aria-label="写真"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-stage p-4"
       onClick={() => {
         viewing.value = null
       }}
@@ -119,13 +119,13 @@ function PhotoOverlay(props: { id: string; url: string | null }) {
       {props.url ? (
         <img src={props.url} alt="" referrerPolicy="no-referrer" class="max-h-full max-w-full object-contain" />
       ) : (
-        <span class="text-sm text-white">読み込み中…</span>
+        <span class="text-sm text-on-stage">読み込み中…</span>
       )}
       <button
         ref={close}
         type="button"
         aria-label="閉じる"
-        class="absolute right-2 top-[max(0.5rem,env(safe-area-inset-top))] inline-flex size-11 items-center justify-center rounded-full bg-black/40 text-white/90 hover:bg-white/15"
+        class="absolute right-2 top-[max(0.5rem,env(safe-area-inset-top))] inline-flex size-11 items-center justify-center rounded-full bg-stage-control text-on-stage hover:bg-stage-hover active:bg-stage-hover"
         onClick={() => {
           viewing.value = null
         }}
@@ -144,9 +144,11 @@ function SharePage() {
   const a = album.value
   return (
     <>
-      <main class="mx-auto max-w-6xl px-4 pb-10 pt-8">
-        <h1 class="text-2xl font-semibold tracking-tight">{a.album.title}</h1>
-        <p class="mb-6 mt-1 text-sm text-muted-foreground">期限 {new Date(a.expiresAt).toLocaleString()}</p>
+      <main class="mx-auto max-w-6xl px-4 pb-12 pt-8 md:pt-12">
+        <h1 class="text-title [overflow-wrap:anywhere]">{a.album.title}</h1>
+        <p class="mb-6 mt-1 text-sm text-muted-foreground tabular-nums">
+          期限 {new Date(a.expiresAt).toLocaleString()}
+        </p>
         <ul class="grid grid-cols-3 gap-0.5 sm:grid-cols-4 sm:gap-1 md:grid-cols-6">
           {a.items.map((item) => (
             <li key={item.id} class="aspect-square overflow-hidden bg-muted">

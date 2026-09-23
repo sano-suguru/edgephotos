@@ -6,6 +6,14 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## 画面の型の統一（2026-09-23）
+
+全画面の見た目を 1 つの規則に揃えました（[design.md](design.md)）。機能・情報設計・API・文言は変えていません。
+
+ページ見出し・空状態・角丸・区切り線・文字の大きさを全画面で共通にしました。viewer と共有ページの暗い面も同じ token にしました。ボタンには押下と処理中の状態があり、phone で触る操作はすべて 44px 以上です。dialog と menu は短く fade して開閉します。reduced motion の設定では fade だけです。
+
+timeline では「年月で移動」と「選択」を 1 行にまとめ、月見出しの横にその月の枚数を出します。
+
 ## 複数選択とまとめての操作（2026-09-22）
 
 timeline / favorites / album で写真を複数選び、album への追加・お気に入り・ゴミ箱への移動をまとめて行えるようにしました。

@@ -58,7 +58,7 @@ function prefetchPreview(id: string) {
 }
 
 const toolbarButton =
-  'inline-flex size-10 items-center justify-center rounded-full text-white/90 transition-colors hover:bg-white/15 disabled:pointer-events-none disabled:opacity-40'
+  'inline-flex size-11 items-center justify-center rounded-full text-on-stage transition hover:bg-stage-hover active:bg-stage-hover motion-safe:active:scale-95 disabled:pointer-events-none disabled:opacity-40'
 
 export type ViewerRemoval = 'trash' | 'restore' | 'purge' | 'remove-from-album'
 
@@ -229,14 +229,14 @@ export function AssetViewer(props: {
       <div class="relative flex min-w-0 flex-1 flex-col">
         <div
           class={cn(
-            'absolute inset-x-0 top-0 z-10 flex items-center gap-1 bg-gradient-to-b from-black/70 to-transparent px-2 pb-6 pt-[max(0.5rem,env(safe-area-inset-top))]',
+            'absolute inset-x-0 top-0 z-10 flex items-center gap-1 bg-gradient-to-b from-stage/70 to-transparent px-2 pb-6 pt-[max(0.5rem,env(safe-area-inset-top))]',
             chrome,
           )}
         >
           <DialogClose className={toolbarButton} aria-label="閉じる">
             <Close />
           </DialogClose>
-          <DialogTitle className="min-w-0 flex-1 truncate px-1 text-sm font-medium text-white/90">
+          <DialogTitle className="min-w-0 flex-1 truncate px-1 text-sm font-medium text-on-stage">
             {asset.filename ?? '写真'}
           </DialogTitle>
           {props.mode !== 'trash' ? (
@@ -250,7 +250,7 @@ export function AssetViewer(props: {
                 title="お気に入り"
                 onClick={() => run(async () => props.onUpdated(await api.setFavorite(asset.id, !asset.isFavorite)))}
               >
-                <Star filled={asset.isFavorite} class={cn('size-5', asset.isFavorite && 'text-amber-300')} />
+                <Star filled={asset.isFavorite} class={cn('size-5', asset.isFavorite && 'text-favorite')} />
               </button>
               <DropdownMenu
                 label={<AlbumPlus />}
@@ -315,7 +315,7 @@ export function AssetViewer(props: {
           )}
           <button
             type="button"
-            class={cn(toolbarButton, infoOpen.value && 'bg-white/20')}
+            class={cn(toolbarButton, infoOpen.value && 'bg-stage-hover')}
             aria-pressed={infoOpen.value}
             aria-label="情報"
             title="情報"
@@ -355,20 +355,20 @@ export function AssetViewer(props: {
             // Only shows when the preview is slow (cached ones arrive at once), so stepping does not flicker.
             <span
               aria-hidden="true"
-              class="pointer-events-none absolute bottom-[calc(3rem+env(safe-area-inset-bottom))] right-3 size-4 animate-[delayed-in_150ms_ease-out_500ms_both] rounded-full border-2 border-white/30 border-t-white/80 motion-safe:animate-[delayed-in_150ms_ease-out_500ms_both,spin_1s_linear_infinite]"
+              class="pointer-events-none absolute bottom-[calc(3rem+env(safe-area-inset-bottom))] right-3 size-4 animate-[delayed-in_150ms_ease-out_500ms_both] rounded-full border-2 border-on-stage/30 border-t-on-stage motion-safe:animate-[delayed-in_150ms_ease-out_500ms_both,spin_1s_linear_infinite]"
             />
           )}
           {failed && (
             <div
               class={cn(
-                'absolute bottom-[calc(3rem+env(safe-area-inset-bottom))] left-1/2 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-black/70 py-1 pl-3 pr-1 text-xs text-white/90',
+                'absolute bottom-[calc(3rem+env(safe-area-inset-bottom))] left-1/2 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-stage/70 py-1 pl-3 pr-1 text-xs text-on-stage',
                 chrome,
               )}
             >
               <span role="status">高画質で表示できませんでした</span>
               <button
                 type="button"
-                class="min-h-8 rounded-full px-3 font-semibold hover:bg-white/15"
+                class="-my-1.5 min-h-11 rounded-full px-3 font-semibold hover:bg-stage-hover active:bg-stage-hover"
                 onClick={() => loadPreview(true)}
               >
                 再試行
@@ -382,7 +382,7 @@ export function AssetViewer(props: {
             onClick={() => go(-1)}
             class={cn(
               toolbarButton,
-              'absolute left-2 top-1/2 size-11 -translate-y-1/2 bg-black/40 disabled:invisible',
+              'absolute left-2 top-1/2 size-11 -translate-y-1/2 bg-stage-control disabled:invisible',
               chrome,
             )}
           >
@@ -395,7 +395,7 @@ export function AssetViewer(props: {
             onClick={() => go(1)}
             class={cn(
               toolbarButton,
-              'absolute right-2 top-1/2 size-11 -translate-y-1/2 bg-black/40 disabled:invisible',
+              'absolute right-2 top-1/2 size-11 -translate-y-1/2 bg-stage-control disabled:invisible',
               chrome,
             )}
           >
@@ -405,7 +405,7 @@ export function AssetViewer(props: {
 
         <p
           class={cn(
-            'pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-8 text-sm text-white/80',
+            'pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-stage/60 to-transparent px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-8 text-sm text-on-stage tabular-nums',
             chrome,
           )}
         >
@@ -417,13 +417,13 @@ export function AssetViewer(props: {
       {infoOpen.value && (
         <aside
           aria-label="写真の情報"
-          class="absolute inset-x-0 bottom-0 z-20 max-h-[50vh] overflow-auto rounded-t-2xl bg-neutral-900 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-sm shadow-2xl md:static md:max-h-none md:w-80 md:shrink-0 md:rounded-none md:border-l md:border-white/10"
+          class="absolute inset-x-0 bottom-0 z-20 max-h-[50vh] overflow-auto rounded-t-sheet bg-stage-raised p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-sm shadow-2xl md:static md:max-h-none md:w-80 md:shrink-0 md:rounded-none md:border-l md:border-stage-hairline max-md:transition-opacity max-md:duration-200 max-md:starting:opacity-0"
         >
           <div class="mb-4 flex items-center justify-between">
-            <h2 class="font-semibold">情報</h2>
+            <h2 class="text-heading">情報</h2>
             <button
               type="button"
-              class={cn(toolbarButton, 'size-8')}
+              class={cn(toolbarButton, '-m-2')}
               aria-label="情報を非表示"
               onClick={() => {
                 infoOpen.value = false
@@ -433,21 +433,21 @@ export function AssetViewer(props: {
             </button>
           </div>
           <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
-            <dt class="text-white/50">撮影日時</dt>
+            <dt class="text-on-stage-muted">撮影日時</dt>
             <dd>{when.known ? formatDateTime(when) : '不明'}</dd>
-            <dt class="text-white/50">ファイル名</dt>
+            <dt class="text-on-stage-muted">ファイル名</dt>
             <dd class="break-all">{asset.filename ?? '—'}</dd>
-            <dt class="text-white/50">サイズ</dt>
+            <dt class="text-on-stage-muted">サイズ</dt>
             <dd>
               {asset.width && asset.height ? `${asset.width}×${asset.height}` : '—'} / {formatBytes(asset.originalSize)}
             </dd>
-            <dt class="text-white/50">形式</dt>
+            <dt class="text-on-stage-muted">形式</dt>
             <dd>{asset.contentType}</dd>
-            <dt class="text-white/50">追加日時</dt>
+            <dt class="text-on-stage-muted">追加日時</dt>
             <dd>{formatDateTime(captureParts({ takenAt: null, createdAt: asset.createdAt }))}</dd>
           </dl>
           {/* The stored file is what the browser handed over, not necessarily the camera's file. */}
-          <p class="mt-3 text-xs text-white/50">
+          <p class="mt-3 text-xs text-on-stage-muted">
             サイズと形式は、アップロード時にブラウザから受け取ったファイルのものです。このファイルは変更せずに保存しています。iPhone
             では、写真を選んだ時点で別の形式に変換されていることがあります。
           </p>

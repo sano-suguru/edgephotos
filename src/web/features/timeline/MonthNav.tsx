@@ -45,6 +45,7 @@ export function MonthNav() {
         variant="secondary"
         size="sm"
         pill
+        class="tabular-nums"
         aria-label={selected ? `年月で移動（${formatMonthKey(selected)}）` : '年月で移動'}
         onClick={() => (open.value = true)}
         disabled={!list?.length}
@@ -71,7 +72,7 @@ export function MonthNav() {
         <div class="flex flex-col gap-5">
           {byYear(list ?? []).map((year) => (
             <section key={year.year} aria-label={`${year.year}年`}>
-              <h3 class="mb-2 text-sm font-semibold text-muted-foreground">{year.year}年</h3>
+              <h3 class="mb-2 text-sm font-semibold text-muted-foreground tabular-nums">{year.year}年</h3>
               <ul class="grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {year.months.map((month) => {
                   const current = month.month === selected
@@ -83,12 +84,12 @@ export function MonthNav() {
                         data-month={month.month}
                         onClick={() => jump(month.month)}
                         class={cn(
-                          'flex min-h-11 w-full flex-col items-center justify-center rounded-lg px-2 py-1.5 text-sm transition',
-                          current ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-border',
+                          'flex min-h-12 w-full flex-col items-center justify-center rounded-control px-2 py-1.5 text-sm font-medium tabular-nums transition motion-safe:active:scale-[0.97]',
+                          current ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-border active:bg-border',
                         )}
                       >
                         <span>{Number(month.month.slice(5))}月</span>
-                        <span class={cn('text-xs', current ? 'opacity-80' : 'text-muted-foreground')}>
+                        <span class={cn('text-xs font-normal', current ? 'opacity-80' : 'text-muted-foreground')}>
                           {month.count.toLocaleString()}
                         </span>
                       </button>

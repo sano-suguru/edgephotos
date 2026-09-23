@@ -12,7 +12,7 @@ import { userMessage } from '../../lib/errors'
 import { libraryVersion } from '../uploads/upload'
 import { AssetViewer, type ViewerRemoval } from './AssetViewer'
 import { type BulkAction, bulkSlot, describeBulk, runBulk } from './bulk'
-import { invalidateMonths } from './months'
+import { invalidateMonths, months } from './months'
 import { createPageList, type PageDirection } from './page-list'
 import { SelectionBar } from './SelectionBar'
 import { createSelection } from './selection'
@@ -32,6 +32,13 @@ export type AssetGridProps = {
   // reader moved, which ends a selection. `start` itself is not that signal: the month list is read again
   // after photos are trashed, and the same month can then begin at another photo.
   startKey?: string | null
+  // Shows each month's photo count next to its heading. Only for the timeline: the counts are the whole
+  // library's, not this list's (favorites, an album, the trash).
+  monthCounts?: boolean
+  // Controls for the start of the row that holds 選択 (the timeline's month navigation), so the two share one
+  // line instead of stacking above the photos. While photos are picked they keep a row of their own above
+  // the selection bar.
+  leading?: ComponentChildren
 }
 
 type Group = { key: string; label: string; items: { asset: AssetSummary; index: number }[] }
@@ -378,8 +385,9 @@ export function AssetGrid(props: AssetGridProps) {
   if (!loaded.value || props.start === 'pending') {
     return (
       <div aria-busy="true">
+        {props.leading && <div class="mb-3 flex min-h-11 items-center gap-2">{props.leading}</div>}
         <span class="sr-only">読み込み中…</span>
-        <div class="mb-3 mt-1 h-5 w-24 rounded-md bg-muted motion-safe:animate-pulse" />
+        <div class="mb-3 mt-1 h-6 w-28 rounded-control bg-muted motion-safe:animate-pulse" />
         <div class="grid grid-cols-3 gap-0.5 sm:grid-cols-4 sm:gap-1 md:grid-cols-6 lg:grid-cols-8">
           {Array.from({ length: 24 }, (_, i) => (
             <div key={i} class="aspect-square bg-muted motion-safe:animate-pulse" />
@@ -390,15 +398,16 @@ export function AssetGrid(props: AssetGridProps) {
   }
 
   if (items.value.length === 0) {
-    return (
-      <div class="flex flex-col items-center gap-3 py-20 text-center text-sm text-muted-foreground">{props.empty}</div>
-    )
+    return <>{props.empty}</>
   }
 
   const selecting = !!props.selectable && picked.active.value
+  const countOf = (key: string) => months.value?.find((m) => m.month === key)?.count
 
   return (
     <div>
+      {/* Opening another month stays possible while photos are picked; it ends the selection. */}
+      {selecting && props.leading && <div class="mb-3 flex min-h-11 items-center gap-2">{props.leading}</div>}
       {props.selectable &&
         (selecting ? (
           <SelectionBar
@@ -415,8 +424,9 @@ export function AssetGrid(props: AssetGridProps) {
             }}
           />
         ) : (
-          <div class="mb-3 flex justify-end">
-            <Button variant="secondary" size="sm" pill class="min-h-11" onClick={picked.enter}>
+          <div class="mb-3 flex min-h-11 flex-wrap items-center gap-2">
+            {props.leading}
+            <Button variant="secondary" size="sm" pill class="ml-auto min-h-11" onClick={picked.enter}>
               <Select class="size-4" />
               選択
             </Button>
@@ -435,14 +445,21 @@ export function AssetGrid(props: AssetGridProps) {
           {/* Sticky, so the month being looked at stays named while the grid scrolls. The header is sticky
               only from md up; below that it scrolls away and the heading takes the top edge. While photos
               are being picked the selection bar holds that edge, and the heading scrolls with the grid. */}
-          <h2
+          <div
             class={cn(
-              'z-10 mb-3 bg-background py-1 text-lg font-semibold tracking-tight',
+              'z-10 mb-3 flex items-baseline gap-3 bg-background py-1.5',
               !selecting && 'sticky top-0 md:top-14',
             )}
           >
-            {group.label}
-          </h2>
+            {/* The month carries the weight; the year sits back. The text still reads "2024年1月". */}
+            <h2 class="text-heading tabular-nums">
+              <span class="text-sm font-medium text-muted-foreground">{group.key.slice(0, 4)}年</span>
+              {Number(group.key.slice(5))}月
+            </h2>
+            {props.monthCounts && countOf(group.key) !== undefined && (
+              <span class="text-xs text-muted-foreground tabular-nums">{countOf(group.key)} 枚</span>
+            )}
+          </div>
           <ul class="grid grid-cols-3 gap-0.5 sm:grid-cols-4 sm:gap-1 md:grid-cols-6 lg:grid-cols-8">
             {group.items.map(({ asset }) => {
               const isPicked = selecting && picked.ids.value.has(asset.id)
@@ -454,8 +471,10 @@ export function AssetGrid(props: AssetGridProps) {
                   loading="lazy"
                   decoding="async"
                   class={cn(
-                    'h-full w-full object-cover transition-opacity group-hover:opacity-90 motion-reduce:transition-none',
-                    isPicked && 'opacity-70',
+                    'h-full w-full object-cover transition-[opacity,scale] group-hover:opacity-90 motion-reduce:transition-none',
+                    // Pressing a tile answers at once, before the viewer opens.
+                    'motion-safe:group-active:scale-[0.97]',
+                    isPicked && 'opacity-70 motion-safe:scale-[0.92]',
                   )}
                   onLoad={() => shown.current.add(asset.id)}
                   onError={() => {
@@ -465,7 +484,14 @@ export function AssetGrid(props: AssetGridProps) {
                 />
               )
               return (
-                <li key={asset.id} class="group relative aspect-square overflow-hidden bg-muted">
+                <li
+                  key={asset.id}
+                  class={cn(
+                    'group relative aspect-square overflow-hidden bg-muted',
+                    // While a bulk action runs the tiles cannot be picked; they say so by fading back.
+                    selecting && busy.value && 'opacity-60',
+                  )}
+                >
                   {/* While photos are being picked the tile is a checkbox and never opens the viewer, so a
                       tap cannot open a photo by mistake. `data-asset-id` names the tile of a photo either
                       way; on the button it is also what the viewer returns focus to. */}
@@ -507,7 +533,9 @@ export function AssetGrid(props: AssetGridProps) {
                       aria-hidden="true"
                       class={cn(
                         'pointer-events-none absolute right-1 top-1 flex size-5 items-center justify-center rounded-full border-2',
-                        isPicked ? 'border-accent bg-accent text-white' : 'border-white/80 bg-black/20',
+                        isPicked
+                          ? 'border-accent bg-accent text-primary-foreground'
+                          : 'border-on-stage bg-stage-control',
                       )}
                     >
                       {isPicked && <Check class="size-3" />}
@@ -515,7 +543,7 @@ export function AssetGrid(props: AssetGridProps) {
                   )}
                   {asset.isFavorite && (
                     <span
-                      class="pointer-events-none absolute left-1 top-1 text-white drop-shadow"
+                      class="pointer-events-none absolute left-1 top-1 text-on-stage drop-shadow"
                       role="img"
                       aria-label="お気に入り"
                     >

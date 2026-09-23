@@ -1,7 +1,9 @@
 import { signal, useSignal, useSignalEffect } from '@preact/signals'
 import type { ComponentChildren } from 'preact'
 import { cn } from './components/ui/button'
-import { Albums, Images, Library, Star } from './components/ui/icons'
+import { EmptyState } from './components/ui/empty'
+import { Albums, Images, Library, Star, Trash } from './components/ui/icons'
+import { PageHeader } from './components/ui/page'
 import { Toaster } from './components/ui/toast'
 import { AlbumPage } from './features/albums/AlbumPage'
 import { AlbumsPage } from './features/albums/AlbumsPage'
@@ -41,38 +43,18 @@ function NavLink(props: {
         window.scrollTo(0, 0)
       }}
       class={cn(
-        'flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] md:flex-row md:px-3 md:py-1.5 md:text-sm',
+        'relative flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] md:flex-row md:rounded-control md:px-3 md:py-2 md:text-sm',
         props.desktopOnly ? 'hidden md:flex' : 'flex',
-        // The current place reads by weight and color; no pill behind it.
-        active ? 'font-semibold text-accent md:text-foreground' : 'text-muted-foreground md:hover:text-foreground',
+        // The current place reads by weight and color, and on desktop a short accent rule under the label;
+        // no pill behind it.
+        active
+          ? 'font-semibold text-accent md:text-foreground md:after:absolute md:after:inset-x-3 md:after:-bottom-px md:after:h-0.5 md:after:rounded-full md:after:bg-accent'
+          : 'text-muted-foreground md:hover:text-foreground',
       )}
     >
       <span class="md:hidden">{props.icon}</span>
       {props.label}
     </a>
-  )
-}
-
-function PageTitle(props: { children: ComponentChildren; hint?: string; back?: { to: string; label: string } }) {
-  const back = props.back
-  return (
-    <div class="mb-6">
-      {back && (
-        // Phones only: on desktop the destination is in the header nav.
-        <a
-          href={back.to}
-          class="-ml-2 inline-flex min-h-11 items-center px-2 text-sm text-muted-foreground hover:underline md:hidden"
-          onClick={(e) => {
-            e.preventDefault()
-            navigate(back.to)
-          }}
-        >
-          ← {back.label}
-        </a>
-      )}
-      <h1 class="text-2xl font-semibold tracking-tight">{props.children}</h1>
-      {props.hint && <p class="mt-1 text-sm text-muted-foreground">{props.hint}</p>}
-    </div>
   )
 }
 
@@ -83,20 +65,19 @@ function Page() {
       return (
         <>
           <h1 class="sr-only">タイムライン</h1>
-          <div class="mb-4 flex items-center gap-2">
-            <MonthNav />
-          </div>
           <AssetGrid
+            leading={<MonthNav />}
             key="timeline"
             selectable
             startKey={timelineMonth.value}
             start={startFor(months.value, timelineMonth.value, monthsError.value !== null)}
+            monthCounts
             empty={
-              <>
-                <Images class="size-8 text-muted-foreground/50" />
-                <p>まだ写真がありません。</p>
-                <p>「アップロード」から写真を選ぶと、撮影した月ごとにここへ並びます。</p>
-              </>
+              <EmptyState
+                icon={<Images />}
+                title="まだ写真がありません。"
+                hint="「アップロード」から写真を選ぶと、撮影した月ごとにここへ並びます。"
+              />
             }
             load={(cursor, direction) => api.listAssets({ cursor, direction })}
           />
@@ -105,16 +86,16 @@ function Page() {
     case 'favorites':
       return (
         <>
-          <PageTitle>お気に入り</PageTitle>
+          <PageHeader>お気に入り</PageHeader>
           <AssetGrid
             key="favorites"
             selectable
             empty={
-              <>
-                <Star class="size-8 text-muted-foreground/50" />
-                <p>お気に入りはまだありません。</p>
-                <p>写真を開いて ☆ を押すと、ここに集まります。</p>
-              </>
+              <EmptyState
+                icon={<Star />}
+                title="お気に入りはまだありません。"
+                hint="写真を開いて ☆ を押すと、ここに集まります。"
+              />
             }
             load={(cursor, direction) => api.listAssets({ cursor, direction, favorite: true })}
           />
@@ -127,16 +108,16 @@ function Page() {
     case 'trash':
       return (
         <>
-          <PageTitle
+          <PageHeader
             back={{ to: '/settings', label: 'ライブラリ' }}
             hint="ゴミ箱の写真は、完全に削除するまで残ります。写真を開くと復元できます。"
           >
             ゴミ箱
-          </PageTitle>
+          </PageHeader>
           <AssetGrid
             key="trash"
             mode="trash"
-            empty={<p>ゴミ箱は空です。</p>}
+            empty={<EmptyState icon={<Trash />} title="ゴミ箱は空です。" />}
             load={(cursor, direction) => api.listAssets({ cursor, direction, trashed: true })}
           />
         </>
@@ -180,11 +161,11 @@ export function App() {
       {/* Phones: the header scrolls away and the tabs sit at the bottom, so photos get the height. Both bars are
           opaque: photos scrolling underneath should not show through the controls. No backdrop filter on the
           header either, which would make it the containing block of the fixed tab bar. */}
-      <header class="bg-background md:sticky md:top-0 md:z-30">
+      <header class="bg-background md:sticky md:top-0 md:z-30 md:border-b md:border-border">
         <div class="mx-auto flex h-12 max-w-screen-2xl items-center gap-2 px-4 md:h-14">
           <a
             href="/"
-            class="mr-4 font-semibold tracking-tight"
+            class="mr-4 text-[0.9375rem] font-bold tracking-tight"
             onClick={(e) => {
               e.preventDefault()
               navigate('/')
@@ -194,7 +175,7 @@ export function App() {
           </a>
           <nav
             aria-label="メイン"
-            class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-black/5 bg-background pb-[env(safe-area-inset-bottom)] md:static md:flex md:flex-1 md:gap-1 md:border-0 md:bg-transparent md:pb-0"
+            class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border bg-background pb-[env(safe-area-inset-bottom)] md:static md:flex md:flex-1 md:gap-1 md:border-0 md:bg-transparent md:pb-0"
           >
             <NavLink to="/" label="タイムライン" icon={<Images />} />
             <NavLink to="/favorites" label="お気に入り" icon={<Star />} />
