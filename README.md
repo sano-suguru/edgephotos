@@ -76,9 +76,9 @@ pnpm check            # typecheck + lint + db:check + cli:check + test + build
 
 ## 写真ファイルの保存
 
-EdgePhotos は、アップロード時に受け取った写真の byte 列を変更せず保存します。EdgePhotos 側で別の形式へ変換して置き換えることはありません。
+**写真ファイルは EdgePhotos 側で再エンコードしません。** アップロード時に受け取ったファイルを、そのまま保存します。
 
-ブラウザや写真ピッカーが、EdgePhotos へ渡す前にファイル形式を変換することはあります。その場合は変換後のファイルを保存し、画面にもその形式を表示します（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
+ただし、ブラウザや写真ピッカーが EdgePhotos へ渡す前にファイル形式を変換する場合があります（[D-030](docs/decisions.md#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。
 
 ## セキュリティ
 
