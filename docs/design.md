@@ -2,7 +2,7 @@
 
 Web UI の見た目と操作感の規則です。画面を足すときや直すときは、この規則に合わせます。
 
-値の正本は `src/web/styles.css` の `@theme` です。この文書は、どの token をどの役割に使うかを決めます。確認した結果は [verification.md](verification.md#見た目の整理2026-09-17) にあります。
+値の正本は `src/web/styles.css` の `@theme` です。この文書は、どの token をどの役割に使うかを決めます。確認した結果は [verification.md](verification.md#見た目の整理2026-09-17) と [画面の型の統一](verification.md#画面の型の統一2026-09-23) にあります。
 
 ## 1. 方針
 

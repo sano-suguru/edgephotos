@@ -220,11 +220,15 @@ Playwright（Chromium / WebKit iPhone 13 相当）で確認した。各 spec は
 
 機能・情報設計・API・文言は変えず、見た目の規則を [design.md](design.md) にまとめて全画面に当てた。token 外の色を stage token と `border` に置き換え、見出し・空状態・角丸・押下と処理中の状態・44px の操作を揃えた。新しく出す情報は timeline の月の枚数だけ。
 
-確認方法: local の `pnpm dev` を Playwright（Chromium）で開き、375px で timeline・viewer と info sheet・album 一覧・album の共有 dialog・ライブラリを、1280px で timeline を撮って見た。375px では、見たどの画面にも横スクロールは無かった。
+確認方法: local の `pnpm dev` を Playwright（Chromium）で開き、375px で timeline・viewer と info sheet・album 一覧・album の共有 dialog・ライブラリを、1280px で timeline を撮って見た。375px では、見たどの画面にも横スクロールは無かった。320 / 414 / 768px では timeline・favorites・albums・ゴミ箱・ライブラリの `scrollWidth` を測り、どれも画面幅を超えなかった。
+
+reduced motion: build した CSS で、dialog・menu・ボタン押下の scale が `prefers-reduced-motion: no-preference` の中にだけあることを確かめた。Browser で emulate しての確認はしていない。
 
 `pnpm test:e2e`（54 件）が通った。途中で 1 件、phone の info sheet の位置の検査が落ちた。sheet が下から入ってくる途中の位置を測っていたので、sheet の入り方を fade だけにした。
 
 「年月で移動」と「選択」を 1 行にした直後は、選択中に「年月で移動」が消え、`e2e/timeline.spec.ts` の「別の月を開くと選択が終わる」が落ちた。選択中は選択 bar の上に残すように直した。
+
+最初の suite 実行で、`e2e/upload.spec.ts` の HEIC のサムネイル読み込み（mobile-webkit）が 1 回だけ 5 秒以内に読み込まれず落ちた。その後の suite 3 回と、単独で 5 回繰り返した実行では通った。原因は調べていない。
 
 `e2e/mobile.spec.ts` の「選択 bar が上端に残る」は、単独で実行すると変更前の `main` でも落ちる。写真が 1 枚だけだと、600px スクロールできるほど page が長くならないため。suite 全体の順序では通る。
 

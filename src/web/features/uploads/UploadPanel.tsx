@@ -138,7 +138,7 @@ export function UploadList() {
         </ul>
         {!active && s.retryable > 0 && (
           <div class="flex justify-end px-4 pb-3">
-            <Button size="sm" class="min-h-11 md:min-h-9" onClick={() => void retryUploads()}>
+            <Button size="sm" onClick={() => void retryUploads()}>
               失敗した {s.retryable} 枚を再試行
             </Button>
           </div>
