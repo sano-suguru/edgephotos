@@ -1,8 +1,10 @@
+import { isAllowedJpegHeaderSegment } from '../../contracts/jpeg-segments'
+
 // Pure helper (no DOM) so it can be unit-tested outside the browser.
-// WebKit's canvas.toBlob('image/jpeg') adds an APP1 (Exif: color space, pixel size) and an APP13 (empty
-// Photoshop IRB) segment. They carry no capture metadata, but finalize rejects any APP1/APP13 in a
-// derivative, so drop them here. Anything that is not a well-formed JPEG header is returned unchanged and
-// left for the server-side check to reject.
+// Encoders add header segments of their own: WebKit's canvas.toBlob('image/jpeg') writes an APP1 (Exif:
+// color space, pixel size) and an APP13 (empty Photoshop IRB). They carry no capture metadata, but finalize
+// accepts only the segments in contracts/jpeg-segments, so drop every other one here. Anything that is not
+// a well-formed JPEG header is returned unchanged and left for the server-side check to reject.
 export function stripJpegMetadata(bytes: Uint8Array): Uint8Array {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return bytes
   const keep: Uint8Array[] = [bytes.subarray(0, 2)]
@@ -25,7 +27,7 @@ export function stripJpegMetadata(bytes: Uint8Array): Uint8Array {
     }
     const end = offset + 2 + ((bytes[offset + 2] << 8) | bytes[offset + 3])
     if (end < offset + 4 || end > bytes.length) return bytes
-    if (marker === 0xe1 || marker === 0xed) removed = true
+    if (!isAllowedJpegHeaderSegment(bytes, offset)) removed = true
     else keep.push(bytes.subarray(offset, end))
     offset = end
   }

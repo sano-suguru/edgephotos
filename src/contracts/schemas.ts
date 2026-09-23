@@ -411,6 +411,7 @@ export const DerivativeVariantSchema = z.enum(['thumbnail', 'preview'])
 export const DerivativeRejectionSchema = z
   .object({
     object: DerivativeVariantSchema,
+    // `metadata_segment`: a header segment outside the allowlist (contracts/jpeg-segments), not only EXIF.
     problem: z.enum(['not_jpeg', 'metadata_segment', 'truncated', 'too_large']),
   })
   .openapi('DerivativeRejection')

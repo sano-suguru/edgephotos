@@ -254,6 +254,13 @@ Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠�
 - 写真を 1 枚 upload して timeline に表示される（`pnpm diagnose` は PUT を実行しないため、upload の成立はここで確かめる）
 - 共有リンクを作成し、private window で表示でき、revoke 後は表示できない
 
+`pnpm diagnose` では見えない Access の設定は、Cloudflare dashboard と Browser で確認します。production の初回 deploy と、member を増減したあとに行います。
+
+- Access application の Allow policy と `HOUSEHOLD_EMAILS` が同じ identity の集合になっている（[D-028](decisions.md)。diagnose は食い違いを検出できない）
+- household に含めていない account でログインすると、Access で拒否される（Access だけを通過した identity に Worker が `403` を返すことは integration test で確認している）
+- Access application の session duration を決め、その値を [verification.md](verification.md) の結果と一緒に記録する
+- `/share` の Bypass application の path に wildcard を付けていない（[Cloudflare Access](#4-cloudflare-access)）。preview URL が `404` を返す
+
 設定不足時に写真機能を匿名公開する fallback はありません。設定が欠けていれば `503 SERVER_MISCONFIGURED` です。
 
 remote-test に対する実行結果は [verification.md](verification.md) にあります。

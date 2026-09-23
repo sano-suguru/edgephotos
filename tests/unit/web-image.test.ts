@@ -104,6 +104,24 @@ describe('derivative JPEG metadata stripping', () => {
     expect(scanJpegForMetadata(stripJpegMetadata(syntheticJpeg({ exif: true })))).toEqual({ ok: true })
   })
 
+  it('removes every segment finalize would refuse and keeps the fixed-format ones', () => {
+    const adobe: [number, string] = [0xee, 'Adobe\u0000\u0064\u0000\u0000\u0000\u0000\u0001']
+    const noisy = syntheticJpeg({
+      seed: 7,
+      segments: [
+        [0xfe, 'GPS 0.000N 0.000E fictional'],
+        [0xe2, 'ICC_PROFILE\u0000\u0001\u0001fictional'],
+        adobe,
+        [0xe2, 'MPF\u0000fictional'],
+        [0xeb, 'JP\u0000x'],
+        [0xe0, 'JFXX\u0000\u0010fictional'],
+      ],
+    })
+    const stripped = stripJpegMetadata(noisy)
+    expect(scanJpegForMetadata(stripped)).toEqual({ ok: true })
+    expect(stripped).toEqual(syntheticJpeg({ seed: 7, segments: [adobe] }))
+  })
+
   it('returns metadata-free input unchanged', () => {
     const plain = syntheticJpeg()
     expect(stripJpegMetadata(plain)).toBe(plain)

@@ -40,6 +40,73 @@ describe('image inspection', () => {
     expect(scanJpegForMetadata(syntheticPng()).ok).toBe(false)
     expect(scanJpegForMetadata(syntheticJpeg().slice(0, 12))).toEqual({ ok: false, reason: 'truncated' })
   })
+
+  // Header segments are an allowlist of fixed-format segments: anything that can carry text or an
+  // embedded image is refused, including APP0 / APP14 that do not have the exact JFIF / Adobe layout.
+  it.each([
+    ['COM', 0xfe, 'GPS 0.000N 0.000E fictional'],
+    ['APP2 ICC profile', 0xe2, 'ICC_PROFILE\u0000\u0001\u0001fictional'],
+    ['APP2 MPF', 0xe2, 'MPF\u0000fictional'],
+    ['APP11 JUMBF', 0xeb, 'JP\u0000fictional'],
+    ['APP3', 0xe3, 'fictional'],
+    ['APP0 that is not JFIF', 0xe0, 'GPS 0.000N 0.000E fictional'],
+    [
+      'APP0 JFIF with trailing bytes',
+      0xe0,
+      'JFIF\u0000\u0001\u0001\u0000\u0000\u0001\u0000\u0001\u0000\u0000fictional',
+    ],
+    ['APP0 JFIF with a thumbnail', 0xe0, 'JFIF\u0000\u0001\u0001\u0000\u0000\u0001\u0000\u0001\u0001\u0001xyz'],
+    ['APP0 JFXX', 0xe0, 'JFXX\u0000\u0010fictional'],
+    ['APP14 that is not Adobe', 0xee, 'fictional!!!'],
+    ['APP14 Adobe with trailing bytes', 0xee, 'Adobe\u0000\u0064\u0000\u0000\u0000\u0000\u0001fictional'],
+  ])('rejects a derivative carrying %s', (_, marker, payload) => {
+    expect(scanJpegForMetadata(syntheticJpeg({ segments: [[marker, payload]] }))).toEqual({
+      ok: false,
+      reason: 'metadata_segment',
+    })
+  })
+
+  it('accepts the fixed-format segments: Adobe APP14 and DRI', () => {
+    const jpeg = syntheticJpeg({
+      segments: [
+        [0xee, 'Adobe\u0000\u0064\u0000\u0000\u0000\u0000\u0001'],
+        [0xdd, '\u0000\u0010'],
+      ],
+    })
+    expect(scanJpegForMetadata(jpeg)).toEqual({ ok: true })
+  })
+
+  // A header policy, but not a pass for bytes that are no image at all.
+  it('requires a frame header before the scan', () => {
+    expect(scanJpegForMetadata(syntheticJpeg({ frame: false }))).toEqual({ ok: false, reason: 'not_jpeg' })
+  })
+
+  // Only length-prefixed segments may stand before the scan: fill bytes and standalone markers are refused,
+  // not skipped, so their count and order cannot carry anything.
+  it.each([
+    ['fill bytes', [0xff, 0xff]],
+    ['RST0', [0xff, 0xd0]],
+    ['TEM', [0xff, 0x01]],
+  ])('refuses %s before the scan', (_, bytes) => {
+    const jpeg = syntheticJpeg()
+    const withMarker = new Uint8Array([...jpeg.subarray(0, 2), ...bytes, ...jpeg.subarray(2)])
+    expect(scanJpegForMetadata(withMarker)).toEqual({ ok: false, reason: 'not_jpeg' })
+  })
+
+  it('refuses an image that ends before any scan', () => {
+    expect(scanJpegForMetadata(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]))).toEqual({ ok: false, reason: 'not_jpeg' })
+  })
+
+  // Every cut through the header, the SOS segment included, is `truncated`; only a complete SOS passes.
+  it('reports a derivative cut anywhere before the end of the SOS segment as truncated', () => {
+    const jpeg = syntheticJpeg()
+    const sos = jpeg.findIndex((b, i) => b === 0xff && jpeg[i + 1] === 0xda)
+    const sosEnd = sos + 2 + ((jpeg[sos + 2] << 8) | jpeg[sos + 3])
+    for (let cut = 3; cut < sosEnd; cut++) {
+      expect(scanJpegForMetadata(jpeg.subarray(0, cut)), `cut at ${cut}`).toEqual({ ok: false, reason: 'truncated' })
+    }
+    expect(scanJpegForMetadata(jpeg.subarray(0, sosEnd))).toEqual({ ok: true })
+  })
 })
 
 describe('R2 presigner', () => {

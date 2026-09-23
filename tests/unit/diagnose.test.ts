@@ -8,6 +8,7 @@ import {
   checkMigrations,
   checkPublicAccess,
   type Fetch,
+  parseDiagnoseArgs,
   REQUIRED_SECRETS,
 } from '../../scripts/lib/diagnose'
 import { readR2SignerConfig } from '../../src/worker/storage/signer'
@@ -204,5 +205,29 @@ describe('setup diagnostics', () => {
     expect(failed?.status).toBe('fail')
     expect(failed?.detail).toContain('https://photos.other.test')
     expect(await albums()).toBe(before)
+  })
+})
+
+describe('diagnose arguments', () => {
+  it.each([
+    [[], { env: undefined, offline: false }],
+    [['--env', 'staging'], { env: 'staging', offline: false }],
+    [['--offline'], { env: undefined, offline: true }],
+    [['--env', 'staging', '--offline'], { env: 'staging', offline: true }],
+  ])('accepts %j', (args, expected) => {
+    expect(parseDiagnoseArgs(args)).toEqual(expected)
+  })
+
+  // Every one of these would otherwise have meant "top-level (production) configuration".
+  it.each([
+    [['--env']],
+    [['--env', '--offline']],
+    [['--env=staging']],
+    [['--en', 'staging']],
+    [['--oops']],
+    [['--offline', '--offline']],
+    [['--env', 'a', '--env', 'b']],
+  ])('refuses %j', (args) => {
+    expect(parseDiagnoseArgs(args)).toBeNull()
   })
 })

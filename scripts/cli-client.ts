@@ -1,12 +1,13 @@
 import type { ApiClient } from './lib/backup.ts'
+import { BASE_URL_HINT, parseBaseUrl } from './lib/base-url.ts'
 
 // API client for the CLIs, configured from EDGEPHOTOS_URL / EDGEPHOTOS_ACCESS_TOKEN.
 // The token goes only to EDGEPHOTOS_URL, never to presigned storage URLs.
 export function cliClient(): ApiClient {
-  const base = process.env.EDGEPHOTOS_URL?.replace(/\/$/, '')
+  const base = parseBaseUrl(process.env.EDGEPHOTOS_URL)
   const token = process.env.EDGEPHOTOS_ACCESS_TOKEN
-  if (!base || !/^https?:\/\//.test(base)) {
-    console.error('EDGEPHOTOS_URL is required (e.g. https://photos.example.com)')
+  if (!base) {
+    console.error(BASE_URL_HINT)
     process.exit(2)
   }
   return {

@@ -182,9 +182,12 @@ describe('upload finalize', () => {
     expect(toHex(stored!.checksums.sha256!)).toBe(p.sha256)
   })
 
-  it('rejects derivatives that carry EXIF/GPS metadata', async () => {
+  it.each([
+    ['EXIF/GPS', { exif: true }],
+    ['a comment (COM)', { segments: [[0xfe, 'GPS 0.000N 0.000E fictional']] as [number, string][] }],
+  ])('rejects derivatives that carry %s', async (_, jpeg) => {
     const app = await makeApp()
-    const p = await photo({ preview: syntheticJpeg({ exif: true }) })
+    const p = await photo({ preview: syntheticJpeg(jpeg) })
     const r = await reserve(app, p)
     for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
     const res = await call(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)

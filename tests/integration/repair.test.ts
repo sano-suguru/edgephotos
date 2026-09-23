@@ -217,6 +217,11 @@ describe('derivative repair', () => {
   describe('a derivative that was written but is not usable', () => {
     const cases = [
       { name: 'carries EXIF', bytes: () => syntheticJpeg({ exif: true }), problem: 'metadata_segment' },
+      {
+        name: 'carries a comment (COM)',
+        bytes: () => syntheticJpeg({ segments: [[0xfe, 'fictional']] }),
+        problem: 'metadata_segment',
+      },
       { name: 'is not a JPEG', bytes: () => syntheticPng(), problem: 'not_jpeg' },
       { name: 'stops mid-header (partial PUT)', bytes: () => syntheticJpeg().slice(0, 12), problem: 'truncated' },
       // An empty object must not survive: If-None-Match: * would block every later repair of that key.

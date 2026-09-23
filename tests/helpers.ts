@@ -162,7 +162,11 @@ function segment(marker: number, payload: Uint8Array): Uint8Array {
 }
 
 // Structurally valid JPEG header layout; the Worker only inspects markers, it never decodes.
-export function syntheticJpeg(opts: { exif?: boolean; seed?: number; padding?: number } = {}): Uint8Array {
+// `segments` are extra header segments (marker, ASCII payload) placed after APP0. `frame: false` leaves
+// out the frame header (SOF0).
+export function syntheticJpeg(
+  opts: { exif?: boolean; seed?: number; padding?: number; segments?: [number, string][]; frame?: boolean } = {},
+): Uint8Array {
   const seed = opts.seed ?? ++counter
   const jfif = new Uint8Array([0x4a, 0x46, 0x49, 0x46, 0x00, 1, 1, 0, 0, 1, 0, 1, 0, 0])
   const parts = [new Uint8Array([0xff, 0xd8]), segment(0xe0, jfif)]
@@ -170,7 +174,10 @@ export function syntheticJpeg(opts: { exif?: boolean; seed?: number; padding?: n
     // "Exif\0\0" + fictional GPS marker text.
     parts.push(segment(0xe1, new TextEncoder().encode('Exif\u0000\u0000GPS 0.000N 0.000E fictional')))
   }
+  for (const [marker, payload] of opts.segments ?? []) parts.push(segment(marker, new TextEncoder().encode(payload)))
   parts.push(segment(0xdb, new Uint8Array(65).fill(seed & 0xff)))
+  // SOF0: 8-bit, 16x16, one component.
+  if (opts.frame !== false) parts.push(segment(0xc0, new Uint8Array([8, 0, 16, 0, 16, 1, 1, 0x11, 0])))
   parts.push(segment(0xda, new Uint8Array([1, 1, 0, 0, 63, 0])))
   parts.push(new Uint8Array(opts.padding ?? 32).map((_, i) => (seed * 31 + i) & 0x7f))
   parts.push(new Uint8Array([0xff, 0xd9]))

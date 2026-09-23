@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { unstable_readConfig } from 'wrangler'
+import { BASE_URL_HINT, parseBaseUrl } from './lib/base-url.ts'
 import {
   type Check,
   checkConfig,
@@ -20,6 +21,7 @@ import {
   checkMigrations,
   checkPublicAccess,
   checkSecrets,
+  parseDiagnoseArgs,
 } from './lib/diagnose.ts'
 
 const run = promisify(execFile)
@@ -44,12 +46,12 @@ async function guarded(name: string, fn: () => Promise<Check | Check[]>): Promis
 }
 
 function parseArgs() {
-  const args = process.argv.slice(2)
-  const envIndex = args.indexOf('--env')
-  return {
-    env: envIndex >= 0 ? args[envIndex + 1] : undefined,
-    offline: args.includes('--offline'),
+  const args = parseDiagnoseArgs(process.argv.slice(2))
+  if (!args) {
+    console.error('usage: pnpm diagnose [--env <name>] [--offline]')
+    process.exit(2)
   }
+  return args
 }
 
 async function accountId(): Promise<string> {
@@ -66,7 +68,11 @@ async function main() {
   const database = config.d1_databases.find((d: { binding: string }) => d.binding === 'DB')
   const bucket = config.r2_buckets.find((b: { binding: string }) => b.binding === 'BUCKET')?.bucket_name
   const local = (await readdir(database?.migrations_dir ?? 'migrations')).filter((f) => f.endsWith('.sql')).sort()
-  const baseUrl = process.env.EDGEPHOTOS_URL?.replace(/\/$/, '')
+  const baseUrl = parseBaseUrl(process.env.EDGEPHOTOS_URL) ?? undefined
+  if (process.env.EDGEPHOTOS_URL && !baseUrl) {
+    console.error(BASE_URL_HINT)
+    process.exit(2)
+  }
   const token = process.env.EDGEPHOTOS_ACCESS_TOKEN || undefined
 
   console.log(`EdgePhotos diagnose: ${config.name} (${env ? `env ${env}` : 'top-level configuration'})`)
