@@ -21,6 +21,7 @@ import {
   checkMigrations,
   checkPublicAccess,
   checkSecrets,
+  parseDiagnoseArgs,
 } from './lib/diagnose.ts'
 
 const run = promisify(execFile)
@@ -44,24 +45,13 @@ async function guarded(name: string, fn: () => Promise<Check | Check[]>): Promis
   }
 }
 
-// Anything not understood stops here: a bare `--env`, `--env=name` or a typo must not quietly fall back
-// to the top-level (production) configuration.
 function parseArgs() {
-  const usage = (): never => {
+  const args = parseDiagnoseArgs(process.argv.slice(2))
+  if (!args) {
     console.error('usage: pnpm diagnose [--env <name>] [--offline]')
     process.exit(2)
   }
-  const args = process.argv.slice(2)
-  let env: string | undefined
-  let offline = false
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--offline' && !offline) offline = true
-    else if (args[i] === '--env' && env === undefined) {
-      env = args[++i]
-      if (!env || env.startsWith('-')) usage()
-    } else usage()
-  }
-  return { env, offline }
+  return args
 }
 
 async function accountId(): Promise<string> {

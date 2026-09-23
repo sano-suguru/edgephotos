@@ -6,6 +6,21 @@ export type Check = { name: string; status: Status; detail: string }
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
 // Every value readAppConfig() / readR2SignerConfig() needs, except R2_BUCKET_NAME (a var).
+// Anything not understood is refused (null): a bare `--env`, `--env=name`, a typo or a repeated flag must
+// not quietly fall back to the top-level (production) configuration.
+export function parseDiagnoseArgs(args: string[]): { env?: string; offline: boolean } | null {
+  let env: string | undefined
+  let offline = false
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--offline' && !offline) offline = true
+    else if (args[i] === '--env' && env === undefined) {
+      env = args[++i]
+      if (!env || env.startsWith('-')) return null
+    } else return null
+  }
+  return { env, offline }
+}
+
 export const REQUIRED_SECRETS = [
   'HOUSEHOLD_EMAILS',
   'APP_ORIGIN',

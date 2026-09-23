@@ -165,7 +165,7 @@ finalize は、derivative の最初の scan（SOS）までの header segment を
 
 - 受け付ける segment: SOF、DHT、DQT、DRI、APP0（thumbnail を持たない 16 byte の JFIF だけ）、APP14（14 byte の Adobe だけ）
 - 上記以外の segment（APP1 の EXIF / XMP、APP13 の IPTC、COM、APP2 の ICC profile と MPF、APP11 の JUMBF など）を含む derivative は `422` で拒否する
-- SOS の前に SOF が無い bytes も拒否する
+- SOS の前に SOF が無い bytes と、SOS の前に fill byte（`FF FF`）・RSTn・TEM・EOI を置いた bytes も拒否する
 
 検査するのは segment の種類と、APP0 / APP14 の形だけです。SOF / DHT / DQT / DRI の中身、最初の scan より後ろ、EOI の後ろは検査しません（[limitations.md](limitations.md#8-derivative-の検査は-header-segment-の種類まで)）。Client は PUT 前に、同じ判定関数（`src/contracts/jpeg-segments.ts`）で許可されない segment を取り除きます。
 

@@ -7,8 +7,9 @@ import { isAllowedJpegHeaderSegment, isStartOfFrame } from '../../contracts/jpeg
 
 export type JpegMetadataScan = { ok: true } | { ok: false; reason: 'not_jpeg' | 'metadata_segment' | 'truncated' }
 
-// Derivatives must be JPEGs whose header, up to and including the first SOS segment, is complete, holds
-// a frame header and holds only the segments in contracts/jpeg-segments. That keeps the usual metadata
+// Derivatives must be JPEGs whose header, up to and including the first SOS segment, is complete, is a
+// plain sequence of length-prefixed segments, holds a frame header and holds only the segments in
+// contracts/jpeg-segments. That keeps the usual metadata
 // carriers (EXIF/XMP, IPTC, COM, other APPn) out of thumbnails/previews; it does not stop bits placed in
 // the allowed tables, after the first scan or after EOI (docs/limitations.md). `metadata_segment` names
 // any disallowed segment (the API contract keeps the name). A header policy, not a decode check.
@@ -20,15 +21,11 @@ export function scanJpegForMetadata(head: Uint8Array): JpegMetadataScan {
   while (offset + 2 <= head.length) {
     if (head[offset] !== 0xff) return { ok: false, reason: 'not_jpeg' }
     const marker = head[offset + 1]
-    if (marker === 0xff) {
-      offset += 1
-      continue
-    }
-    // An image that ends before any scan is not a derivative.
-    if (marker === 0xd9) return { ok: false, reason: 'not_jpeg' }
-    if ((marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
-      offset += 2
-      continue
+    // Only length-prefixed segments may stand before the scan. Fill bytes (FF FF), standalone RSTn / TEM
+    // and an EOI are refused rather than skipped: canvas encoders do not write them there, and their count
+    // and order could carry bits of their own.
+    if (marker === 0xff || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+      return { ok: false, reason: 'not_jpeg' }
     }
     if (offset + 4 > head.length) return { ok: false, reason: 'truncated' }
     const length = (head[offset + 2] << 8) | head[offset + 3]

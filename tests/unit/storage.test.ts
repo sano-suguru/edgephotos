@@ -81,6 +81,18 @@ describe('image inspection', () => {
     expect(scanJpegForMetadata(syntheticJpeg({ frame: false }))).toEqual({ ok: false, reason: 'not_jpeg' })
   })
 
+  // Only length-prefixed segments may stand before the scan: fill bytes and standalone markers are refused,
+  // not skipped, so their count and order cannot carry anything.
+  it.each([
+    ['fill bytes', [0xff, 0xff]],
+    ['RST0', [0xff, 0xd0]],
+    ['TEM', [0xff, 0x01]],
+  ])('refuses %s before the scan', (_, bytes) => {
+    const jpeg = syntheticJpeg()
+    const withMarker = new Uint8Array([...jpeg.subarray(0, 2), ...bytes, ...jpeg.subarray(2)])
+    expect(scanJpegForMetadata(withMarker)).toEqual({ ok: false, reason: 'not_jpeg' })
+  })
+
   it('refuses an image that ends before any scan', () => {
     expect(scanJpegForMetadata(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]))).toEqual({ ok: false, reason: 'not_jpeg' })
   })

@@ -47,9 +47,10 @@ WebP の `takenAt` は常に `null` です。EXIF orientation は WebKit では�
 
 ## 8. derivative の検査は header segment の種類まで
 
-finalize が derivative について保証するのは、先頭 256 KiB のうち最初の scan（SOS）までに現れる segment が allowlist に入っていること、APP0 / APP14 が決まった形であること、SOF があることだけです（[security.md](security.md#7-metadata-の漏れ防止)）。次は検査しません。
+finalize が derivative について保証するのは、先頭 256 KiB のうち最初の scan（SOS）までが length 付きの segment だけで並び、どれも allowlist に入っていること、APP0 / APP14 が決まった形であること、SOF があることだけです（[security.md](security.md#7-metadata-の漏れ防止)）。次は検査しません。
 
 - SOF / DHT / DQT / DRI の中身
+- APP0 / APP14 のうち、signature・長さ・thumbnail の有無以外の field の値（JFIF の version / units / density、Adobe の version / flags / transform）
 - progressive JPEG の scan の間に挟んだ segment
 - EOI の後ろに付けたデータ
 - 画素そのもの
