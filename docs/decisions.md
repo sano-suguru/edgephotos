@@ -512,6 +512,7 @@ storage audit は `missing_derivative`（original は無事だが thumbnail / pr
 
 - R2 CORS の `AllowedMethods` に `GET` が要ります。repair は original を `<img>` ではなく `fetch()` で読むためです。運用の [R2 CORS](operations.md#6-r2-cors) の規則は元から `GET` を含みますが、`pnpm diagnose` の `r2: CORS` が `GET` も検査するようになります
 - presigned PUT に `If-Match` を使うのはこの経路が初めてです（upload は `If-None-Match: *` だけ）
+- R2 CORS の `AllowedHeaders` に `if-match` も要ります。Browser が署名済みの `If-Match` を送るので preflight に載るためです。当初この項目が漏れており、運用の CORS 例と `pnpm diagnose` にも無かったため、2026-09-23 に追加しました（[R2 CORS](operations.md#6-r2-cors)）
 
 残るリスク:
 

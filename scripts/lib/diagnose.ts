@@ -16,8 +16,9 @@ export const REQUIRED_SECRETS = [
   'R2_SECRET_ACCESS_KEY',
 ] as const
 
-// Headers the browser sends on a presigned PUT (docs/decisions.md D-013, D-018).
-export const PUT_HEADERS = ['content-type', 'if-none-match', 'x-amz-checksum-sha256'] as const
+// Headers the browser sends on a presigned PUT (docs/decisions.md D-013, D-018). `if-match` is sent only when
+// replacing an unusable derivative (D-026), so a rule without it fails that repair and nothing else.
+export const PUT_HEADERS = ['content-type', 'if-none-match', 'if-match', 'x-amz-checksum-sha256'] as const
 
 const check = (name: string, status: Status, detail: string): Check => ({ name, status, detail })
 
@@ -107,7 +108,9 @@ export async function checkCorsPreflight(fetch: Fetch, objectUrl: string, origin
   }
   const allowOrigin = res.headers.get('access-control-allow-origin')
   const allowMethods = (res.headers.get('access-control-allow-methods') ?? '').toUpperCase()
-  const allowHeaders = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase()
+  const allowHeaders = new Set(
+    (res.headers.get('access-control-allow-headers') ?? '').split(',').map((h) => h.trim().toLowerCase()),
+  )
   if (!res.ok || !allowOrigin) {
     return check(name, 'fail', `no CORS rule allows ${origin} (preflight ${res.status}); see docs/operations.md §6`)
   }
@@ -117,7 +120,7 @@ export async function checkCorsPreflight(fetch: Fetch, objectUrl: string, origin
   if (!allowMethods.includes('GET')) {
     return check(name, 'fail', 'GET is not an allowed method; repairing a derivative cannot read the original')
   }
-  const missingHeaders = PUT_HEADERS.filter((h) => !allowHeaders.includes(h))
+  const missingHeaders = PUT_HEADERS.filter((h) => !allowHeaders.has(h))
   if (missingHeaders.length > 0) {
     return check(name, 'fail', `AllowedHeaders lacks: ${missingHeaders.join(', ')}`)
   }

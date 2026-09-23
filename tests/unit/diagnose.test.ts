@@ -62,10 +62,22 @@ describe('setup diagnostics', () => {
     const ok = {
       'access-control-allow-origin': origin,
       'access-control-allow-methods': 'GET, PUT',
-      'access-control-allow-headers': 'content-type, if-none-match, x-amz-checksum-sha256',
+      'access-control-allow-headers': 'content-type, if-none-match, if-match, x-amz-checksum-sha256',
     }
     expect((await checkCorsPreflight(preflight(ok), 'https://r2/x', origin)).status).toBe('pass')
-    const noChecksum = { ...ok, 'access-control-allow-headers': 'content-type, if-none-match' }
+    // Replacing an unusable derivative sends `If-Match` from the browser (docs/decisions.md D-026). A rule
+    // without it passes every upload and fails only that repair, in the preflight.
+    const noIfMatch = { ...ok, 'access-control-allow-headers': 'content-type, if-none-match, x-amz-checksum-sha256' }
+    const repairBlocked = await checkCorsPreflight(preflight(noIfMatch), 'https://r2/x', origin)
+    expect(repairBlocked.status).toBe('fail')
+    expect(repairBlocked.detail).toContain('if-match')
+    // Header names are compared whole: `x-if-match-extra` does not allow `if-match`.
+    const lookalike = {
+      ...ok,
+      'access-control-allow-headers': 'content-type, if-none-match, x-if-match-extra, x-amz-checksum-sha256',
+    }
+    expect((await checkCorsPreflight(preflight(lookalike), 'https://r2/x', origin)).status).toBe('fail')
+    const noChecksum = { ...ok, 'access-control-allow-headers': 'content-type, if-none-match, if-match' }
     expect((await checkCorsPreflight(preflight(noChecksum), 'https://r2/x', origin)).detail).toContain(
       'x-amz-checksum-sha256',
     )

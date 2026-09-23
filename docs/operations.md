@@ -180,6 +180,7 @@ Custom domain は v1 の必須条件ではありません。custom domain を追
 Browser は presigned URL に対して次を送ります。
 
 - `PUT`（upload）: `Content-Type` と `If-None-Match` header 付き（[D-013](decisions.md)）。original はさらに `x-amz-checksum-sha256` 付き（[D-018](decisions.md)）
+- `PUT`（使えない derivative の置き換え）: `If-None-Match` の代わりに `If-Match` header 付き（[D-026](decisions.md)）
 - `GET`: `<img>` による表示、original の取得、derivative の作り直しが `fetch()` で読む original
 
 `AllowedMethods` に `GET` が無くても、写真の表示（`<img>`）と upload は動きます。失敗するのは derivative の作り直しだけです。`fetch()` が応答を読むには `Access-Control-Allow-Origin` が要るためです（[D-026](decisions.md)）。`pnpm diagnose` の `r2: CORS` が `GET` と `PUT` の両方を検査します。
@@ -193,7 +194,7 @@ wrangler の `--file` は Dashboard 表示とは別形式です。`rules` 配列
       "allowed": {
         "origins": ["https://photos.example.com"],
         "methods": ["GET", "PUT"],
-        "headers": ["content-type", "if-none-match", "x-amz-checksum-sha256"]
+        "headers": ["content-type", "if-none-match", "if-match", "x-amz-checksum-sha256"]
       },
       "maxAgeSeconds": 600
     }
@@ -208,9 +209,11 @@ pnpm wrangler r2 bucket cors list edgephotos-remote-test
 
 `*` は使いません。
 
-`exposeHeaders` は設定しません。`If-None-Match: *` と `x-amz-checksum-sha256` は署名に含める request header であり（[D-013](decisions.md)、[D-018](decisions.md)）、client は PUT 応答の `ETag` や checksum を読みません。client が応答 header を読む必要が生じた時点で追加します。
+`exposeHeaders` は設定しません。`If-None-Match: *`、`If-Match`、`x-amz-checksum-sha256` は署名に含める request header であり（[D-013](decisions.md)、[D-018](decisions.md)、[D-026](decisions.md)）、client は PUT 応答の `ETag` や checksum を読みません。client が応答 header を読む必要が生じた時点で追加します。
 
 D-018 より前に CORS を設定した bucket は、`x-amz-checksum-sha256` を追加して `cors set` し直してください。追加しないと Browser の preflight で original の PUT が失敗します（CLI の `pnpm backup restore` は CORS の影響を受けません）。
+
+`if-match` の無い CORS を設定済みの bucket も、追加して `cors set` し直してください。upload と表示はそのまま動き、使えない derivative の置き換えだけが preflight で失敗します。欠けた derivative の作成は `If-None-Match` なので影響を受けません。`pnpm diagnose` の `r2: CORS` は `if-match` の有無も検査します。
 
 ## 7. セットアップの確認
 
