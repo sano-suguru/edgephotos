@@ -4,7 +4,7 @@ v1 までに残っている作業だけを管理します。終わった段階�
 
 設計の理由は [decisions.md](decisions.md)、不変条件は [architecture.md](architecture.md) と [security.md](security.md)、既知の制約は [limitations.md](limitations.md) にあります。各項目の確認手順と合格の条件は、リンク先の [verification.md](verification.md) にあります。
 
-状態の凡例（2026-09-23 時点）:
+状態の凡例（2026-09-24 時点）:
 
 - ⬜ 未着手
 - 🟡 一部済み
@@ -18,8 +18,7 @@ beta は置いていません。alpha と v1 の間に別の呼び名が要る�
 
 ## Production
 
-- ⬜ production 環境を作成して deploy し、`pnpm diagnose` と写真 1 枚の upload まで通す（[リソース作成とデプロイ](operations.md#2-リソース作成とデプロイ)）
-- ⬜ [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す
+- 🟡 [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す。setup は 2026-09-24 に実走し、手順の誤りは無かった（[verification.md](verification.md#production-の作成と初回-deploy2026-09-24)）。update は未実走
 - ⬜ uninstall は、写真を置いていない使い捨ての環境で実走する。production では行わない
 
 ## Post-merge verification
