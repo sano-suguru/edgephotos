@@ -41,6 +41,7 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 - 🟡 screenshots / demo（README に timeline の 1 枚がある）
 - ⬜ accessibility の基本確認
 - ⬜ client-side image processing を実機で計測する（desktop の Chromium / WebKit では計測済み。[benchmarks.md](benchmarks.md)）
+- ⬜ v1 の release 時に、その時点の manifest version を後方互換の起点として decisions.md に記録する。以降はその version からの reader を残す（[D-035](decisions.md)）
 
 ## Future
 
