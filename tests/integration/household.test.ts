@@ -253,7 +253,7 @@ describe('duplicate originals across members', () => {
 })
 
 describe('uploader attribution', () => {
-  it('records which member finalized each upload, and shows it to every member', async () => {
+  it('records which member reserved each upload, and shows it to every member', async () => {
     const app = await makeApp()
     const fromA = (await uploadAs(app, MEMBER_A)).result.asset
     const fromB = (await uploadAs(app, MEMBER_B)).result.asset
@@ -328,11 +328,37 @@ describe('uploader attribution', () => {
     expect(asset.uploadedBy).toBe(MEMBER_A)
   })
 
-  it('does not attribute a restored photo to the member running the restore', async () => {
+  it('records the uploader restore names, null included, instead of the member running it', async () => {
     const app = await makeApp()
-    const restored = (await uploadAs(app, MEMBER_B, undefined, { createdAt: '2020-01-02T03:04:05.000Z' })).result
-    expect(restored.result).toBe('created')
-    expect(restored.asset.uploadedBy).toBeNull()
+    const createdAt = '2020-01-02T03:04:05.000Z'
+    const named = (await uploadAs(app, MEMBER_B, undefined, { createdAt, uploadedBy: MEMBER_A })).result
+    expect(named.asset.uploadedBy).toBe(MEMBER_A)
+    const unrecorded = (await uploadAs(app, MEMBER_B, undefined, { createdAt, uploadedBy: null })).result
+    expect(unrecorded.asset.uploadedBy).toBeNull()
+  })
+
+  it('does not read an upload time as a restore: without uploadedBy, the reserving member is recorded', async () => {
+    const app = await makeApp()
+    const withTime = (await uploadAs(app, MEMBER_B, undefined, { createdAt: '2020-01-02T03:04:05.000Z' })).result
+    expect(withTime.asset.uploadedBy).toBe(MEMBER_B)
+  })
+
+  it('refuses an uploader that is not a stored member email', async () => {
+    const app = await makeApp()
+    const p = await photo()
+    const token = await memberToken(MEMBER_A)
+    for (const uploadedBy of ['not an email', 'Member-B@example.test', '']) {
+      const res = await call(app, 'POST', '/api/v1/uploads', {
+        token,
+        body: {
+          original: { size: p.original.byteLength, contentType: 'image/jpeg', sha256: p.sha256 },
+          thumbnail: { size: p.thumbnail.byteLength },
+          preview: { size: p.preview.byteLength },
+          metadata: { uploadedBy },
+        },
+      })
+      expect(res.status).toBe(400)
+    }
   })
 
   it('serves a photo stored before attribution existed, with no uploader, to either member', async () => {

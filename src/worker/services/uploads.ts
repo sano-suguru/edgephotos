@@ -23,7 +23,7 @@ function duplicateError(existing: AssetRow) {
 }
 
 // Step 1 of reserve -> presigned PUT -> finalize. The server chooses ids and object keys.
-// `member` is who reserves: the uploader, whoever later finalizes (D-034).
+// `member` is who reserves: the uploader, whoever later finalizes, unless restore names one (D-034).
 export async function reserveUpload(ctx: ServiceContext, input: ReserveInput, member: string) {
   const existing = await findStoredAsset(ctx, input.original.sha256)
   if (existing) throw duplicateError(existing)
@@ -59,9 +59,7 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput, me
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
     asset_created_at: assetCreatedAt,
-    // A restore sends the original upload time; the member running it did not upload the photo, and the
-    // backup does not say who did.
-    uploaded_by: assetCreatedAt === null ? member : null,
+    uploaded_by: meta.uploadedBy === undefined ? member : meta.uploadedBy,
   })
 
   const keys = assetObjectKeys(assetId)

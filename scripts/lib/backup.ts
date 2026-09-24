@@ -145,7 +145,7 @@ export function validateManifest(value: unknown, source: string): ExportManifest
   }
   if (!EXPORT_FORMAT_VERSIONS_READ.some((v) => v === header.formatVersion)) {
     throw new BackupError(
-      `${source} has formatVersion ${JSON.stringify(header.formatVersion)}; this version reads ${EXPORT_FORMAT_VERSIONS_READ.join(' and ')}. ` +
+      `${source} has formatVersion ${JSON.stringify(header.formatVersion)}; this version reads ${EXPORT_FORMAT_VERSIONS_READ.slice(0, -1).join(', ')} and ${EXPORT_FORMAT_VERSIONS_READ.at(-1)}. ` +
         'Use the EdgePhotos release that wrote this backup.',
     )
   }
@@ -434,6 +434,8 @@ export async function restoreLibrary(
             ...(asset.height ? { height: asset.height } : {}),
             ...(asset.takenAt ? { takenAt: asset.takenAt } : {}),
             createdAt: asset.createdAt,
+            // null (not recorded) for a v1 / v2 backup; omitting it would credit the member running restore.
+            uploadedBy: asset.uploadedBy,
           },
         }),
       })
@@ -579,6 +581,11 @@ export async function verifyLibrary(
       'createdAt',
     ] as const) {
       if (a[field] !== e[field]) problems.push(`asset ${e.sha256}: ${field} differs`)
+    }
+    // The one field compared by version: a v1 / v2 backup reads every uploader as null because it cannot
+    // express one, so a live library that has them has not diverged from it.
+    if (expected.formatVersion >= 3 && a.uploadedBy !== e.uploadedBy) {
+      problems.push(`asset ${e.sha256}: uploadedBy differs`)
     }
     if ((a.trashedAt === null) !== (e.trashedAt === null)) problems.push(`asset ${e.sha256}: trash state differs`)
   }

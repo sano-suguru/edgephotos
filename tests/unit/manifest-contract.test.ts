@@ -29,6 +29,7 @@ function asset(overrides: Partial<ExportAsset> = {}): ExportAsset {
     isFavorite: false,
     trashedAt: null,
     createdAt: '2024-05-02T00:00:00.000Z',
+    uploadedBy: 'member-a@example.test',
     objects: {
       original: `originals/${ID_A}`,
       thumbnail: `derivatives/v1/${ID_A}/thumbnail.jpg`,
@@ -106,8 +107,25 @@ describe('export manifest contract', () => {
   })
 
   describe('format versions', () => {
-    it('writes v2', () => {
-      expect(EXPORT_FORMAT_VERSION).toBe(2)
+    it('writes v3', () => {
+      expect(EXPORT_FORMAT_VERSION).toBe(3)
+    })
+
+    it('keeps each uploader in v3, and requires the field', async () => {
+      const both = manifest({ assets: [asset(), asset({ id: ID_B, sha256: 'b'.repeat(64), uploadedBy: null })] })
+      expect((await read(both)).assets.map((a) => a.uploadedBy)).toEqual(['member-a@example.test', null])
+      const { uploadedBy: _, ...missing } = asset()
+      await rejects(manifest({ assets: [missing as ExportAsset] }), /assets\[0\]\.uploadedBy/)
+      await rejects(manifest({ assets: [asset({ uploadedBy: 'not an email' })] }), /uploadedBy/)
+      await rejects(manifest({ assets: [asset({ uploadedBy: 'Member-A@example.test' })] }), /uploadedBy/)
+    })
+
+    it('reads every photo of a v1 or v2 manifest as having no recorded uploader', async () => {
+      // Written before v3, so a key of that name is not part of the contract and is not read.
+      for (const formatVersion of [1, 2]) {
+        const old = await read({ ...manifest(), formatVersion })
+        expect(old.assets.map((a) => a.uploadedBy)).toEqual([null])
+      }
     })
 
     it('still reads a v1 manifest, under the contract v1 was written with', async () => {
@@ -126,7 +144,7 @@ describe('export manifest contract', () => {
     })
 
     it('refuses a version it does not know instead of reading part of it', () =>
-      rejects({ ...manifest(), formatVersion: 3 }, /formatVersion/))
+      rejects({ ...manifest(), formatVersion: 4 }, /formatVersion/))
   })
 
   describe('rejects a file that is not a v1 manifest', () => {
@@ -141,8 +159,8 @@ describe('export manifest contract', () => {
 
     it('a newer formatVersion', () =>
       rejects(
-        manifest({ formatVersion: 3 as never }),
-        /formatVersion 3; this version reads 1 and 2\. Use the EdgePhotos release that wrote this backup/,
+        manifest({ formatVersion: 4 as never }),
+        /formatVersion 4; this version reads 1, 2 and 3\. Use the EdgePhotos release that wrote this backup/,
       ))
   })
 

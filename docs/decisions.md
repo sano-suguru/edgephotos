@@ -928,7 +928,12 @@ reserve を選ぶのは、Worker が検証済みの identity を持ち、かつ 
 
 - finalize の再送と duplicate は、既存 asset の値を変えない（asset を作る INSERT は `pending` の upload にしか効かない）。同じ bytes を後から upload した member は、upload した人になりません
 - 別の member が finalize しても、storage cleanup が完了させても、reserve した member が残ります
-- restore（reserve に `metadata.createdAt` がある）で作った asset は `NULL`。restore を実行した member は写真を upload した人ではなく、manifest も upload した人を持たないため
+
+**restore は upload した人を明示して送る。** reserve の `metadata.uploadedBy` を省けば reserve した member、値を送ればその値（`null` は「記録なし」）を記録します。restore は manifest の値を必ず送ります。restore を実行した member は写真を upload した人ではないためです。
+
+`metadata.createdAt` の有無では判定しません。upload 時刻を送ることと、upload した人が誰かは別の事実です。時刻を持つ取り込みを後から作ったときに、upload した人が黙って消えることを避けます。
+
+送られた値は、形式（`HOUSEHOLD_EMAILS` と同じ規則の小文字 email）だけを確かめます。今の `HOUSEHOLD_EMAILS` には照合しません。backup には、既に外した member が upload した写真も入っているからです。したがってこの値は client の申告です。member は信頼境界の内側にいるので（[D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける) と同じ）、それで足ります。値は表示にしか使いません。
 
 **記録の無い写真は「記録なし」と表示し、推測で埋めない。** migration は既存の行を `NULL` のまま残します。backfill はしません。どの member が upload したかを示す記録が他に無いからです。
 
@@ -938,29 +943,43 @@ reserve を選ぶのは、Worker が検証済みの identity を持ち、かつ 
 - 絞り込み・並べ替え・member ごとの timeline / favorite / album / trash を作らない。index も張らない
 - role・招待・user ごとの library を入れない
 
-**公開面と backup には出さない。** 共有ページの response（`SharedAsset`）と export の manifest（`ExportAsset`）は変えません。member の email を共有相手へ渡さないためです。
+**公開面には出さない。** 共有ページの response（`SharedAsset`）は変えません。member の email を共有相手へ渡さないためです。
 
-manifest の現在の formatVersion は 2 です（[D-030](#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。manifest に足してよいのは「無視しても restore でデータを失わない optional field」だけです（[D-025](#d-025-backup-manifest-を-v1-として確定し読み込み時に検証する)）。upload した人を v2 のまま足すと、それを知らない reader は field を無視して restore し、upload した人を失います。この条件に当たらないので、足すなら v3 へ上げることになります。今回はそこまで広げません。
+### export manifest を v3 へ上げる
+
+見えている metadata が backup から戻らないのは、データの消失です。しかも後から直せません。この変更を出荷してから manifest に足すまでの間に取った backup には、upload した人が最初から入らないからです。そのため列を足すのと同じ変更で、manifest にも入れます。
+
+`ExportAsset` に `uploadedBy`（小文字 email または `null`）を足し、manifest を v3 にします。manifest に足してよいのは「無視しても restore でデータを失わない optional field」だけです（[D-025](#d-025-backup-manifest-を-v1-として確定し読み込み時に検証する)）。upload した人を v2 のまま足すと、それを知らない reader は field を無視して restore し、upload した人を失います。この条件に当たらないので、version を上げます。
+
+- 新規 export は v3 を書く。v3 では `uploadedBy` が必須
+- reader は v1・v2・v3 を読む。v1 と v2 の写真は、すべて `uploadedBy: null` として読む。v1 / v2 の manifest に同じ名前の key があっても、その version の契約に無いので読まない
+- `pnpm backup verify` は、v3 の manifest に対してだけ `uploadedBy` を比べる。v1 / v2 は upload した人を表せないので、ライブラリ側に値があっても差分ではない
+- 以前の CLI は v3 を知らないので、v3 の backup を読まずに拒否する（[D-025](#d-025-backup-manifest-を-v1-として確定し読み込み時に検証する) のとおり）
+
+backup の `manifest.json` に member の email が入ります。backup ディレクトリは元のファイル名と撮影日時を既に平文で持つので、置き場所の保護（[security.md](security.md#backup-ディレクトリ)）は変わりません。
 
 却下した案:
 
 - finalize を呼んだ member を記録する: 列は `assets` の 1 つで済むが、記録されるのは「finalize した人」で、upload した人とは別の事実になる。別 member の finalize では別人になり、storage cleanup では記録が消える
 - `sub` を記録する: 上のとおり、表示できず IdP の変更で意味を失う
 - restore を実行した member を記録する: upload した人を作り出すことになる
+- `metadata.createdAt` がある reserve を restore とみなし、`NULL` を記録する: 時刻の field が別の metadata の意味を暗黙に変える。時刻を送る別の client を作った時点で、upload した人が黙って消える
+- restore を示す `source: 'restore'` のような flag を足す: 値を運ぶ field が別に要る。upload した人をそのまま送れば flag は要らない
+- manifest には入れず、必要になってから v3 にする: その間の backup からは、後で直しても戻らない
 
 影響:
 
 - 更新時に `0004_asset_uploaded_by` を適用する。既存の写真は「記録なし」と表示される
 - 適用より前に reserve して、適用後に finalize した upload も「記録なし」になる。reserve の時点で記録していないため
 - API の asset に `uploadedBy` が増える。読むのは Web だけで、この repository と一緒に更新する
+- manifest が v3 になる。以前の CLI は新しい backup を読めない。この変更より前の backup（v1 / v2）から restore した写真は「記録なし」になる
 
 残るリスク:
 
-- backup から restore すると、upload した人は失われて「記録なし」になる
 - 記録は email なので、member の email が変わっても過去の写真は古い email のまま表示される。member を削除しても、その email は写真に残る
-- 記録は request を送った member の申告ではなく Access の検証済み identity だが、同じ端末を 2 人で使えば実際に撮った人とは一致しない
+- 通常の upload で記録するのは Access の検証済み identity で、account であって人ではない。同じ端末を 2 人で使えば、実際に撮った人とは一致しない
+- restore で記録するのは manifest の値で、server は検証しない。backup を手で書き換えれば、別の member の値にできる
 
 再検討する条件:
 
-- backup をまたいで upload した人を残す必要が出たとき（manifest を v3 へ上げる）
 - 表示だけでなく、upload した人で権限や一覧を分ける要求が出たとき（D-028 の見直しとして扱う）

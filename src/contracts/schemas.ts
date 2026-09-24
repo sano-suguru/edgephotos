@@ -28,6 +28,15 @@ export const ShareIdSchema = z
 
 export const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, 'Expected lowercase hex SHA-256')
 
+// A household member's email as EdgePhotos stores it: an entry HOUSEHOLD_EMAILS accepts (src/worker/env.ts
+// reads the list with this same rule), lowercased. Deliberately not a stricter email grammar: a recorded
+// uploader passed this rule, and a backup must never be refused for a value the Worker itself wrote.
+export const MEMBER_EMAIL_RE = /^[^\s@,]+@[^\s@,]+$/
+export const MemberEmailSchema = z
+  .string()
+  .regex(MEMBER_EMAIL_RE, 'Expected an email address')
+  .refine((value) => value === value.toLowerCase(), 'Expected the stored (lowercase) email')
+
 // ISO 8601 date-time. The offset is optional because EXIF often lacks timezone information.
 export const TakenAtSchema = z
   .string()
@@ -61,10 +70,10 @@ export const AssetSummarySchema = z
     isFavorite: z.boolean(),
     trashedAt: z.string().nullable(),
     createdAt: z.string(),
-    // Email of the household member who reserved the upload. Null when it was not recorded (photos from
-    // before this was recorded, or restored from a backup). Display only: every member has the same rights
-    // over every asset.
-    uploadedBy: z.string().nullable(),
+    // Email of the household member who uploaded the photo (D-034). Null when it was not recorded: photos
+    // from before it was recorded, or restored from a backup that did not carry it. Display only: every
+    // member has the same rights over every asset.
+    uploadedBy: MemberEmailSchema.nullable(),
     thumbnailUrl: z.url(),
     urlsExpireAt: z.string(),
   })
@@ -121,9 +130,12 @@ export const UploadReserveSchema = z
         height: z.number().int().positive().optional(),
         takenAt: TakenAtSchema.optional(),
         // When the photo was first added to a library. Restore sends the value from the backup so that the
-        // timeline order of photos without a capture time survives; other clients omit it (= now). Sending it
-        // also leaves the uploader unrecorded (docs/decisions.md D-034), so a normal upload must not.
+        // timeline order of photos without a capture time survives; other clients omit it (= now).
         createdAt: z.iso.datetime({ offset: true }).optional(),
+        // Who uploaded the photo (docs/decisions.md D-034). Omitted: the member making this request, which is
+        // what every client but restore does. Restore sends the value from the backup, null included (not
+        // recorded). The server cannot check it: a restored photo may come from a member no longer listed.
+        uploadedBy: MemberEmailSchema.nullable().optional(),
       })
       .default({}),
   })
@@ -276,6 +288,8 @@ export const ExportAssetSchema = z
     trashedAt: InstantSchema.nullable(),
     // When the photo entered a library. Restore sends it back so the timeline order survives.
     createdAt: InstantSchema,
+    // Who uploaded the photo, null if not recorded (D-034). Restore sends it back. Since v3.
+    uploadedBy: MemberEmailSchema.nullable(),
     // The R2 keys this photo had at export time, so a raw bucket dump can be matched to the manifest.
     // Descriptive only: the backup CLI stores files by SHA-256 and never reads these.
     objects: z.object({ original: z.string(), thumbnail: z.string(), preview: z.string() }),
@@ -311,6 +325,13 @@ const ExportManifestBase = z.object({
   albums: z.array(ExportAlbumSchema),
 })
 
+// v1 and v2 have no uploader. A key of that name in one is not part of its contract and is not read: the
+// photo reads as not recorded, the same asset type as v3 gives, so a reader need not branch on the version.
+const ExportAssetBeforeV3Schema = ExportAssetSchema.omit({ uploadedBy: true }).transform((asset) => ({
+  ...asset,
+  uploadedBy: null as string | null,
+}))
+
 // The version selects the contract; there is no migration step between them. A reader that does not know
 // a version refuses the whole manifest rather than reading part of it (D-025).
 export const ExportManifestSchema = z.discriminatedUnion('formatVersion', [
@@ -318,7 +339,7 @@ export const ExportManifestSchema = z.discriminatedUnion('formatVersion', [
     formatVersion: z.literal(1),
     // Checked per asset rather than with a narrower enum, so every version parses to the same asset type
     // and a reader does not have to branch on the version to use what it read.
-    assets: z.array(ExportAssetSchema).superRefine((assets, ctx) => {
+    assets: z.array(ExportAssetBeforeV3Schema).superRefine((assets, ctx) => {
       assets.forEach((a, index) => {
         if ((EXPORT_V1_CONTENT_TYPES as readonly string[]).includes(a.contentType)) return
         ctx.addIssue({
@@ -331,6 +352,10 @@ export const ExportManifestSchema = z.discriminatedUnion('formatVersion', [
   }),
   ExportManifestBase.extend({
     formatVersion: z.literal(2),
+    assets: z.array(ExportAssetBeforeV3Schema),
+  }),
+  ExportManifestBase.extend({
+    formatVersion: z.literal(3),
     assets: z.array(ExportAssetSchema),
   }),
 ])

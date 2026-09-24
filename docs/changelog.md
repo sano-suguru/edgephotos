@@ -8,9 +8,11 @@
 
 ## upload した人の記録（2026-09-24）
 
-新しく upload した写真に、upload を始めた（reserve した）household member の email を記録します。viewer の「情報」に「追加した人」として表示します。記録の無い写真（この変更より前の写真、backup から restore した写真）は「記録なし」と表示します。
+新しく upload した写真に、upload を始めた（reserve した）household member の email を記録します。viewer の「情報」に「追加した人」として表示します。記録の無い写真（この変更より前の写真、この変更より前の backup から restore した写真）は「記録なし」と表示します。
 
-API の asset（一覧と 1 件）に `uploadedBy`（email または `null`）が増えます。権限・一覧・favorite・album・trash・share・backup の manifest は変わりません（[D-034](decisions.md)）。
+API の asset（一覧と 1 件）に `uploadedBy`（email または `null`）が増えます。権限・一覧・favorite・album・trash・share は変わりません（[D-034](decisions.md)）。
+
+backup manifest は v3 になり、各写真の `uploadedBy` を持ちます。restore は upload した人を戻し、`pnpm backup verify` は v3 の backup に対して比べます。v1 / v2 の backup も引き続き restore できます。以前の CLI は v3 の backup を読めません。
 
 更新時は `0004_asset_uploaded_by` の migration を deploy の前に適用します。既存の写真は `NULL` のまま残り、後から埋めません。production での migration の適用と確認はまだです。
 

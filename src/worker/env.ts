@@ -1,3 +1,5 @@
+import { MEMBER_EMAIL_RE } from '../contracts/schemas'
+
 export interface Env {
   DB: D1Database
   BUCKET: R2Bucket
@@ -29,7 +31,6 @@ export type AppConfig = {
 }
 
 const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
-const EMAIL_RE = /^[^\s@,]+@[^\s@,]+$/
 
 // Returns null when any required value is missing or malformed. Callers must fail closed.
 export function readAppConfig(env: Env): AppConfig | null {
@@ -50,7 +51,7 @@ export function readAppConfig(env: Env): AppConfig | null {
 export function readHouseholdEmails(value: string | undefined): ReadonlySet<string> | null {
   if (value === undefined) return null
   const entries = value.split(',').map((entry) => entry.trim().toLowerCase())
-  if (entries.some((entry) => !EMAIL_RE.test(entry))) return null
+  if (entries.some((entry) => !MEMBER_EMAIL_RE.test(entry))) return null
   return new Set(entries)
 }
 
