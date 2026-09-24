@@ -1008,7 +1008,7 @@ D-025 自身が「未公開の旧形式への fallback を残す」を「公開�
 
 **alpha の間は、以前の alpha release との互換を約束しない。** 対象は client（Web / CLI）と backup manifest です。形式を変えたら reader も同じ変更で変え、古い形式は拒否してよいとします。API client については [D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける)・D-034 で既にそうしていました。保存済みのデータ（D1 / R2）は、これまでどおり migration で引き継ぎます。
 
-**manifest は v3 だけを読む。** `formatVersion` は 3 のままにします。v1 / v2 は、version を名指しして「現在の CLI で backup を取り直す」ように伝えて拒否します。1 に戻さないのは、既存の v3 backup と changelog の記述をそのまま有効にするためです。
+**manifest は v3 だけを読む。** `formatVersion` は 3 のままにします。v1 / v2 は version を名指しして拒否し、元のライブラリが残っていれば現在の CLI で backup を取り直すよう伝えます。v1 / v2 から v3 への変換は作りません。1 に戻さないのは、既存の v3 backup と changelog の記述をそのまま有効にするためです。
 
 **未知の key を拒否する（strict）。** manifest・`assets[]`・`objects`・`albums[]` のすべてが対象です。未知の key を無視する規則は、古い reader が新しい field を読み飛ばすためのものでした。前方互換を約束しないなら残す理由がありません。無視すると、manifest が持っている値を restore が黙って落とせるようになります。export の endpoint の response は同じ object の shape を使い、strict にはしません。読むときの manifest にだけ適用します。
 
@@ -1024,7 +1024,7 @@ D-025 自身が「未公開の旧形式への fallback を残す」を「公開�
 
 影響:
 
-- 以前の alpha release が書いた v1 / v2 の backup は、`check` / `restore` / `verify` で拒否される。更新の前に、現在の CLI（v3 を書く）で backup を取り直す
+- 以前の alpha release が書いた v1 / v2 の backup は、`check` / `restore` / `verify` で拒否される。更新の前に、現在の CLI（v3 を書く）で backup を取り直す。元のライブラリが無い v1 / v2 の backup は読めなくなる
 - 手で key を足した manifest や、他所で生成した JSON は、その key を理由に拒否される
 - `pnpm backup verify` は、`uploadedBy` をほかの field と同じく常に比べる
 

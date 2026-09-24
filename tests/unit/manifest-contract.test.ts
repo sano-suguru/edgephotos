@@ -155,7 +155,7 @@ describe('export manifest contract', () => {
         await rejects(
           { ...manifest(), formatVersion, assets: [old] },
           new RegExp(
-            `formatVersion ${formatVersion}; this version reads only 3\\. Backups written by an earlier alpha release are not readable: create a new backup with this release`,
+            `formatVersion ${formatVersion}; this version reads only 3\\. Backups written by an earlier alpha release are not readable\\. If the library it came from still exists, create a new backup of it with this release`,
           ),
         )
         // Refused for its version, not for the fields a v3 photo would need.

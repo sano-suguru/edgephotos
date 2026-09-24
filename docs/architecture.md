@@ -426,7 +426,7 @@ versioning（[D-035](decisions.md)）:
 
 - reader は知らない `formatVersion` を部分的に読まずに拒否します
 - reader は知らない key も拒否します（manifest・`assets[]`・`objects`・`albums[]` のすべて）。field の追加・削除、既存 field の意味・書式・必須性の変更では `formatVersion` を上げ、reader も同じ release で変えます
-- **alpha の間**: reader が読むのは現在の version（v3）だけです。以前の alpha release が書いた v1 / v2 の backup は拒否します。古い backup は、元のライブラリから現在の CLI で取り直します
+- **alpha の間**: reader が読むのは現在の version（v3）だけです。以前の alpha release が書いた v1 / v2 の backup は拒否します。元のライブラリが残っていれば、現在の CLI で取り直します。残っていない v1 / v2 の backup を読む手段はありません
 - **v1 release 以降**: 新しい CLI は、v1 release 以降の release が書いたすべての version を読み続けます。その reader は通常の整理で削除しません。backup の長期保存で約束するのは、この「新しい CLI が古い backup を読む」ことです
 - 古い CLI が新しい CLI の書いた backup を読めること（前方互換）は約束しません。CLI はこの repository と一緒に更新します
 

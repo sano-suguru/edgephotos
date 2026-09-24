@@ -202,7 +202,7 @@ describe('export and restore to an empty environment', () => {
 
     const target = await makeApp({ which: 'restore' })
     await expect(restoreLibrary(apiClient(target), store)).rejects.toThrow(
-      /formatVersion 2; this version reads only 3\. Backups written by an earlier alpha release are not readable/,
+      /formatVersion 2; this version reads only 3\. Backups written by an earlier alpha release are not readable\. If the library/,
     )
     expect((await callJson(target, 'GET', '/api/v1/assets?limit=200')).items).toEqual([])
   })

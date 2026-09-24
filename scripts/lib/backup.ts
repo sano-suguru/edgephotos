@@ -146,12 +146,12 @@ export function validateManifest(value: unknown, source: string): ExportManifest
   }
   if (header.formatVersion !== EXPORT_FORMAT_VERSION) {
     // During alpha a release reads only the version it writes (D-035). An older backup cannot be converted
-    // here: the way forward is a new backup of the library it came from.
+    // here: the only way forward is a new backup of the library it came from, if that library still exists.
     const older = typeof header.formatVersion === 'number' && header.formatVersion < EXPORT_FORMAT_VERSION
     throw new BackupError(
       `${source} has formatVersion ${JSON.stringify(header.formatVersion)}; this version reads only ${EXPORT_FORMAT_VERSION}. ` +
         (older
-          ? 'Backups written by an earlier alpha release are not readable: create a new backup with this release (pnpm backup export).'
+          ? 'Backups written by an earlier alpha release are not readable. If the library it came from still exists, create a new backup of it with this release (pnpm backup export).'
           : 'Use the EdgePhotos release that wrote this backup.'),
     )
   }

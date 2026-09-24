@@ -8,7 +8,7 @@
 
 ## alpha の間の互換性の整理（2026-09-24）
 
-**互換性を壊す変更です。** `pnpm backup check` / `restore` / `verify` が読む manifest は v3 だけになりました。以前の alpha release が書いた v1 / v2 の backup は、`formatVersion` を名指しして拒否されます。v1 / v2 の backup しか持っていない場合は、**この変更に更新する前に**、元のライブラリから現在の CLI（v3 を書く）で `pnpm backup export` をやり直してください。
+**互換性を壊す変更です。** `pnpm backup check` / `restore` / `verify` が読む manifest は v3 だけになりました。以前の alpha release が書いた v1 / v2 の backup は、`formatVersion` を名指しして拒否されます。v1 / v2 の backup しか持っていない場合は、**この変更に更新する前に**、元のライブラリから現在の CLI（v3 を書く）で `pnpm backup export` をやり直してください。元のライブラリが無い場合、v1 / v2 の backup を読む手段はありません（変換の仕組みは作りません）。
 
 manifest は未知の key も拒否します（manifest・`assets[]`・`objects`・`albums[]`）。`pnpm backup export` とライブラリ画面のダウンロードが書く manifest は変わりません。
 
