@@ -673,7 +673,9 @@ account の identity provider は Cloudflare アカウントでのログイン�
 - 認証なしの `curl` で、`/` と `/api/v1/assets` は Access の login へ `302`、`/share` は `200`、`/share/api/v1/*` は Worker の `404` だった。login 画面は identity provider の選択を挟まず、email の入力欄を返した
 - 最新の Worker version の preview URL（`<version>-edgephotos...workers.dev`）は `404` だった
 
-家族 2 人が OTP で login できるか、登録していない email でコードが届かないかは、まだ確かめていない。
+- 利用者（household の 1 人目）が、自分の email に届いたコードで login できた
+
+2 人目の member の login と、登録していない email にコードが届かないことは、まだ確かめていない。
 
 ### deploy と CORS
 
