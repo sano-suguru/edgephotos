@@ -11,8 +11,8 @@
 ## 現在の状況
 
 - 最終確認: 2026-09-24
-- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`
-- 未確認: production 環境の作成と deploy（初回 deploy の secret の渡し方は[確認済み](#初回-deploy-の-secret-の渡し方2026-09-24)）、iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
+- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload）
+- 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
 各項目に日付がある場合は、その日付が優先します。
 
@@ -646,6 +646,38 @@ production の作成前に、Worker がまだ無い状態からの初回 deploy 
 - 確認後に Worker を `wrangler delete` で削除し、`10007`（存在しない）を確認した
 
 この結果を [初回の deploy で secret を渡す](operations.md#初回の-deploy-で-secret-を渡す) に反映した。
+
+## production の作成と初回 deploy（2026-09-24）
+
+運用の [リソース作成とデプロイ](operations.md#2-リソース作成とデプロイ) の順で、production（`wrangler.jsonc` の top-level 設定）を作った。対象は main の `f1939d1`（#46）、wrangler 4.131.2。Worker の hostname は workers.dev。
+
+### D1・R2・build
+
+- `pnpm check` が通った後、`wrangler d1 create edgephotos` と `wrangler r2 bucket create edgephotos` で作成した。作成前にどちらも存在しないことを確かめた
+- `d1 migrations apply edgephotos --remote` で `0001`〜`0004` を順に適用した。その後の `migrations list` は `No migrations to apply!`
+- `r2 bucket dev-url get` は r2.dev が無効、`r2 bucket domain list` は custom domain なし
+- `CLOUDFLARE_ENV` なしの `pnpm build` が成功し、`dist/edgephotos/wrangler.json` の Worker・D1・R2 の名前はすべて `edgephotos` だった
+
+### Access
+
+- private（hostname のみ、Allow）と `/share`（wildcard なし、Bypass・Everyone）の 2 つの self-hosted application を、Cloudflare API で作った。destination は public、session duration は 24 時間（remote-test と同じ）
+- 作成後に API で読み直し、2 つの hostname が `APP_ORIGIN` と同じ host であること、Allow policy の email が `HOUSEHOLD_EMAILS` と同じ 2 人であることを確かめた
+- household に含めていない account での login 拒否と、preview URL の `404` は、production ではまだ確かめていない
+
+### deploy と CORS
+
+- 7 つの secret を `.env` 形式の file にまとめ、`wrangler deploy --config dist/edgephotos/wrangler.json --secrets-file <file>` の初回 deploy が成功した。`wrangler secret list` では 7 つとも `secret_text`
+- file の置き場所だけ、運用の手順（repository の外）から外れた。repository 内の git が無視する path に置き、deploy の直後に削除した。commit には入っていない
+- R2 CORS は、運用の [R2 CORS](operations.md#6-r2-cors) の規則を `APP_ORIGIN` の origin だけで `cors set` し、`cors list` で読み戻した。設定前の bucket に CORS 規則は無かった
+
+### diagnose と smoke
+
+- `EDGEPHOTOS_URL` と Access token を付けた `pnpm diagnose`（`--env` なし）は、library が空のため `r2: presigned GET` だけが SKIP で、ほかは PASS した
+- 利用者（household の 1 人目）が Browser で写真を 1 枚 upload した。timeline に thumbnail、viewer に preview が表示され、「最初に追加した人」に login した email が出ることを、利用者が確認した
+- D1 では、その asset が `ready`、`uploaded_by` が同じ email、upload の行が `finalized` だった。R2 には original と `derivatives/v1` の thumbnail・preview の 3 つがあった（`r2 object get` で byte 数だけを確認）
+- upload 後に `pnpm diagnose` を再実行し、`r2: presigned GET` を含む全項目が PASS した（no failures）
+
+2 人目の member による upload は、実環境ではまだ確かめていない（[2 人の household での利用](#2-人の-household-での利用)）。
 
 ## 未検証
 
