@@ -131,4 +131,6 @@ test('the info panel names who added the photo, and says so when that was not re
   await viewer.getByRole('button', { name: '情報', exact: true }).click()
   await expect(info.getByRole('definition').last()).toHaveText('記録なし')
   await expect(info).not.toContainText('you@localhost.test')
+  // The viewer may still be prefetching a neighbour through the route when the test ends.
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
 })
