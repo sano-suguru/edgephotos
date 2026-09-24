@@ -39,10 +39,7 @@ function asset(overrides: Partial<ExportAsset> = {}): ExportAsset {
   }
 }
 
-// The current format. v1 manifests are built from this one in the version tests below.
-type CurrentManifest = Extract<ExportManifest, { formatVersion: typeof EXPORT_FORMAT_VERSION }>
-
-function manifest(overrides: Partial<CurrentManifest> = {}): CurrentManifest {
+function manifest(overrides: Partial<ExportManifest> = {}): ExportManifest {
   return {
     format: EXPORT_FORMAT,
     formatVersion: EXPORT_FORMAT_VERSION,
@@ -101,9 +98,31 @@ describe('export manifest contract', () => {
     expect(await read(sparse)).toEqual(sparse)
   })
 
-  it('ignores unknown keys so a later v1 may add optional fields', async () => {
-    const withExtra = { ...manifest(), somethingNew: 'ignored' }
-    expect(await read(withExtra)).toEqual(manifest())
+  describe('refuses a key the contract does not describe, naming where it is', () => {
+    it('on the manifest', () =>
+      rejects({ ...manifest(), somethingNew: 1 }, /\(root\): Unrecognized key: "somethingNew"/))
+
+    it('on a photo', () =>
+      rejects(
+        manifest({ assets: [{ ...asset(), rating: 5 } as ExportAsset] }),
+        /assets\[0\]: Unrecognized key: "rating"/,
+      ))
+
+    it("in a photo's objects", () =>
+      rejects(
+        manifest({ assets: [asset({ objects: { ...asset().objects, raw: 'x' } as ExportAsset['objects'] })] }),
+        /assets\[0\]\.objects: Unrecognized key: "raw"/,
+      ))
+
+    it('on an album', () =>
+      rejects(
+        manifest({
+          albums: [
+            { id: ALBUM, title: 'Summer', createdAt: '2024-05-01T00:00:00.000Z', assetIds: [], cover: ID_A } as never,
+          ],
+        }),
+        /albums\[0\]: Unrecognized key: "cover"/,
+      ))
   })
 
   describe('format versions', () => {
@@ -111,7 +130,7 @@ describe('export manifest contract', () => {
       expect(EXPORT_FORMAT_VERSION).toBe(3)
     })
 
-    it('keeps each uploader in v3, and requires the field', async () => {
+    it('keeps each uploader, and requires the field', async () => {
       const both = manifest({ assets: [asset(), asset({ id: ID_B, sha256: 'b'.repeat(64), uploadedBy: null })] })
       expect((await read(both)).assets.map((a) => a.uploadedBy)).toEqual(['member-a@example.test', null])
       const { uploadedBy: _, ...missing } = asset()
@@ -120,22 +139,7 @@ describe('export manifest contract', () => {
       await rejects(manifest({ assets: [asset({ uploadedBy: 'Member-A@example.test' })] }), /uploadedBy/)
     })
 
-    it('reads every photo of a v1 or v2 manifest as having no recorded uploader', async () => {
-      // Written before v3, so a key of that name is not part of the contract and is not read.
-      for (const formatVersion of [1, 2]) {
-        const old = await read({ ...manifest(), formatVersion })
-        expect(old.assets.map((a) => a.uploadedBy)).toEqual([null])
-      }
-    })
-
-    it('still reads a v1 manifest, under the contract v1 was written with', async () => {
-      const v1 = { ...manifest(), formatVersion: 1 }
-      expect(await read(v1)).toMatchObject({ formatVersion: 1 })
-      // HEIC was not an original type when v1 was the format, so a v1 manifest claiming one is wrong.
-      await rejects({ ...v1, assets: [asset({ contentType: 'image/heic' })] }, /contentType/)
-    })
-
-    it('reads HEIC and HEIF in a v2 manifest', async () => {
+    it('reads HEIC and HEIF originals', async () => {
       for (const contentType of ['image/heic', 'image/heif'] as const) {
         expect(await read(manifest({ assets: [asset({ contentType })] }))).toMatchObject({
           assets: [{ contentType }],
@@ -143,11 +147,30 @@ describe('export manifest contract', () => {
       }
     })
 
+    // During alpha only the current version is read (D-035). An earlier alpha backup is refused as a whole,
+    // with a way forward, even where its photos would also be valid v3 photos.
+    it('refuses a v1 or v2 manifest from an earlier alpha release, and says to back up again', async () => {
+      for (const formatVersion of [1, 2]) {
+        const { uploadedBy: _, ...old } = asset()
+        await rejects(
+          { ...manifest(), formatVersion, assets: [old] },
+          new RegExp(
+            `formatVersion ${formatVersion}; this version reads only 3\\. Backups written by an earlier alpha release are not readable: create a new backup with this release`,
+          ),
+        )
+        // Refused for its version, not for the fields a v3 photo would need.
+        await rejects(
+          { ...manifest(), formatVersion },
+          new RegExp(`formatVersion ${formatVersion}; this version reads only 3`),
+        )
+      }
+    })
+
     it('refuses a version it does not know instead of reading part of it', () =>
       rejects({ ...manifest(), formatVersion: 4 }, /formatVersion/))
   })
 
-  describe('rejects a file that is not a v1 manifest', () => {
+  describe('rejects a file that is not a v3 manifest', () => {
     it('missing', () => expect(readManifest(store({}))).rejects.toThrow(/not an EdgePhotos backup/))
 
     it('malformed JSON', () => rejects('{"format": "edgephotos-export"', /manifest\.json is not valid JSON/))
@@ -160,7 +183,7 @@ describe('export manifest contract', () => {
     it('a newer formatVersion', () =>
       rejects(
         manifest({ formatVersion: 4 as never }),
-        /formatVersion 4; this version reads 1, 2 and 3\. Use the EdgePhotos release that wrote this backup/,
+        /formatVersion 4; this version reads only 3\. Use the EdgePhotos release that wrote this backup/,
       ))
   })
 

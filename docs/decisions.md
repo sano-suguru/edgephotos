@@ -997,3 +997,37 @@ backup の `manifest.json` に member の email が入ります。backup ディ�
 再検討する条件:
 
 - 表示だけでなく、upload した人で権限や一覧を分ける要求が出たとき（D-028 の見直しとして扱う）
+
+## D-035: alpha の間は互換を約束せず、manifest は v3 だけを読む
+
+**状態:** 採用（2026-09-24。[D-025](#d-025-backup-manifest-を-v1-として確定し読み込み時に検証する) の「未知の key は無視する」と、[D-030](#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)・[D-034](#d-034-写真を-upload-した-member-を記録しviewer-に表示する) の「reader は以前の version も読む」を置き換える）
+
+EdgePhotos は alpha で、production はまだありません。それでも backup manifest の reader は v1・v2・v3 を読み、version ごとの schema・`uploadedBy` を補う transform・verify の version 分岐を持っていました。manifest の field の足し方は、「10 年後に古い CLI が読む」前提（前方互換）の規則で決めていました。
+
+D-025 自身が「未公開の旧形式への fallback を残す」を「公開前なので維持する相手がいない」として却下しています。v1 / v2 の reader は、この理由にそのまま当たります。v1 / v2 の backup は開発環境にしか無く、元のライブラリから v3 で取り直せます。
+
+**alpha の間は、以前の alpha release との互換を約束しない。** 対象は client（Web / CLI）と backup manifest です。形式を変えたら reader も同じ変更で変え、古い形式は拒否してよいとします。API client については [D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける)・D-034 で既にそうしていました。保存済みのデータ（D1 / R2）は、これまでどおり migration で引き継ぎます。
+
+**manifest は v3 だけを読む。** `formatVersion` は 3 のままにします。v1 / v2 は、version を名指しして「現在の CLI で backup を取り直す」ように伝えて拒否します。1 に戻さないのは、既存の v3 backup と changelog の記述をそのまま有効にするためです。
+
+**未知の key を拒否する（strict）。** manifest・`assets[]`・`objects`・`albums[]` のすべてが対象です。未知の key を無視する規則は、古い reader が新しい field を読み飛ばすためのものでした。前方互換を約束しないなら残す理由がありません。無視すると、manifest が持っている値を restore が黙って落とせるようになります。export の endpoint の response は同じ object の shape を使い、strict にはしません。読むときの manifest にだけ適用します。
+
+**v1 release 以降は、後方互換を約束する。** 新しい CLI は、v1 release 以降の release が書いたすべての manifest version を読み続けます。その reader は通常の整理で削除しません。backup の長期保存で意味があるのは、数年後の新しい CLI が古い backup を読めることです。古い CLI が新しい backup を読めることではありません。
+
+**前方互換は約束しない。** 古い CLI は、新しい CLI の書いた backup を読めなくてよいとします。CLI はこの repository と一緒に更新します。
+
+却下した案:
+
+- v1 / v2 の reader を v1 release まで残す: 読む相手がいない。version を上げるたびに旧 version 用の schema・transform・verify の分岐を足す構造が続く
+- 未知の key を無視したまま v3 だけを読む: 無視する規則は古い reader のためのもので、前方互換を約束しないなら残す理由がない。持っている値を restore が落とす余地を残す
+- `formatVersion` を 1 に戻す: 既存の v3 backup が別の意味の v1 と区別できなくなる
+
+影響:
+
+- 以前の alpha release が書いた v1 / v2 の backup は、`check` / `restore` / `verify` で拒否される。更新の前に、現在の CLI（v3 を書く）で backup を取り直す
+- 手で key を足した manifest や、他所で生成した JSON は、その key を理由に拒否される
+- `pnpm backup verify` は、`uploadedBy` をほかの field と同じく常に比べる
+
+再検討する条件:
+
+- v1 を release するとき。その時点の version を後方互換の起点として記録する

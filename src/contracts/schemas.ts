@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi'
-import { EXPORT_FORMAT } from './export-manifest.ts'
+import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION } from './export-manifest.ts'
 
 // API schemas shared by the Worker (runtime validation + OpenAPI) and clients (types only).
 // Nothing here may reference server secrets or storage credentials.
@@ -269,10 +269,9 @@ export const ShareVariantSchema = z.enum(['thumbnail', 'preview'])
 // ---- Export ----
 
 // The backup manifest (`manifest.json`) is this contract, assembled from the paged export endpoints
-// (./export-manifest.ts). v1 is fixed: readers reject a formatVersion they do not know instead of reading
-// it partially, and readers ignore keys they do not know. What may be added to v1 is therefore only an
-// optional field that a reader which ignores it entirely can still restore from without losing data,
-// meaning or a verification result. Everything else bumps formatVersion. See docs/architecture.md, D-025.
+// (./export-manifest.ts). A reader accepts only the formatVersion it knows and refuses unknown keys: any change
+// to what a manifest holds changes the format, and the reader changes with it in the same release. During alpha
+// only the current version is read; from v1 on, every version a release has written stays readable (D-035).
 
 // Every timestamp EdgePhotos records is `new Date().toISOString()`: UTC, milliseconds, `Z`. The manifest
 // pins that exact spelling, so a restored library compares equal to its backup as a string
@@ -291,6 +290,8 @@ export const InstantSchema = z
   }, 'Expected a date and time that exists')
   .openapi({ example: '2024-05-01T10:20:30.000Z' })
 
+const ExportObjectsSchema = z.object({ original: z.string(), thumbnail: z.string(), preview: z.string() })
+
 // Restore re-uploads every photo through `POST /uploads`, so each field here is at least as strict as
 // UploadReserveSchema: a manifest that parses can be restored without failing part-way through.
 export const ExportAssetSchema = z
@@ -308,11 +309,11 @@ export const ExportAssetSchema = z
     trashedAt: InstantSchema.nullable(),
     // When the photo entered a library. Restore sends it back so the timeline order survives.
     createdAt: InstantSchema,
-    // Who uploaded the photo, null if not recorded (D-034). Restore sends it back. Since v3.
+    // Who uploaded the photo, null if not recorded (D-034). Restore sends it back.
     uploadedBy: MemberEmailSchema.nullable(),
     // The R2 keys this photo had at export time, so a raw bucket dump can be matched to the manifest.
     // Descriptive only: the backup CLI stores files by SHA-256 and never reads these.
-    objects: z.object({ original: z.string(), thumbnail: z.string(), preview: z.string() }),
+    objects: ExportObjectsSchema,
   })
   .openapi('ExportAsset')
 
@@ -334,51 +335,18 @@ export const ExportAlbumSchema = z
   })
   .openapi('ExportAlbum')
 
-// v1 manifests were written before HEIC/HEIF were accepted as originals. Keeping the old enum on the v1
-// branch means a v1 backup is read under exactly the contract it was written under.
-export const EXPORT_V1_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
-
-const ExportManifestBase = z.object({
+// The manifest and every object in it are strict: a key this reader does not know is refused, not skipped,
+// so nothing a backup holds can be dropped silently on restore. The export endpoints share the object
+// shapes above without strictness; only a manifest being read is held to it. There is no version branch: a
+// reader that does not know a version refuses the whole manifest rather than reading part of it.
+export const ExportManifestSchema = z.strictObject({
   format: z.literal(EXPORT_FORMAT),
+  formatVersion: z.literal(EXPORT_FORMAT_VERSION),
   // When the last export page was read. Identifies the backup while a restore resumes.
   exportedAt: InstantSchema,
-  albums: z.array(ExportAlbumSchema),
+  assets: z.array(z.strictObject({ ...ExportAssetSchema.shape, objects: z.strictObject(ExportObjectsSchema.shape) })),
+  albums: z.array(z.strictObject(ExportAlbumSchema.shape)),
 })
-
-// v1 and v2 have no uploader. A key of that name in one is not part of its contract and is not read: the
-// photo reads as not recorded, the same asset type as v3 gives, so a reader need not branch on the version.
-const ExportAssetBeforeV3Schema = ExportAssetSchema.omit({ uploadedBy: true }).transform((asset) => ({
-  ...asset,
-  uploadedBy: null as string | null,
-}))
-
-// The version selects the contract; there is no migration step between them. A reader that does not know
-// a version refuses the whole manifest rather than reading part of it (D-025).
-export const ExportManifestSchema = z.discriminatedUnion('formatVersion', [
-  ExportManifestBase.extend({
-    formatVersion: z.literal(1),
-    // Checked per asset rather than with a narrower enum, so every version parses to the same asset type
-    // and a reader does not have to branch on the version to use what it read.
-    assets: z.array(ExportAssetBeforeV3Schema).superRefine((assets, ctx) => {
-      assets.forEach((a, index) => {
-        if ((EXPORT_V1_CONTENT_TYPES as readonly string[]).includes(a.contentType)) return
-        ctx.addIssue({
-          code: 'custom',
-          path: [index, 'contentType'],
-          message: `formatVersion 1 has no ${a.contentType} originals`,
-        })
-      })
-    }),
-  }),
-  ExportManifestBase.extend({
-    formatVersion: z.literal(2),
-    assets: z.array(ExportAssetBeforeV3Schema),
-  }),
-  ExportManifestBase.extend({
-    formatVersion: z.literal(3),
-    assets: z.array(ExportAssetSchema),
-  }),
-])
 
 // ---- Storage audit / cleanup (docs/decisions.md D-023) ----
 

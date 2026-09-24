@@ -337,7 +337,9 @@ EdgePhotos が唯一のバックアップであるとは説明しません。
 - `pnpm backup export <dir>`: manifest に加え、original と derivative を presigned URL 経由で取得し、各 original の SHA-256 を検証して保存する
 - `pnpm backup check <dir>`: backup ディレクトリだけを読み、manifest のすべての original の SHA-256 と derivative の有無を確かめる（network 不要）
 
-`manifest.json` は format v3 に従います（[Export と restore](architecture.md#9-export-と-restore)、[D-025](decisions.md)、[D-030](decisions.md)、[D-034](decisions.md)）。v1 と v2 で書かれた backup も読めます。v2 から HEIC / HEIF の original を持てます。v3 から各写真の upload した人（`uploadedBy`）を持ちます。v1 / v2 の backup から restore した写真は、upload した人が「記録なし」になります。
+`manifest.json` は format v3 に従います（[Export と restore](architecture.md#9-export-と-restore)、[D-025](decisions.md)、[D-035](decisions.md)）。HEIC / HEIF の original と、各写真の upload した人（`uploadedBy`）を持ちます。
+
+alpha の間、CLI が読むのは v3 の manifest だけです。以前の alpha release が書いた v1 / v2 の backup は、`check` / `restore` / `verify` が `formatVersion` を名指しして拒否します。古い backup しか持っていない場合は、そのライブラリから現在の CLI で `pnpm backup export` をやり直します。v1 release 以降は、新しい CLI が以前の release の backup を読み続けます。古い CLI が新しい backup を読めることは約束しません。
 
 `check` / `restore` / `verify` は読み込み時に検証します。JSON として壊れている・contract に合わない・整合しない manifest は、ライブラリへ最初の request を送る前に、不正な field とその理由を並べて拒否します。
 

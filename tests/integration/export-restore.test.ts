@@ -182,22 +182,12 @@ describe('export and restore to an empty environment', () => {
     )
   })
 
-  it('restores a v2 backup with every uploader unrecorded, and verifies it against that backup', async () => {
+  // During alpha only the current manifest version is read (D-035): a backup from an earlier alpha release is
+  // refused before the target library is touched, rather than restored with its uploaders missing.
+  it('refuses to restore a v2 backup, and leaves the target library untouched', async () => {
     await emptyRestoreEnvironment()
     const source = await makeApp({ which: 'primary' })
-    const photoOfB = await photo()
-    const r = await callJson(source, 'POST', '/api/v1/uploads', {
-      expect: 201,
-      token: await memberToken(MEMBER_B),
-      body: {
-        original: { size: photoOfB.original.byteLength, contentType: 'image/jpeg', sha256: photoOfB.sha256 },
-        thumbnail: { size: photoOfB.thumbnail.byteLength },
-        preview: { size: photoOfB.preview.byteLength },
-        metadata: {},
-      },
-    })
-    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(source, r.targets[v], photoOfB[v])
-    await callJson(source, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
+    await uploadPhoto(source)
 
     const store = memoryStore()
     await backupLibrary(apiClient(source), store)
@@ -211,12 +201,10 @@ describe('export and restore to an empty environment', () => {
     store.files.set('manifest.json', new TextEncoder().encode(JSON.stringify(v2)))
 
     const target = await makeApp({ which: 'restore' })
-    await restoreLibrary(apiClient(target), store)
-    const restored = (await callJson(target, 'GET', '/api/v1/assets?limit=200')).items
-    expect(restored.length).toBeGreaterThan(0)
-    expect(restored.every((i: { uploadedBy: string | null }) => i.uploadedBy === null)).toBe(true)
-    // The source still has its uploaders; a v2 backup cannot express them, so verify does not call it a difference.
-    expect(await verifyLibrary(apiClient(source), await readManifest(store))).toMatchObject({ ok: true, problems: [] })
+    await expect(restoreLibrary(apiClient(target), store)).rejects.toThrow(
+      /formatVersion 2; this version reads only 3\. Backups written by an earlier alpha release are not readable/,
+    )
+    expect((await callJson(target, 'GET', '/api/v1/assets?limit=200')).items).toEqual([])
   })
 
   it('keeps HEIC original bytes and checksum across export and restore', async () => {

@@ -6,6 +6,14 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## alpha の間の互換性の整理（2026-09-24）
+
+**互換性を壊す変更です。** `pnpm backup check` / `restore` / `verify` が読む manifest は v3 だけになりました。以前の alpha release が書いた v1 / v2 の backup は、`formatVersion` を名指しして拒否されます。v1 / v2 の backup しか持っていない場合は、**この変更に更新する前に**、元のライブラリから現在の CLI（v3 を書く）で `pnpm backup export` をやり直してください。
+
+manifest は未知の key も拒否します（manifest・`assets[]`・`objects`・`albums[]`）。`pnpm backup export` とライブラリ画面のダウンロードが書く manifest は変わりません。
+
+alpha の間は、以前の alpha release の client や backup との互換を約束しません。v1 release 以降は、新しい CLI が以前の release の backup を読み続けます。古い CLI が新しい backup を読めることは約束しません（[D-035](decisions.md)）。
+
 ## upload した人の記録（2026-09-24）
 
 新しく upload した写真に、upload を始めた（reserve した）household member の email を記録します。viewer の「情報」に「最初に追加した人」として表示します。同じ写真を後から upload した member は記録しません。記録の無い写真（この変更より前の写真、この変更より前の backup から restore した写真）は「記録なし」と表示します。

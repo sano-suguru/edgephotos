@@ -375,7 +375,7 @@ share から発行する URL の期限は 300 秒以下で、share の残り期�
 
 export は 3 つの paged endpoint（`/api/v1/export/assets`・`/albums`・`/album-assets`）です。どれも読むだけで、状態を変えません。`pnpm backup export` は、失敗なく `manifest.json` を書き終えたあとに `POST /api/v1/backup/complete` を送り、最終 backup export の時刻を記録します（[D-033](decisions.md)）。
 
-Client は `src/contracts/export-manifest.ts` で manifest に組み立てます。asset metadata・album 構成・object manifest・期待 SHA-256 を持つ format 1 の manifest です。1 response にまとめないのは、10 万枚で Worker の memory 上限に近づくためです（[D-024](decisions.md)）。
+Client は `src/contracts/export-manifest.ts` で manifest に組み立てます。asset metadata・album 構成・object manifest・期待 SHA-256 を持つ format 3 の manifest です。1 response にまとめないのは、10 万枚で Worker の memory 上限に近づくためです（[D-024](decisions.md)）。
 
 original 本体を含む backup（差分）、backup ディレクトリの検査、空環境への restore（再開可能）、整合性検証は、`pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)、[D-024](decisions.md)）。
 
@@ -400,7 +400,7 @@ original 本体を含む backup（差分）、backup ディレクトリの検査
 | `id` | UUID v4 の書式 | | export 元での asset ID。restore 先では別の ID になります |
 | `sha256` | 小文字 hex 64 桁 | | original の SHA-256。写真の同一性はこれだけで決まります |
 | `originalSize` | 整数 1〜100 MiB | | original の byte 数 |
-| `contentType` | `image/jpeg` \| `image/png` \| `image/webp` | | original の形式 |
+| `contentType` | `image/jpeg` \| `image/png` \| `image/webp` \| `image/heic` \| `image/heif` | | original の形式（[D-030](decisions.md)） |
 | `filename` | 1〜255 文字 | ✓ | upload 時のファイル名。object key には使いません |
 | `width` / `height` | 正の整数 | ✓ | pixel |
 | `takenAt` | ISO 8601 date-time（offset 任意） | ✓ | EXIF の撮影日時。**instant ではなく壁時計**で、offset の無い値をそのまま保ちます |
@@ -422,15 +422,13 @@ shape とは別に、次を満たさない manifest は拒否します。
 - 1 つの album が同じ写真を 2 回挙げること
 - `assets` に無い写真への membership
 
-versioning:
+versioning（[D-035](decisions.md)）:
 
 - reader は知らない `formatVersion` を部分的に読まずに拒否します
-- reader は知らない key を無視します。したがって既存の version に足してよいのは、**その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field だけ**です。10 年後に古い CLI がこの backup を読む可能性を前提にします
-- 上の条件を満たさない追加、および既存 field の意味・書式・必須性の変更では `formatVersion` を上げます
-- 現在の reader は v1・v2・v3 を読みます。新規 export は v3 です。version ごとの契約の違いは次の 2 つです
-  - v2 から HEIC / HEIF の original を持てる（[D-030](decisions.md)）
-  - v3 から `uploadedBy` が必須。v1 / v2 の写真は `uploadedBy: null` として読みます（[D-034](decisions.md)）
-- 未公開の旧形式への fallback は持ちません
+- reader は知らない key も拒否します（manifest・`assets[]`・`objects`・`albums[]` のすべて）。field の追加・削除、既存 field の意味・書式・必須性の変更では `formatVersion` を上げ、reader も同じ release で変えます
+- **alpha の間**: reader が読むのは現在の version（v3）だけです。以前の alpha release が書いた v1 / v2 の backup は拒否します。古い backup は、元のライブラリから現在の CLI で取り直します
+- **v1 release 以降**: 新しい CLI は、v1 release 以降の release が書いたすべての version を読み続けます。その reader は通常の整理で削除しません。backup の長期保存で約束するのは、この「新しい CLI が古い backup を読む」ことです
+- 古い CLI が新しい CLI の書いた backup を読めること（前方互換）は約束しません。CLI はこの repository と一緒に更新します
 
 paged export は、ライブラリが変化しうる間に 1 ページずつ読みます。asset ページに無い写真への membership は組み立て時に落とすので、manifest が知らない写真を指すことはありません。
 
