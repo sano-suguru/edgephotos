@@ -117,7 +117,7 @@ Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証し�
 
 EdgePhotos が想定する利用者は 1 つの household です。Access を通過しただけでは member とみなしません。`HOUSEHOLD_EMAILS` に設定した email と一致する principal だけが private API を使えます（[D-028](decisions.md)）。
 
-member は互いに対等で、1 つの library を共同利用します。`AppPrincipal` は role を持たず、asset・album・share のどの行にも「誰が作ったか」を記録しません。したがって認可の判断は「member かどうか」だけです。
+member は互いに対等で、1 つの library を共同利用します。`AppPrincipal` は role を持ちません。asset は upload した member の email を `uploadedBy` として持ちますが、表示のためだけの値で、認可にも絞り込みにも使いません（[D-034](decisions.md)）。album・share には「誰が作ったか」を記録しません。したがって認可の判断は「member かどうか」だけです。
 
 将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とします。Native 固有の token を Worker の中で直接解釈しない形は変えません。
 
@@ -153,6 +153,7 @@ Web も将来の Native client も、同じ API を使います。
 ```text
 GET    /api/v1/me
 POST   /api/v1/uploads                          reserve
+POST   /api/v1/restore/uploads                  reserve for restore, with the backup's uploadedBy (D-034)
 POST   /api/v1/uploads/{uploadId}/finalize      idempotent
 GET    /api/v1/assets?cursor&limit&direction&favorite&trashed
 GET    /api/v1/assets/months                    写真のある年月と件数（D-031）
@@ -223,6 +224,8 @@ D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transacti
 
 asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
 
+reserve した member を `uploads.uploaded_by` に記録し、finalize が asset を作るときに `assets.uploaded_by` へ写します。finalize を呼んだ member は見ないので、別の member や storage cleanup が finalize しても変わりません。再送や duplicate は既存 asset の値を変えません。通常の reserve は upload した人を body から受け取りません。restore は `POST /api/v1/restore/uploads` で reserve し、manifest の値を `uploadedBy` で送ります（`null` を含む）。0004 より前の asset は `NULL` です。どちらも `NULL` なら API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。
+
 presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。
 
 original の PUT は、さらに申告 SHA-256 を `x-amz-checksum-sha256`（raw digest の base64）として署名します。R2 は body の digest が一致しない PUT を拒否し、object を作りません。Client はこの header を省略も変更もできません（[D-018](decisions.md)）。
@@ -231,7 +234,7 @@ finalize は upload の期限を見ません。期限内に PUT が済んでい�
 
 中断した upload は、member が実行する storage cleanup が片付けます。3 object が揃って検査を通るものは finalize して写真にし、それ以外は終端状態にしてから、その upload の key の object だけを消します。実行の条件と閾値は [D-023](decisions.md) にあります。
 
-reserve の `metadata.createdAt`（任意、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。
+restore の reserve（`POST /api/v1/restore/uploads`）の `metadata.createdAt`（必須、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。通常の reserve は `metadata.createdAt` を `400` で拒否します。以前の restore client が通常の endpoint で成功し、restore を実行した member を記録しないためです（[D-034](decisions.md)）。
 
 失敗した upload をどこからやり直すかは Client が決めます。Server 側の契約は、finalize が冪等であることと、presigned URL が期限内に限り再利用できることです（[D-020](decisions.md)）。
 
@@ -376,14 +379,14 @@ Client は `src/contracts/export-manifest.ts` で manifest に組み立てます
 
 original 本体を含む backup（差分）、backup ディレクトリの検査、空環境への restore（再開可能）、整合性検証は、`pnpm backup` CLI が公開 API 経由で行います（[D-015](decisions.md)、[D-024](decisions.md)）。
 
-### backup manifest v2
+### backup manifest v3
 
 `manifest.json`（backup ディレクトリ）と、ライブラリ画面からダウンロードする JSON は同じ contract です。shape は `ExportManifestSchema`（`src/contracts/schemas.ts`）、整合性の規則は `manifestIntegrityIssues`（`src/contracts/export-manifest.ts`）が定義します（[D-025](decisions.md)）。
 
 ```jsonc
 {
   "format": "edgephotos-export",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "exportedAt": "2026-09-18T04:05:06.789Z",
   "assets": [ /* ... */ ],
   "albums": [ /* ... */ ]
@@ -404,6 +407,7 @@ original 本体を含む backup（差分）、backup ディレクトリの検査
 | `isFavorite` | boolean | | |
 | `trashedAt` | instant | ✓ | 非 null なら trash 内。restore 先でも trash に入ります |
 | `createdAt` | instant | | ライブラリに入った時刻。restore が送り直すので保たれます |
+| `uploadedBy` | 小文字 email | ✓ | upload した household member。null は記録なし。restore が送り直すので保たれます（v3 から。[D-034](decisions.md)） |
 | `objects` | `{ original, thumbnail, preview }` | | export 時点の R2 key。R2 の生 dump から手で戻すための記述で、CLI は読みません |
 
 `albums[]` の field は 4 つです。`id`（UUID v4 の書式）、`title`（1〜200 文字、保存されている綴りのまま = 前後の空白なし）、`createdAt`（instant）、`assetIds`（この manifest の `assets` にある ID。順序に意味はありません）。
@@ -423,7 +427,9 @@ versioning:
 - reader は知らない `formatVersion` を部分的に読まずに拒否します
 - reader は知らない key を無視します。したがって既存の version に足してよいのは、**その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field だけ**です。10 年後に古い CLI がこの backup を読む可能性を前提にします
 - 上の条件を満たさない追加、および既存 field の意味・書式・必須性の変更では `formatVersion` を上げます
-- 現在の reader は v1 と v2 を読みます。新規 export は v2 です。version ごとの契約の違いは、v2 が HEIC / HEIF の original を持てることだけです（[D-030](decisions.md)）
+- 現在の reader は v1・v2・v3 を読みます。新規 export は v3 です。version ごとの契約の違いは次の 2 つです
+  - v2 から HEIC / HEIF の original を持てる（[D-030](decisions.md)）
+  - v3 から `uploadedBy` が必須。v1 / v2 の写真は `uploadedBy: null` として読みます（[D-034](decisions.md)）
 - 未公開の旧形式への fallback は持ちません
 
 paged export は、ライブラリが変化しうる間に 1 ページずつ読みます。asset ページに無い写真への membership は組み立て時に落とすので、manifest が知らない写真を指すことはありません。

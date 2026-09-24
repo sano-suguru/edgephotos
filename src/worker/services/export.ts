@@ -28,6 +28,7 @@ export async function exportAssetsPage(db: Db, after: string | undefined, limit:
       isFavorite: a.is_favorite === 1,
       trashedAt: a.trashed_at,
       createdAt: a.created_at,
+      uploadedBy: a.uploaded_by,
       objects: assetObjectKeys(a.id),
     })),
     nextAfter,

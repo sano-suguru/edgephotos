@@ -445,6 +445,8 @@ export function AssetViewer(props: {
             <dd>{asset.contentType}</dd>
             <dt class="text-on-stage-muted">追加日時</dt>
             <dd>{formatDateTime(captureParts({ takenAt: null, createdAt: asset.createdAt }))}</dd>
+            <dt class="text-on-stage-muted">最初に追加した人</dt>
+            <dd class="break-all">{asset.uploadedBy ?? '記録なし'}</dd>
           </dl>
           {/* The stored file is what the browser handed over, not necessarily the camera's file. */}
           <p class="mt-3 text-xs text-on-stage-muted">

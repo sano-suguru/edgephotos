@@ -9,13 +9,17 @@ import {
   restoreLibrary,
   verifyLibrary,
 } from '../../scripts/lib/backup'
+import { EXPORT_FORMAT_VERSION } from '../../src/contracts/export-manifest'
 import {
   apiClient,
   call,
   callJson,
   clock,
   heicFixture,
+  MEMBER_A,
+  MEMBER_B,
   makeApp,
+  memberToken,
   photo,
   putObject,
   reserve,
@@ -129,6 +133,92 @@ describe('export and restore to an empty environment', () => {
     await expect(restoreLibrary(apiClient(target), store)).rejects.toThrow(/not empty/)
   })
 
+  it('carries each uploader across backup and restore, and does not credit the member restoring', async () => {
+    await emptyRestoreEnvironment()
+    const source = await makeApp({ which: 'primary' })
+    const fromA = (await uploadPhoto(source)).result.asset
+    const p = await photo()
+    const r = await callJson(source, 'POST', '/api/v1/uploads', {
+      expect: 201,
+      token: await memberToken(MEMBER_B),
+      body: {
+        original: { size: p.original.byteLength, contentType: 'image/jpeg', sha256: p.sha256 },
+        thumbnail: { size: p.thumbnail.byteLength },
+        preview: { size: p.preview.byteLength },
+        metadata: {},
+      },
+    })
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(source, r.targets[v], p[v])
+    const fromB = (await callJson(source, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })).asset
+    const legacy = (await uploadPhoto(source)).result.asset
+    await env.DB.prepare('UPDATE assets SET uploaded_by = NULL WHERE id = ?').bind(legacy.id).run()
+
+    const store = memoryStore()
+    await backupLibrary(apiClient(source), store)
+    const manifest = await readManifest(store)
+    const bySha = (items: { sha256: string; uploadedBy: string | null }[]) =>
+      Object.fromEntries(items.map((i) => [i.sha256, i.uploadedBy]))
+    expect(bySha(manifest.assets)).toMatchObject({
+      [fromA.sha256]: MEMBER_A,
+      [fromB.sha256]: MEMBER_B,
+      [legacy.sha256]: null,
+    })
+
+    // apiClient restores as MEMBER_A: neither B's photo nor the unrecorded one becomes A's.
+    const target = await makeApp({ which: 'restore' })
+    await restoreLibrary(apiClient(target), store)
+    const restored = (await callJson(target, 'GET', '/api/v1/assets?limit=200')).items
+    expect(bySha(restored)).toMatchObject({
+      [fromA.sha256]: MEMBER_A,
+      [fromB.sha256]: MEMBER_B,
+      [legacy.sha256]: null,
+    })
+    expect(await verifyLibrary(apiClient(target), manifest)).toMatchObject({ ok: true, problems: [] })
+
+    // A changed uploader is a difference verify reports.
+    await env.RESTORE_DB.prepare('UPDATE assets SET uploaded_by = NULL WHERE sha256 = ?').bind(fromB.sha256).run()
+    expect((await verifyLibrary(apiClient(target), manifest)).problems).toContain(
+      `asset ${fromB.sha256}: uploadedBy differs`,
+    )
+  })
+
+  it('restores a v2 backup with every uploader unrecorded, and verifies it against that backup', async () => {
+    await emptyRestoreEnvironment()
+    const source = await makeApp({ which: 'primary' })
+    const photoOfB = await photo()
+    const r = await callJson(source, 'POST', '/api/v1/uploads', {
+      expect: 201,
+      token: await memberToken(MEMBER_B),
+      body: {
+        original: { size: photoOfB.original.byteLength, contentType: 'image/jpeg', sha256: photoOfB.sha256 },
+        thumbnail: { size: photoOfB.thumbnail.byteLength },
+        preview: { size: photoOfB.preview.byteLength },
+        metadata: {},
+      },
+    })
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(source, r.targets[v], photoOfB[v])
+    await callJson(source, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
+
+    const store = memoryStore()
+    await backupLibrary(apiClient(source), store)
+    // What an export before v3 wrote: the same manifest without uploaders.
+    const current = JSON.parse(new TextDecoder().decode(store.files.get('manifest.json')))
+    const v2 = {
+      ...current,
+      formatVersion: 2,
+      assets: current.assets.map(({ uploadedBy: _, ...a }: Record<string, unknown>) => a),
+    }
+    store.files.set('manifest.json', new TextEncoder().encode(JSON.stringify(v2)))
+
+    const target = await makeApp({ which: 'restore' })
+    await restoreLibrary(apiClient(target), store)
+    const restored = (await callJson(target, 'GET', '/api/v1/assets?limit=200')).items
+    expect(restored.length).toBeGreaterThan(0)
+    expect(restored.every((i: { uploadedBy: string | null }) => i.uploadedBy === null)).toBe(true)
+    // The source still has its uploaders; a v2 backup cannot express them, so verify does not call it a difference.
+    expect(await verifyLibrary(apiClient(source), await readManifest(store))).toMatchObject({ ok: true, problems: [] })
+  })
+
   it('keeps HEIC original bytes and checksum across export and restore', async () => {
     await emptyRestoreEnvironment()
     const source = await makeApp({ which: 'primary' })
@@ -146,7 +236,7 @@ describe('export and restore to an empty environment', () => {
     const store = memoryStore()
     await backupLibrary(apiClient(source), store)
     const manifest = await readManifest(store)
-    expect(manifest.formatVersion).toBe(2)
+    expect(manifest.formatVersion).toBe(EXPORT_FORMAT_VERSION)
     expect(manifest.assets.find((a) => a.sha256 === fixture.sha256)?.contentType).toBe('image/heic')
     // The backup holds the original bytes themselves, not a re-encoding of them.
     expect(store.files.get(`originals/${fixture.sha256}`)).toEqual(original)
@@ -176,7 +266,7 @@ describe('export and restore to an empty environment', () => {
           retryDelayMs: () => 0,
           // Every third API call fails before reaching the Worker. Creating POSTs are never repeated, so spare them.
           api: async (path: string, init?: RequestInit) => {
-            const creates = init?.method === 'POST' && (path === '/api/v1/albums' || path === '/api/v1/uploads')
+            const creates = init?.method === 'POST' && (path === '/api/v1/albums' || path === '/api/v1/restore/uploads')
             if (++calls % 3 === 0 && !creates) {
               injected.unavailable++
               return new Response('unavailable', { status: 503 })
@@ -228,7 +318,7 @@ describe('export and restore to an empty environment', () => {
       // The reservation is created, then the response is lost.
       api: async (path: string, init?: RequestInit) => {
         const res = await inner.api(path, init)
-        if (path === '/api/v1/uploads' && init?.method === 'POST') {
+        if (path === '/api/v1/restore/uploads' && init?.method === 'POST') {
           reserves++
           throw new TypeError('network connection lost')
         }

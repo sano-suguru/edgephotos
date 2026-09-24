@@ -28,6 +28,15 @@ export const ShareIdSchema = z
 
 export const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, 'Expected lowercase hex SHA-256')
 
+// A household member's email as EdgePhotos stores it: an entry HOUSEHOLD_EMAILS accepts (src/worker/env.ts
+// reads the list with this same rule), lowercased. Deliberately not a stricter email grammar: a recorded
+// uploader passed this rule, and a backup must never be refused for a value the Worker itself wrote.
+export const MEMBER_EMAIL_RE = /^[^\s@,]+@[^\s@,]+$/
+export const MemberEmailSchema = z
+  .string()
+  .regex(MEMBER_EMAIL_RE, 'Expected an email address')
+  .refine((value) => value === value.toLowerCase(), 'Expected the stored (lowercase) email')
+
 // ISO 8601 date-time. The offset is optional because EXIF often lacks timezone information.
 export const TakenAtSchema = z
   .string()
@@ -61,6 +70,11 @@ export const AssetSummarySchema = z
     isFavorite: z.boolean(),
     trashedAt: z.string().nullable(),
     createdAt: z.string(),
+    // Email of the household member who first uploaded these bytes (D-034): the member who reserved the upload,
+    // or for a restored photo the value its backup recorded. Null when it was not recorded: photos from before
+    // it was recorded, or restored from a backup that did not carry it. Display only: every member has the
+    // same rights over every asset.
+    uploadedBy: MemberEmailSchema.nullable(),
     thumbnailUrl: z.url(),
     urlsExpireAt: z.string(),
   })
@@ -101,28 +115,51 @@ export const SignedUrlSchema = z.object({ url: z.url(), expiresAt: z.string() })
 
 // ---- Uploads ----
 
-export const UploadReserveSchema = z
-  .object({
-    original: z.object({
-      size: z.number().int().positive().max(LIMITS.originalMaxBytes),
-      contentType: z.enum(ORIGINAL_CONTENT_TYPES),
-      sha256: Sha256Schema,
-    }),
-    thumbnail: z.object({ size: z.number().int().positive().max(LIMITS.thumbnailMaxBytes) }),
-    preview: z.object({ size: z.number().int().positive().max(LIMITS.previewMaxBytes) }),
-    metadata: z
-      .object({
-        filename: z.string().min(1).max(LIMITS.filenameMax).optional(),
-        width: z.number().int().positive().optional(),
-        height: z.number().int().positive().optional(),
-        takenAt: TakenAtSchema.optional(),
-        // When the photo was first added to a library. Restore sends the value from the backup so that the
-        // timeline order of photos without a capture time survives; other clients omit it (= now).
-        createdAt: z.iso.datetime({ offset: true }).optional(),
+const UploadMetadataSchema = z.object({
+  filename: z.string().min(1).max(LIMITS.filenameMax).optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  takenAt: TakenAtSchema.optional(),
+})
+
+const UploadObjectsSchema = z.object({
+  original: z.object({
+    size: z.number().int().positive().max(LIMITS.originalMaxBytes),
+    contentType: z.enum(ORIGINAL_CONTENT_TYPES),
+    sha256: Sha256Schema,
+  }),
+  thumbnail: z.object({ size: z.number().int().positive().max(LIMITS.thumbnailMaxBytes) }),
+  preview: z.object({ size: z.number().int().positive().max(LIMITS.previewMaxBytes) }),
+})
+
+// POST /api/v1/uploads. The photo is added now, by the member making the request (D-034).
+export const UploadReserveSchema = UploadObjectsSchema.extend({
+  metadata: UploadMetadataSchema.extend({
+    // Restore-only history. Refused rather than ignored: a restore client from before D-034 sends it here, and
+    // accepting that request would record the member running the restore as the photo's uploader.
+    // (z.never() would say this more directly, but the OpenAPI generator cannot describe it.)
+    createdAt: z
+      .unknown()
+      .refine((value) => value === undefined, {
+        error: 'metadata.createdAt is for restoring a backup: use POST /api/v1/restore/uploads',
       })
-      .default({}),
-  })
-  .openapi('UploadReserve')
+      .optional()
+      .openapi({ description: 'Not accepted here. A restore sends it to POST /api/v1/restore/uploads.' }),
+  }).default({}),
+}).openapi('UploadReserve')
+
+// POST /api/v1/restore/uploads: the same reservation, for restoring a backup into a library (D-034). Only here
+// does the client state when the photo was added and by whom: the values the backup recorded. Both required,
+// uploadedBy null (not recorded) included, so a restore never credits the member running it or the time it
+// ran. The server cannot check the uploader: the photo may come from a member no longer listed.
+export const RestoreUploadReserveSchema = UploadObjectsSchema.extend({
+  metadata: UploadMetadataSchema.extend({
+    // When the photo was first added to a library, so the timeline order of photos without a capture time
+    // survives.
+    createdAt: z.iso.datetime({ offset: true }),
+  }),
+  uploadedBy: MemberEmailSchema.nullable(),
+}).openapi('RestoreUploadReserve')
 
 export const UploadTargetSchema = z
   .object({
@@ -271,6 +308,8 @@ export const ExportAssetSchema = z
     trashedAt: InstantSchema.nullable(),
     // When the photo entered a library. Restore sends it back so the timeline order survives.
     createdAt: InstantSchema,
+    // Who uploaded the photo, null if not recorded (D-034). Restore sends it back. Since v3.
+    uploadedBy: MemberEmailSchema.nullable(),
     // The R2 keys this photo had at export time, so a raw bucket dump can be matched to the manifest.
     // Descriptive only: the backup CLI stores files by SHA-256 and never reads these.
     objects: z.object({ original: z.string(), thumbnail: z.string(), preview: z.string() }),
@@ -306,6 +345,13 @@ const ExportManifestBase = z.object({
   albums: z.array(ExportAlbumSchema),
 })
 
+// v1 and v2 have no uploader. A key of that name in one is not part of its contract and is not read: the
+// photo reads as not recorded, the same asset type as v3 gives, so a reader need not branch on the version.
+const ExportAssetBeforeV3Schema = ExportAssetSchema.omit({ uploadedBy: true }).transform((asset) => ({
+  ...asset,
+  uploadedBy: null as string | null,
+}))
+
 // The version selects the contract; there is no migration step between them. A reader that does not know
 // a version refuses the whole manifest rather than reading part of it (D-025).
 export const ExportManifestSchema = z.discriminatedUnion('formatVersion', [
@@ -313,7 +359,7 @@ export const ExportManifestSchema = z.discriminatedUnion('formatVersion', [
     formatVersion: z.literal(1),
     // Checked per asset rather than with a narrower enum, so every version parses to the same asset type
     // and a reader does not have to branch on the version to use what it read.
-    assets: z.array(ExportAssetSchema).superRefine((assets, ctx) => {
+    assets: z.array(ExportAssetBeforeV3Schema).superRefine((assets, ctx) => {
       assets.forEach((a, index) => {
         if ((EXPORT_V1_CONTENT_TYPES as readonly string[]).includes(a.contentType)) return
         ctx.addIssue({
@@ -326,6 +372,10 @@ export const ExportManifestSchema = z.discriminatedUnion('formatVersion', [
   }),
   ExportManifestBase.extend({
     formatVersion: z.literal(2),
+    assets: z.array(ExportAssetBeforeV3Schema),
+  }),
+  ExportManifestBase.extend({
+    formatVersion: z.literal(3),
     assets: z.array(ExportAssetSchema),
   }),
 ])
@@ -479,6 +529,7 @@ export type Asset = z.infer<typeof AssetSchema>
 export type AssetPage = z.infer<typeof AssetPageSchema>
 export type AssetMonth = z.infer<typeof AssetMonthSchema>
 export type UploadReserve = z.input<typeof UploadReserveSchema>
+export type RestoreUploadReserve = z.input<typeof RestoreUploadReserveSchema>
 export type UploadReservation = z.infer<typeof UploadReservationSchema>
 export type UploadFinalizeResult = z.infer<typeof UploadFinalizeResultSchema>
 export type Album = z.infer<typeof AlbumSchema>

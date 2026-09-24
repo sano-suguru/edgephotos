@@ -120,7 +120,7 @@ member の追加・削除は、**Access policy と `HOUSEHOLD_EMAILS` の両方*
 
 急いで締め出す場合も同じです。`HOUSEHOLD_EMAILS` の更新だけで Worker 側は塞がります。Access policy の削除はそのあとで構いません。
 
-member を削除しても、その人が upload した写真は library に残ります。asset に「誰が作ったか」は記録していないためです（[D-028](decisions.md)）。
+member を削除しても、その人が upload した写真は library に残ります。asset に記録した upload した人（[D-034](decisions.md)）は表示のためだけの値で、所有者ではないためです（[D-028](decisions.md)）。viewer には削除した member の email がそのまま表示されます。
 
 ### `OWNER_EMAIL` から移行する
 
@@ -328,7 +328,7 @@ EdgePhotos が唯一のバックアップであるとは説明しません。
 - `pnpm backup export <dir>`: manifest に加え、original と derivative を presigned URL 経由で取得し、各 original の SHA-256 を検証して保存する
 - `pnpm backup check <dir>`: backup ディレクトリだけを読み、manifest のすべての original の SHA-256 と derivative の有無を確かめる（network 不要）
 
-`manifest.json` は format v2 に従います（[Export と restore](architecture.md#9-export-と-restore)、[D-025](decisions.md)、[D-030](decisions.md)）。v1 で書かれた backup も読めます。v1 と v2 の違いは、v2 が HEIC / HEIF の original を持てることだけです。
+`manifest.json` は format v3 に従います（[Export と restore](architecture.md#9-export-と-restore)、[D-025](decisions.md)、[D-030](decisions.md)、[D-034](decisions.md)）。v1 と v2 で書かれた backup も読めます。v2 から HEIC / HEIF の original を持てます。v3 から各写真の upload した人（`uploadedBy`）を持ちます。v1 / v2 の backup から restore した写真は、upload した人が「記録なし」になります。
 
 `check` / `restore` / `verify` は読み込み時に検証します。JSON として壊れている・contract に合わない・整合しない manifest は、ライブラリへ最初の request を送る前に、不正な field とその理由を並べて拒否します。
 

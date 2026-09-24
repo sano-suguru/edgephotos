@@ -451,10 +451,26 @@ describe('storage cleanup', () => {
   })
 })
 
-describe('reserve metadata.createdAt', () => {
+describe('restore reservation metadata.createdAt', () => {
+  const restoreBody = (p: Awaited<ReturnType<typeof photo>>, createdAt: string) => ({
+    original: { size: p.original.byteLength, contentType: 'image/jpeg', sha256: p.sha256 },
+    thumbnail: { size: p.thumbnail.byteLength },
+    preview: { size: p.preview.byteLength },
+    metadata: { createdAt },
+    uploadedBy: null,
+  })
+
   it('keeps the given upload time so photos without a capture time keep their order', async () => {
     const app = await makeApp()
-    const older = await uploadPhoto(app, undefined, { createdAt: '2015-03-04T05:06:07+09:00' })
+    const p = await photo()
+    const r = await callJson(app, 'POST', '/api/v1/restore/uploads', {
+      expect: 201,
+      body: restoreBody(p, '2015-03-04T05:06:07+09:00'),
+    })
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
+    const older = {
+      result: await callJson(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 }),
+    }
     expect(older.result.asset.createdAt).toBe('2015-03-03T20:06:07.000Z')
     const page = await callJson(app, 'GET', '/api/v1/assets?limit=200', { expect: 200 })
     const ids = page.items.map((i: { id: string }) => i.id)
@@ -469,14 +485,10 @@ describe('reserve metadata.createdAt', () => {
   it('rejects a time in the future', async () => {
     const app = await makeApp()
     const p = await photo()
-    const res = await call(app, 'POST', '/api/v1/uploads', {
-      body: {
-        original: { size: p.original.byteLength, contentType: 'image/jpeg', sha256: p.sha256 },
-        thumbnail: { size: p.thumbnail.byteLength },
-        preview: { size: p.preview.byteLength },
-        metadata: { createdAt: new Date(Date.now() + 86_400_000).toISOString() },
-      },
+    const res = await call(app, 'POST', '/api/v1/restore/uploads', {
+      body: restoreBody(p, new Date(Date.now() + 86_400_000).toISOString()),
     })
     expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: { message: string } }).error.message).toMatch(/future/)
   })
 })

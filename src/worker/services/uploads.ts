@@ -1,6 +1,6 @@
 import type { z } from '@hono/zod-openapi'
 import { and, eq, sql } from 'drizzle-orm'
-import type { UploadReserveSchema } from '../../contracts/schemas'
+import type { RestoreUploadReserveSchema, UploadReserveSchema } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
@@ -11,7 +11,7 @@ import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import { getAssetRow, purgeAsset, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
 
-type ReserveInput = z.infer<typeof UploadReserveSchema>
+type ReserveInput = z.infer<typeof UploadReserveSchema> | z.infer<typeof RestoreUploadReserveSchema>
 
 const CREATED_AT_SKEW_MS = 5 * 60 * 1000
 
@@ -23,7 +23,10 @@ function duplicateError(existing: AssetRow) {
 }
 
 // Step 1 of reserve -> presigned PUT -> finalize. The server chooses ids and object keys.
-export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
+// `uploadedBy` is fixed here, whoever later finalizes (D-034): the reserving member for a normal upload, the
+// backup's value for a restore. The route decides which; nothing in a normal upload's body can change it, and
+// only a restore's body carries metadata.createdAt.
+export async function reserveUpload(ctx: ServiceContext, input: ReserveInput, uploadedBy: string | null) {
   const existing = await findStoredAsset(ctx, input.original.sha256)
   if (existing) throw duplicateError(existing)
 
@@ -58,6 +61,7 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput) {
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
     asset_created_at: assetCreatedAt,
+    uploaded_by: uploadedBy,
   })
 
   const keys = assetObjectKeys(assetId)
@@ -200,6 +204,7 @@ export type FinalizeOutcome = { result: 'created' | 'duplicate'; asset: AssetRow
 
 // Step 3. Idempotent: replays converge on the same asset. D1 and R2 are not one transaction;
 // on any D1 failure the upload stays pending and objects are left in place for a retry.
+// Who calls it does not matter: the uploader comes from the upload row, so storage cleanup keeps it too.
 export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Promise<FinalizeOutcome> {
   const upload = await getUploadRow(ctx.db, uploadId)
   if (!upload) throw new ApiError(404, 'UPLOAD_NOT_FOUND', 'Upload not found.')
@@ -238,6 +243,7 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
               trashed_at: sql<null>`NULL`.as('trashed_at'),
               created_at: sql<string>`${createdAt}`.as('created_at'),
               updated_at: sql<string>`${ts}`.as('updated_at'),
+              uploaded_by: uploads.uploaded_by,
             })
             .from(uploads)
             .where(and(eq(uploads.id, upload.id), eq(uploads.status, 'pending'))),

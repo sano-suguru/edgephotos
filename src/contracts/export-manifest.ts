@@ -6,10 +6,12 @@ import type { ExportAlbumList, ExportAssetPage, ExportManifest, ExportMembership
 
 export const EXPORT_FORMAT = 'edgephotos-export'
 // What a new export writes. v2 added the HEIC/HEIF original content types; nothing else differs from v1.
-export const EXPORT_FORMAT_VERSION = 2
+// v3 added each photo's uploader (D-034). A new version, not an optional field: a reader that ignored it
+// would restore every photo as "not recorded" and lose that data (D-025).
+export const EXPORT_FORMAT_VERSION = 3
 // The versions this build can restore from. A backup is read years after it was written, so v1 stays
 // readable: only the contract each version was written under decides what its values may be.
-export const EXPORT_FORMAT_VERSIONS_READ = [1, 2] as const
+export const EXPORT_FORMAT_VERSIONS_READ = [1, 2, 3] as const
 
 // A library that changed under a paged export in a way the manifest cannot express. The pages themselves
 // were all valid; assembled, they describe a library that never existed. Nothing is wrong with the library
