@@ -71,6 +71,12 @@ D1 schema は `src/worker/db/schema.ts` で変更し、`pnpm db:generate <name>`
 
 適用済みの `migrations/*.sql` と `migrations/meta/_journal.json` の baseline entry（`idx: 1`）は書き換えないでください。`drizzle-kit push` は使いません。
 
+互換性の範囲（[D-035](docs/decisions.md)）:
+
+- alpha の間は、以前の alpha release の client（Web / CLI）や backup manifest との互換を約束しません。形式を変えたら reader も同じ変更で変え、古い形式は拒否してよい。保存済みのデータは、これまでどおり migration で引き継ぎます
+- v1 release 以降、新しい CLI は v1 release 以降に出たすべての manifest version を読み続けます。その reader を通常の整理で削除しないでください
+- 古い CLI が新しい backup を読めること（前方互換）は約束しません。manifest は未知の key を拒否します
+
 ## 6. 将来要件を先回りしない
 
 現在の要求や測定結果がないまま、次を追加しないでください。

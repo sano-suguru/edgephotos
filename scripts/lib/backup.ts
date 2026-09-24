@@ -6,7 +6,7 @@ import { z } from '@hono/zod-openapi'
 import {
   collectExportManifest,
   EXPORT_FORMAT,
-  EXPORT_FORMAT_VERSIONS_READ,
+  EXPORT_FORMAT_VERSION,
   manifestIntegrityIssues,
 } from '../../src/contracts/export-manifest.ts'
 import {
@@ -132,7 +132,7 @@ function fieldPath(path: readonly PropertyKey[]): string {
 
 // Rejects anything that is not a manifest this build can read, before a caller can act on it. Split in two on purpose:
 // the schema decides whether every value is well formed, manifestIntegrityIssues whether the whole is
-// consistent. Unknown keys are ignored, so a later v1 may add optional fields (D-025).
+// consistent. Unknown keys are refused along with every other value the contract does not describe (D-035).
 export function validateManifest(value: unknown, source: string): ExportManifest {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new BackupError(`${source} is not an EdgePhotos export manifest: expected a JSON object`)
@@ -144,10 +144,15 @@ export function validateManifest(value: unknown, source: string): ExportManifest
       `${source} is not an EdgePhotos export manifest: format is ${JSON.stringify(header.format)}, expected "${EXPORT_FORMAT}"`,
     )
   }
-  if (!EXPORT_FORMAT_VERSIONS_READ.some((v) => v === header.formatVersion)) {
+  if (header.formatVersion !== EXPORT_FORMAT_VERSION) {
+    // During alpha a release reads only the version it writes (D-035). An older backup cannot be converted
+    // here: the only way forward is a new backup of the library it came from, if that library still exists.
+    const older = typeof header.formatVersion === 'number' && header.formatVersion < EXPORT_FORMAT_VERSION
     throw new BackupError(
-      `${source} has formatVersion ${JSON.stringify(header.formatVersion)}; this version reads ${EXPORT_FORMAT_VERSIONS_READ.slice(0, -1).join(', ')} and ${EXPORT_FORMAT_VERSIONS_READ.at(-1)}. ` +
-        'Use the EdgePhotos release that wrote this backup.',
+      `${source} has formatVersion ${JSON.stringify(header.formatVersion)}; this version reads only ${EXPORT_FORMAT_VERSION}. ` +
+        (older
+          ? 'Backups written by an earlier alpha release are not readable. If the library it came from still exists, create a new backup of it with this release (pnpm backup export).'
+          : 'Use the EdgePhotos release that wrote this backup.'),
     )
   }
   const parsed = ExportManifestSchema.safeParse(value)
@@ -580,13 +585,9 @@ export async function verifyLibrary(
       'takenAt',
       'isFavorite',
       'createdAt',
+      'uploadedBy',
     ] as const) {
       if (a[field] !== e[field]) problems.push(`asset ${e.sha256}: ${field} differs`)
-    }
-    // The one field compared by version: a v1 / v2 backup reads every uploader as null because it cannot
-    // express one, so a live library that has them has not diverged from it.
-    if (expected.formatVersion >= 3 && a.uploadedBy !== e.uploadedBy) {
-      problems.push(`asset ${e.sha256}: uploadedBy differs`)
     }
     if ((a.trashedAt === null) !== (e.trashedAt === null)) problems.push(`asset ${e.sha256}: trash state differs`)
   }
