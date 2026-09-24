@@ -225,7 +225,7 @@ export async function cleanupUploads(ctx: ServiceContext, limit: number): Promis
   )
   for (const row of pending.slice(0, limit)) {
     try {
-      const outcome = await finalizeUpload(ctx, row.id, null)
+      const outcome = await finalizeUpload(ctx, row.id)
       if (outcome.result === 'created') result.completed.push(outcome.asset.id)
       else result.cleared += (await clearSettledUpload(ctx, row)) ? 1 : 0
     } catch (err) {

@@ -8,7 +8,7 @@
 
 ## upload した人の記録（2026-09-24）
 
-finalize で新しく作られた写真に、finalize した household member の email を記録します。viewer の「情報」に「追加した人」として表示します。記録の無い写真（この変更より前の写真、backup から restore した写真、storage cleanup が完了させた写真）は「記録なし」と表示します。
+新しく upload した写真に、upload を始めた（reserve した）household member の email を記録します。viewer の「情報」に「追加した人」として表示します。記録の無い写真（この変更より前の写真、backup から restore した写真）は「記録なし」と表示します。
 
 API の asset（一覧と 1 件）に `uploadedBy`（email または `null`）が増えます。権限・一覧・favorite・album・trash・share・backup の manifest は変わりません（[D-034](decisions.md)）。
 

@@ -254,7 +254,7 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - 未認証 private API が拒否される。
 - Access user でも household 外の email は拒否される。
 - 設定した 2 人の member がどちらも同じ library を読み書きできる。
-- 2 人の member が finalize した写真は、それぞれの upload した人を区別して記録する。記録の無い写真も読み書きでき、upload した人を補わない（[D-034](decisions.md)）。
+- 2 人の member が upload した写真は、それぞれの upload した人を区別して記録する。別の member や storage cleanup が finalize しても、reserve した member が残る。記録の無い写真も読み書きでき、upload した人を補わない（[D-034](decisions.md)）。
 - Access 設定異常時に private data を返さない。
 - share secret 不正 / expired / revoked を拒否する。
 - 別 album の asset を share から取得できない。

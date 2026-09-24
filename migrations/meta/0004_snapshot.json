@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7f94cd87-8b47-435c-a4ea-46636292859a",
+  "id": "aa4e6387-c55c-4e2d-979d-e160aa73218c",
   "prevId": "d48e1d27-1cd0-4f00-bcc7-0e2aff21defe",
   "tables": {
     "album_assets": {
@@ -493,6 +493,13 @@
         },
         "asset_created_at": {
           "name": "asset_created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "uploaded_by": {
+          "name": "uploaded_by",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

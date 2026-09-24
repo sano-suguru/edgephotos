@@ -25,9 +25,9 @@ export const assets = sqliteTable(
     trashed_at: text(),
     created_at: text().notNull(),
     updated_at: text().notNull(),
-    // The member (normalized AppPrincipal.email) whose request finalized the upload. Attribution only: it
-    // never decides who may read or change the asset (docs/decisions.md D-034). NULL when it was not
-    // recorded: assets from before 0004, restored from a backup, or completed by storage cleanup.
+    // Copied from uploads.uploaded_by when the asset is created. Attribution only: it never decides who may
+    // read or change the asset (docs/decisions.md D-034). NULL when it was not recorded: assets from before
+    // 0004, or restored from a backup.
     uploaded_by: text(),
   },
   (t) => [
@@ -74,6 +74,9 @@ export const uploads = sqliteTable(
     finalized_at: text(),
     // assets.created_at to use instead of this row's created_at (restore keeps the original upload time).
     asset_created_at: text(),
+    // The member (normalized AppPrincipal.email) who reserved this upload: the only request that both carries
+    // a verified identity and starts the upload (the PUTs go straight to R2). NULL for a restore (D-034).
+    uploaded_by: text(),
   },
   (t) => [
     index('uploads_status').on(t.status, t.created_at),

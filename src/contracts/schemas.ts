@@ -61,9 +61,9 @@ export const AssetSummarySchema = z
     isFavorite: z.boolean(),
     trashedAt: z.string().nullable(),
     createdAt: z.string(),
-    // Email of the household member who uploaded the photo. Null when it was not recorded (photos from
-    // before this was recorded, restored from a backup, or completed by storage cleanup). Display only:
-    // every member has the same rights over every asset.
+    // Email of the household member who reserved the upload. Null when it was not recorded (photos from
+    // before this was recorded, or restored from a backup). Display only: every member has the same rights
+    // over every asset.
     uploadedBy: z.string().nullable(),
     thumbnailUrl: z.url(),
     urlsExpireAt: z.string(),

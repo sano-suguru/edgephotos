@@ -918,13 +918,17 @@ POST に分けると、backup CLI が backup export を終えたときだけ記�
 
 household の 2 人が同じ library に写真を入れるので、viewer で「どちらが追加した写真か」を見分けたい、という要求が出ました。[D-028](#d-028-許可した複数の-email-が-1-つの-library-を対等に共同利用する) は `created_by` を「誰も読まない列」として見送り、「member ごとの表示を実際に必要としたとき」を再検討の条件にしていました。その条件が満たされたので、表示のための列を足します。D-028 の本文は書き換えません。
 
-`assets` に nullable な `uploaded_by`（text）を足します（`0004_asset_uploaded_by`）。API の asset（`AssetSummary` / `Asset`）は `uploadedBy: string | null` を返します。
+`uploads` と `assets` に nullable な `uploaded_by`（text）を足します（`0004_asset_uploaded_by`）。API の asset（`AssetSummary` / `Asset`）は `uploadedBy: string | null` を返します。
 
-**記録するのは、asset を作った finalize の request の member。** 値は `AppPrincipal.email`（正規化済み）です。Access の `sub` は IdP を変えると変わり、`HOUSEHOLD_EMAILS` とも照合できないので使いません。reserve と PUT と finalize は通常同じ client が続けて行うので、finalize した member が upload した member です。
+**記録するのは、upload を reserve した member。** reserve の時点で `uploads.uploaded_by` に書き、finalize は asset を作るときにその値を写すだけです。finalize を呼んだ member は見ません。
+
+reserve を選ぶのは、Worker が検証済みの identity を持ち、かつ upload を始める request がそれだけだからです。original の PUT は presigned URL で R2 へ直接届くので、Access の identity を持ちません。finalize は upload の結果を確かめる request で、別の member や storage cleanup が行うこともあります。「finalize した人」を記録すると、reserve と finalize が同じ client の間だけ正しい値になります。
+
+値は `AppPrincipal.email`（正規化済み）です。Access の `sub` は IdP を変えると変わり、`HOUSEHOLD_EMAILS` とも照合できないので使いません。
 
 - finalize の再送と duplicate は、既存 asset の値を変えない（asset を作る INSERT は `pending` の upload にしか効かない）。同じ bytes を後から upload した member は、upload した人になりません
-- restore（reserve に `metadata.createdAt` がある）で作った asset は `NULL`。restore を実行した member は写真を upload した人ではなく、manifest v1 は upload した人を持たないため
-- storage cleanup が完了させた upload も `NULL`。cleanup を実行した member の request は、その upload ではないため
+- 別の member が finalize しても、storage cleanup が完了させても、reserve した member が残ります
+- restore（reserve に `metadata.createdAt` がある）で作った asset は `NULL`。restore を実行した member は写真を upload した人ではなく、manifest も upload した人を持たないため
 
 **記録の無い写真は「記録なし」と表示し、推測で埋めない。** migration は既存の行を `NULL` のまま残します。backfill はしません。どの member が upload したかを示す記録が他に無いからです。
 
@@ -934,17 +938,20 @@ household の 2 人が同じ library に写真を入れるので、viewer で「
 - 絞り込み・並べ替え・member ごとの timeline / favorite / album / trash を作らない。index も張らない
 - role・招待・user ごとの library を入れない
 
-**公開面と backup には出さない。** 共有ページの response（`SharedAsset`）と export の manifest（`ExportAsset`）は変えません。member の email を共有相手へ渡さないためです。manifest v1 は「無視しても restore でデータを失わない optional field だけを足せる」契約なので（[D-025](#d-025-backup-manifest-を-v1-として確定し読み込み時に検証する)）、upload した人を足すなら formatVersion を上げることになります。今回はそこまで広げません。
+**公開面と backup には出さない。** 共有ページの response（`SharedAsset`）と export の manifest（`ExportAsset`）は変えません。member の email を共有相手へ渡さないためです。
+
+manifest の現在の formatVersion は 2 です（[D-030](#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める)）。manifest に足してよいのは「無視しても restore でデータを失わない optional field」だけです（[D-025](#d-025-backup-manifest-を-v1-として確定し読み込み時に検証する)）。upload した人を v2 のまま足すと、それを知らない reader は field を無視して restore し、upload した人を失います。この条件に当たらないので、足すなら v3 へ上げることになります。今回はそこまで広げません。
 
 却下した案:
 
-- reserve 時に `uploads` にも記録して finalize で写す: 列が 2 つになる。reserve と finalize を別の member が行う client は無い
+- finalize を呼んだ member を記録する: 列は `assets` の 1 つで済むが、記録されるのは「finalize した人」で、upload した人とは別の事実になる。別 member の finalize では別人になり、storage cleanup では記録が消える
 - `sub` を記録する: 上のとおり、表示できず IdP の変更で意味を失う
 - restore を実行した member を記録する: upload した人を作り出すことになる
 
 影響:
 
 - 更新時に `0004_asset_uploaded_by` を適用する。既存の写真は「記録なし」と表示される
+- 適用より前に reserve して、適用後に finalize した upload も「記録なし」になる。reserve の時点で記録していないため
 - API の asset に `uploadedBy` が増える。読むのは Web だけで、この repository と一緒に更新する
 
 残るリスク:
@@ -955,5 +962,5 @@ household の 2 人が同じ library に写真を入れるので、viewer で「
 
 再検討する条件:
 
-- backup をまたいで upload した人を残す必要が出たとき（manifest の formatVersion を上げる）
+- backup をまたいで upload した人を残す必要が出たとき（manifest を v3 へ上げる）
 - 表示だけでなく、upload した人で権限や一覧を分ける要求が出たとき（D-028 の見直しとして扱う）

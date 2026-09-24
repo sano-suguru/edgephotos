@@ -1,10 +1,11 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import type { Asset, UploadFinalizeResult, UploadReservation } from '../../src/contracts/schemas'
+import type { Asset, StorageCleanupResult, UploadFinalizeResult, UploadReservation } from '../../src/contracts/schemas'
 import {
   assetIdFromTarget,
   call,
   callJson,
+  clock,
   MEMBER_A,
   MEMBER_B,
   makeApp,
@@ -296,6 +297,35 @@ describe('uploader attribution', () => {
     expect(second.asset.uploadedBy).toBe(MEMBER_A)
     // A replay by the other member does not rewrite it either.
     expect((await finalize(a.upload.id, MEMBER_B)).asset.uploadedBy).toBe(MEMBER_A)
+  })
+
+  it('keeps the member who reserved as the uploader, whoever finalizes', async () => {
+    const app = await makeApp()
+    const p = await photo()
+    const r = await reserveAs(app, MEMBER_A, p)
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
+    const done = await callJson<UploadFinalizeResult>(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, {
+      expect: 200,
+      token: await memberToken(MEMBER_B),
+    })
+    expect(done.result).toBe('created')
+    expect(done.asset.uploadedBy).toBe(MEMBER_A)
+  })
+
+  it('keeps the uploader of an upload that storage cleanup completes for another member', async () => {
+    const DAY = 24 * 60 * 60 * 1000
+    const old = await makeApp({ clock: clock(Date.now() - 3 * DAY) })
+    const p = await photo()
+    const r = await reserveAs(old, MEMBER_A, p)
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(old, r.targets[v], p[v])
+
+    const app = await makeApp()
+    const token = await memberToken(MEMBER_B)
+    const res = await callJson<StorageCleanupResult>(app, 'POST', '/api/v1/storage/cleanup', { expect: 200, token })
+    const assetId = assetIdFromTarget(r.targets.original.url).slice('originals/'.length)
+    expect(res.completed).toContain(assetId)
+    const asset = await callJson<Asset>(app, 'GET', `/api/v1/assets/${assetId}`, { expect: 200, token })
+    expect(asset.uploadedBy).toBe(MEMBER_A)
   })
 
   it('does not attribute a restored photo to the member running the restore', async () => {

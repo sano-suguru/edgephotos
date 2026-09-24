@@ -210,7 +210,7 @@ export function createApp(options: AppOptions) {
         ...errorResponses,
       },
     }),
-    async (c) => c.json(await uploads.reserveUpload(svc(c), c.req.valid('json')), 201),
+    async (c) => c.json(await uploads.reserveUpload(svc(c), c.req.valid('json'), c.get('principal').email), 201),
   )
 
   app.openapi(
@@ -228,7 +228,7 @@ export function createApp(options: AppOptions) {
       },
     }),
     async (c) => {
-      const outcome = await uploads.finalizeUpload(svc(c), c.req.valid('param').uploadId, c.get('principal').email)
+      const outcome = await uploads.finalizeUpload(svc(c), c.req.valid('param').uploadId)
       return c.json({ result: outcome.result, asset: await assets.toAsset(svc(c), outcome.asset) }, 200)
     },
   )

@@ -223,7 +223,7 @@ D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transacti
 
 asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
 
-asset を作った finalize の request の member を `assets.uploaded_by` に記録します。再送や duplicate は既存 asset の値を変えません。restore（`metadata.createdAt` 付き）と storage cleanup が作った asset、および 0004 より前の asset は `NULL` で、API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。
+reserve した member を `uploads.uploaded_by` に記録し、finalize が asset を作るときに `assets.uploaded_by` へ写します。finalize を呼んだ member は見ないので、別の member や storage cleanup が finalize しても変わりません。再送や duplicate は既存 asset の値を変えません。restore（`metadata.createdAt` 付き）で作った asset と 0004 より前の asset は `NULL` で、API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。
 
 presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。
 
