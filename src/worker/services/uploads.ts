@@ -1,6 +1,6 @@
 import type { z } from '@hono/zod-openapi'
 import { and, eq, sql } from 'drizzle-orm'
-import type { UploadReserveSchema } from '../../contracts/schemas'
+import type { RestoreUploadReserveSchema, UploadReserveSchema } from '../../contracts/schemas'
 import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
@@ -11,7 +11,7 @@ import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import { getAssetRow, purgeAsset, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
 
-type ReserveInput = z.infer<typeof UploadReserveSchema>
+type ReserveInput = z.infer<typeof UploadReserveSchema> | z.infer<typeof RestoreUploadReserveSchema>
 
 const CREATED_AT_SKEW_MS = 5 * 60 * 1000
 
@@ -24,7 +24,8 @@ function duplicateError(existing: AssetRow) {
 
 // Step 1 of reserve -> presigned PUT -> finalize. The server chooses ids and object keys.
 // `uploadedBy` is fixed here, whoever later finalizes (D-034): the reserving member for a normal upload, the
-// backup's value for a restore. The route decides which; nothing in the request body can change a normal one.
+// backup's value for a restore. The route decides which; nothing in a normal upload's body can change it, and
+// only a restore's body carries metadata.createdAt.
 export async function reserveUpload(ctx: ServiceContext, input: ReserveInput, uploadedBy: string | null) {
   const existing = await findStoredAsset(ctx, input.original.sha256)
   if (existing) throw duplicateError(existing)

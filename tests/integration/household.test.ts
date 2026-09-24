@@ -335,9 +335,30 @@ describe('uploader attribution', () => {
     expect(claimsA.asset.uploadedBy).toBe(MEMBER_B)
     const claimsNone = (await uploadAs(app, MEMBER_B, undefined, { uploadedBy: null })).result
     expect(claimsNone.asset.uploadedBy).toBe(MEMBER_B)
-    // Sending an upload time (what restore also sends) does not make an upload a restore.
-    const withTime = (await uploadAs(app, MEMBER_B, undefined, { createdAt: '2020-01-02T03:04:05.000Z' })).result
-    expect(withTime.asset.uploadedBy).toBe(MEMBER_B)
+  })
+
+  it('refuses a restore sent as a normal upload, instead of crediting the member restoring', async () => {
+    const app = await makeApp()
+    const p = await photo()
+    // What a restore client from before D-034 sends: the backup's upload time, on the normal endpoint.
+    const res = await call(app, 'POST', '/api/v1/uploads', {
+      token: await memberToken(MEMBER_B),
+      body: {
+        original: { size: p.original.byteLength, contentType: 'image/jpeg', sha256: p.sha256 },
+        thumbnail: { size: p.thumbnail.byteLength },
+        preview: { size: p.preview.byteLength },
+        metadata: { createdAt: '2020-01-02T03:04:05.000Z' },
+      },
+    })
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error: { code: string; message: string; details?: unknown } }
+    expect(body.error.code).toBe('VALIDATION_FAILED')
+    expect(JSON.stringify(body.error)).toContain('/api/v1/restore/uploads')
+    // Nothing was reserved, so nothing can later become an asset credited to B.
+    const reserved = await env.DB.prepare('SELECT COUNT(*) AS n FROM uploads WHERE sha256 = ?')
+      .bind(p.sha256)
+      .first<{ n: number }>()
+    expect(reserved?.n).toBe(0)
   })
 
   describe('restore reservation', () => {
@@ -370,6 +391,22 @@ describe('uploader attribution', () => {
     it('records the uploader the backup names, null included, instead of the member restoring', async () => {
       expect((await restoreAs(MEMBER_B, MEMBER_A))?.asset.uploadedBy).toBe(MEMBER_A)
       expect((await restoreAs(MEMBER_B, null))?.asset.uploadedBy).toBeNull()
+    })
+
+    it('requires the upload time to be stated', async () => {
+      const app = await makeApp()
+      const p = await photo()
+      const res = await call(app, 'POST', '/api/v1/restore/uploads', {
+        token: await memberToken(MEMBER_A),
+        body: {
+          original: { size: p.original.byteLength, contentType: 'image/jpeg', sha256: p.sha256 },
+          thumbnail: { size: p.thumbnail.byteLength },
+          preview: { size: p.preview.byteLength },
+          metadata: {},
+          uploadedBy: null,
+        },
+      })
+      expect(res.status).toBe(400)
     })
 
     it('requires the uploader to be stated, and to be a stored member email', async () => {

@@ -931,11 +931,15 @@ reserve を選ぶのは、Worker が検証済みの identity を持ち、かつ 
 
 **通常の upload では、client は upload した人を指定できない。** `POST /api/v1/uploads` の body には upload した人の field がありません。送っても読まず、reserve した member を記録します。`null` を送って「記録なし」にすることもできません。通常の upload の値は、client が変えられない事実です。
 
-**restore は別の endpoint で、upload した人を明示して送る。** `POST /api/v1/restore/uploads` は、`POST /api/v1/uploads` と同じ reserve に `uploadedBy`（必須、`null` を含む）を足したものです。`pnpm backup restore` は manifest の値を必ず送ります。restore を実行した member は写真を upload した人ではないためです。finalize は通常の upload と同じです。
+**restore は別の endpoint で、upload した人と upload 時刻を明示して送る。** `POST /api/v1/restore/uploads` は、`POST /api/v1/uploads` と同じ reserve に `uploadedBy`（必須、`null` を含む）と `metadata.createdAt`（必須）を足したものです。`pnpm backup restore` は manifest の値を必ず送ります。restore を実行した member は写真を upload した人ではないためです。finalize は通常の upload と同じです。
 
 入口を分けるのは、「この request を送った member」という事実と、「backup が記録していた過去の値」を同じ field で受け付けないためです。1 つの field で両方を受けると、どの client も通常の upload で任意の値を書けます。
 
-`metadata.createdAt` の有無では判定しません。upload 時刻を送ることと、upload した人が誰かは別の事実です。通常の reserve に `createdAt` を送っても、reserve した member が記録されます。
+**通常の reserve は `metadata.createdAt` を `400` で拒否する。** `createdAt` は [D-024](#d-024-export-をページに分けbackup--restore-を差分再開できるようにする) で restore のために足した field で、restore 以外の client は送っていません。この変更より前の restore client は、通常の endpoint に `createdAt` を付けて reserve します。これを受け付けると、restore は成功したように見えたまま、restore を実行した member が「最初に追加した人」として記録されます。backup に元の値が無ければ、後から直せません。黙って誤った値を保存するより、`400` で止めて新しい endpoint へ案内します。
+
+黙って捨てる（受け取って読まない）こともしません。捨てると、以前の restore client は upload 時刻を失ったまま成功します。
+
+`createdAt` の有無で restore かどうかを判定し、同じ endpoint で扱うこともしません。upload 時刻と upload した人は別の事実です。
 
 restore で送られた値は、形式（`HOUSEHOLD_EMAILS` と同じ規則の小文字 email）だけを確かめます。今の `HOUSEHOLD_EMAILS` には照合しません。backup には、既に外した member が upload した写真も入っているからです。したがってこの値は client の申告です。restore の endpoint はどの member も呼べるので、偽った値を書くことは技術的には止めていません。member は信頼境界の内側にいるので（[D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける) と同じ）、それで足ります。値は表示にしか使いません。
 
@@ -972,6 +976,7 @@ backup の `manifest.json` に member の email が入ります。backup ディ�
 - `metadata.createdAt` がある reserve を restore とみなし、`NULL` を記録する: 時刻の field が別の metadata の意味を暗黙に変える。時刻を送る別の client を作った時点で、upload した人が黙って消える
 - 通常の reserve に任意の `metadata.uploadedBy` を足し、restore だけがそれを送る: どの client も通常の upload で他の member の名前や `null` を書ける。Web が送らないことは、API がそれを許していないことにならない
 - restore を示す `source: 'restore'` のような flag を足す: 値を運ぶ field が別に要る。入口を分ければ flag は要らない
+- 通常の reserve でも `metadata.createdAt` を受け付け続ける: 以前の restore client が通常の endpoint で成功し、restore を実行した member を記録する。写真は戻るので、誤りに気づく契機が無い
 - manifest には入れず、必要になってから v3 にする: その間の backup からは、後で直しても戻らない
 
 影響:
@@ -981,7 +986,7 @@ backup の `manifest.json` に member の email が入ります。backup ディ�
 - API の asset に `uploadedBy` が増える。読むのは Web だけで、この repository と一緒に更新する
 - `POST /api/v1/restore/uploads` が増える。`pnpm backup restore` はこちらで reserve する
 - manifest が v3 になる。以前の CLI は新しい backup を読めない。この変更より前の backup（v1 / v2）から restore した写真は「記録なし」になる
-- 以前の CLI で v1 / v2 の backup を restore すると、`POST /api/v1/uploads` を使うので、restore を実行した member が記録される。互換の経路は置かず、CLI をこの repository と一緒に更新する（[D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける) と同じ）
+- 以前の CLI の restore は、最初の写真の reserve で `400` になって止まる。何も reserve されないので、restore を実行した member の値で写真が入ることはない。互換の経路は置かず、CLI をこの repository と一緒に更新する（[D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける) と同じ）
 
 残るリスク:
 

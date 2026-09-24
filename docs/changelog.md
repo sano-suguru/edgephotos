@@ -12,7 +12,7 @@
 
 API の asset（一覧と 1 件）に `uploadedBy`（email または `null`）が増えます。権限・一覧・favorite・album・trash・share は変わりません（[D-034](decisions.md)）。
 
-backup manifest は v3 になり、各写真の `uploadedBy` を持ちます。restore は `POST /api/v1/restore/uploads` で upload した人を戻し、`pnpm backup verify` は v3 の backup に対して比べます。通常の upload では、client は upload した人を指定できません。v1 / v2 の backup も引き続き restore できます。以前の CLI は v3 の backup を読めません。
+backup manifest は v3 になり、各写真の `uploadedBy` を持ちます。restore は `POST /api/v1/restore/uploads` で upload した人を戻し、`pnpm backup verify` は v3 の backup に対して比べます。通常の upload では、client は upload した人を指定できません。通常の reserve は `metadata.createdAt` を `400` で拒否するので、以前の CLI の restore は最初の写真で止まります。v1 / v2 の backup も引き続き restore できます。以前の CLI は v3 の backup を読めません。
 
 更新時は `0004_asset_uploaded_by` の migration を deploy の前に適用します。既存の写真は `NULL` のまま残り、後から埋めません。production での migration の適用と確認はまだです。
 

@@ -234,7 +234,7 @@ finalize は upload の期限を見ません。期限内に PUT が済んでい�
 
 中断した upload は、member が実行する storage cleanup が片付けます。3 object が揃って検査を通るものは finalize して写真にし、それ以外は終端状態にしてから、その upload の key の object だけを消します。実行の条件と閾値は [D-023](decisions.md) にあります。
 
-reserve の `metadata.createdAt`（任意、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。
+restore の reserve（`POST /api/v1/restore/uploads`）の `metadata.createdAt`（必須、未来は不可）は asset の `createdAt` になり、撮影日時の無い写真の並び順にも使います。restore が backup の値を送ります（[D-024](decisions.md)）。通常の reserve は `metadata.createdAt` を `400` で拒否します。以前の restore client が通常の endpoint で成功し、restore を実行した member を記録しないためです（[D-034](decisions.md)）。
 
 失敗した upload をどこからやり直すかは Client が決めます。Server 側の契約は、finalize が冪等であることと、presigned URL が期限内に限り再利用できることです（[D-020](decisions.md)）。
 

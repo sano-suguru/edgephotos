@@ -115,34 +115,49 @@ export const SignedUrlSchema = z.object({ url: z.url(), expiresAt: z.string() })
 
 // ---- Uploads ----
 
-export const UploadReserveSchema = z
-  .object({
-    original: z.object({
-      size: z.number().int().positive().max(LIMITS.originalMaxBytes),
-      contentType: z.enum(ORIGINAL_CONTENT_TYPES),
-      sha256: Sha256Schema,
-    }),
-    thumbnail: z.object({ size: z.number().int().positive().max(LIMITS.thumbnailMaxBytes) }),
-    preview: z.object({ size: z.number().int().positive().max(LIMITS.previewMaxBytes) }),
-    metadata: z
-      .object({
-        filename: z.string().min(1).max(LIMITS.filenameMax).optional(),
-        width: z.number().int().positive().optional(),
-        height: z.number().int().positive().optional(),
-        takenAt: TakenAtSchema.optional(),
-        // When the photo was first added to a library. Restore sends the value from the backup so that the
-        // timeline order of photos without a capture time survives; other clients omit it (= now).
-        createdAt: z.iso.datetime({ offset: true }).optional(),
-      })
-      .default({}),
-  })
-  .openapi('UploadReserve')
+const UploadMetadataSchema = z.object({
+  filename: z.string().min(1).max(LIMITS.filenameMax).optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  takenAt: TakenAtSchema.optional(),
+})
 
-// POST /api/v1/restore/uploads: the same reservation, for restoring a backup into a library (D-034). A normal
-// upload records the member who reserves it and takes no uploader from the client; only here is the uploader
-// a stated value, the one the backup recorded. Required, null (not recorded) included, so a restore never
-// credits the member running it. The server cannot check it: the photo may come from a member no longer listed.
-export const RestoreUploadReserveSchema = UploadReserveSchema.extend({
+const UploadObjectsSchema = z.object({
+  original: z.object({
+    size: z.number().int().positive().max(LIMITS.originalMaxBytes),
+    contentType: z.enum(ORIGINAL_CONTENT_TYPES),
+    sha256: Sha256Schema,
+  }),
+  thumbnail: z.object({ size: z.number().int().positive().max(LIMITS.thumbnailMaxBytes) }),
+  preview: z.object({ size: z.number().int().positive().max(LIMITS.previewMaxBytes) }),
+})
+
+// POST /api/v1/uploads. The photo is added now, by the member making the request (D-034).
+export const UploadReserveSchema = UploadObjectsSchema.extend({
+  metadata: UploadMetadataSchema.extend({
+    // Restore-only history. Refused rather than ignored: a restore client from before D-034 sends it here, and
+    // accepting that request would record the member running the restore as the photo's uploader.
+    // (z.never() would say this more directly, but the OpenAPI generator cannot describe it.)
+    createdAt: z
+      .unknown()
+      .refine((value) => value === undefined, {
+        error: 'metadata.createdAt is for restoring a backup: use POST /api/v1/restore/uploads',
+      })
+      .optional()
+      .openapi({ description: 'Not accepted here. A restore sends it to POST /api/v1/restore/uploads.' }),
+  }).default({}),
+}).openapi('UploadReserve')
+
+// POST /api/v1/restore/uploads: the same reservation, for restoring a backup into a library (D-034). Only here
+// does the client state when the photo was added and by whom: the values the backup recorded. Both required,
+// uploadedBy null (not recorded) included, so a restore never credits the member running it or the time it
+// ran. The server cannot check the uploader: the photo may come from a member no longer listed.
+export const RestoreUploadReserveSchema = UploadObjectsSchema.extend({
+  metadata: UploadMetadataSchema.extend({
+    // When the photo was first added to a library, so the timeline order of photos without a capture time
+    // survives.
+    createdAt: z.iso.datetime({ offset: true }),
+  }),
   uploadedBy: MemberEmailSchema.nullable(),
 }).openapi('RestoreUploadReserve')
 
