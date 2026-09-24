@@ -168,6 +168,25 @@ wildcard を使わないのは、`/alpha/*` が親の `/alpha` 自体を含ま�
 
 `/share/assets/*`（build 済み JS / CSS）と share API（`/share/api/v1/*`）はどちらも `/share` 配下なので、Bypass 1 つで公開面が揃います（[D-011](decisions.md)）。
 
+### login 方法
+
+member の login には One-time PIN（OTP）を使います。登録した email に届くコードを入力する方式で、member は Cloudflare のアカウントを必要としません。
+
+新しい Zero Trust organization の既定の login 方法は、Cloudflare アカウントでのログインです。「account の member に限る」設定のままだと、Cloudflare アカウントを持たない member は login できません。OTP は自動では追加されないため、identity provider として追加します。
+
+1 の application では、login 方法を明示します。
+
+- `allowed_idps` に OTP だけを指定する。空のままだと account のすべての identity provider が対象になり、あとで別の用途に追加した identity provider も login 画面に出てしまう
+- `auto_redirect_to_identity` を有効にする。login 方法が 1 つなので、選択画面を飛ばして email の入力へ直接進む
+
+2 の application（Bypass）は変更しません。
+
+OTP の挙動で、確認や問い合わせのときに知っておくこと:
+
+- 登録していない email を入力しても、画面には「コードを送った」と表示されます。実際にはメールは送られません。拒否の確認は、コードが届かず login を完了できないことで行います
+- 送信元は `noreply@notify.cloudflare.com` です。コードは 10 分で失効します
+- メールのセキュリティ製品がリンクを先読みすると、コードが使用済みになることがあります。その場合はコードを再送します
+
 ### preview URL を無効にする
 
 Worker の preview URL は無効にします（`wrangler.jsonc` の `"preview_urls": false`）。
@@ -176,7 +195,7 @@ Worker の preview URL は無効にします（`wrangler.jsonc` の `"preview_ur
 
 Bypass policy は identity selector を使えず、request log も残りません。`/share/*` の監査は EdgePhotos 側でのみ取得できます。
 
-Access application は API でも作成できます。必要な token 権限は `Access: Apps and Policies Edit`（account scope）だけです。作業後は token を revoke します。
+Access application と identity provider は API でも作成できます。必要な token 権限（account scope）は、application が `Access: Apps and Policies Edit`、identity provider が `Access: Organizations, Identity Providers, and Groups Write` です。作業後は token を revoke します。
 
 ## 5. APP_ORIGIN
 

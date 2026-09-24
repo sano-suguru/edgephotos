@@ -11,7 +11,7 @@
 ## 現在の状況
 
 - 最終確認: 2026-09-24
-- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload）
+- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更）
 - 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
 各項目に日付がある場合は、その日付が優先します。
@@ -662,7 +662,18 @@ production の作成前に、Worker がまだ無い状態からの初回 deploy 
 
 - private（hostname のみ、Allow）と `/share`（wildcard なし、Bypass・Everyone）の 2 つの self-hosted application を、Cloudflare API で作った。destination は public、session duration は 24 時間（remote-test と同じ）
 - 作成後に API で読み直し、2 つの hostname が `APP_ORIGIN` と同じ host であること、Allow policy の email が `HOUSEHOLD_EMAILS` と同じ 2 人であることを確かめた
-- household に含めていない account での login 拒否と、preview URL の `404` は、production ではまだ確かめていない
+- household に含めていない account での login 拒否は、production ではまだ確かめていない（下の「login 方法を One-time PIN にする」）
+
+### login 方法を One-time PIN にする（2026-09-24）
+
+account の identity provider は Cloudflare アカウントでのログインだけで、「account の member に限る」設定だった。account の member でない 2 人目は login できないため、運用の [login 方法](operations.md#login-方法) のとおりに変えた。
+
+- Cloudflare API で One-time PIN の identity provider を作った。既存の Cloudflare の identity provider は残した
+- private application を、変更前の設定に `allowed_idps`（One-time PIN だけ）と `auto_redirect_to_identity: true` を足して更新した。読み直すと、policy の email（2 人）、hostname、AUD、session duration（24 時間）は変更前と同じだった。`/share` の application は更新されていない（`updated_at` が作成時のまま）
+- 認証なしの `curl` で、`/` と `/api/v1/assets` は Access の login へ `302`、`/share` は `200`、`/share/api/v1/*` は Worker の `404` だった。login 画面は identity provider の選択を挟まず、email の入力欄を返した
+- 最新の Worker version の preview URL（`<version>-edgephotos...workers.dev`）は `404` だった
+
+家族 2 人が OTP で login できるか、登録していない email でコードが届かないかは、まだ確かめていない。
 
 ### deploy と CORS
 

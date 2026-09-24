@@ -82,7 +82,7 @@ member は互いに対等で、library 全体に同じ権限を持ちます。�
 
 - どの member も、他の member が upload した写真を trash・完全削除・export できます。
 - どの member も、他の member が作った share を revoke・再発行できます。
-- member 1 人のアカウントや端末が侵害されれば、library 全体が侵害されます。member の削除は Access policy と `HOUSEHOLD_EMAILS` の両方から行います。
+- member 1 人のアカウントや端末が侵害されれば、library 全体が侵害されます。login は email に届く One-time PIN なので、ここでいうアカウントには member の email アカウントが含まれます。member の削除は Access policy と `HOUSEHOLD_EMAILS` の両方から行います。
 
 member 間で権限を分けたい場合、この設計では解決できません。
 
