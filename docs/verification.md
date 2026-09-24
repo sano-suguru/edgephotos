@@ -10,7 +10,7 @@
 
 ## 現在の状況
 
-- 最終確認: 2026-09-22
+- 最終確認: 2026-09-24
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`
 - 未確認: production 環境の作成と deploy、iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
@@ -373,7 +373,7 @@ restore の入口: 壊れた manifest と壊れた `restore-state.json` は、�
 
 **Browser から実際に壊れた写真を作り直す往復は未実施**（下の「未検証」）。
 
-追記（2026-09-23）: 上の「作り直しのための設定変更は不要だった」は、欠けた derivative を作る経路（`If-None-Match`）についてだけ正しい。使えない derivative を置き換える経路は Browser が `If-Match` を送るため、`allowed_headers` に `if-match` が要る。この bucket の設定のままでは、その PUT は preflight で失敗する。運用の CORS 例と `pnpm diagnose` の検査に `if-match` を加えた（[D-026](decisions.md)）。remote-test の bucket はまだ `cors set` し直していない。
+追記（2026-09-23）: 上の「作り直しのための設定変更は不要だった」は、欠けた derivative を作る経路（`If-None-Match`）についてだけ正しい。使えない derivative を置き換える経路は Browser が `If-Match` を送るため、`allowed_headers` に `if-match` が要る。この bucket の設定のままでは、その PUT は preflight で失敗する。運用の CORS 例と `pnpm diagnose` の検査に `if-match` を加えた（[D-026](decisions.md)）。2026-09-24 に `if-match` を加えて `cors set` し直した（[upload した人の記録](#upload-した人の記録2026-09-24)）。
 
 ## CI の時間制限（2026-09-21）
 
@@ -595,6 +595,45 @@ CI は Linux runner の WebKit で HEIC を decode できないため、この a
 
 5,000 枚を末尾まで読み込むと Chromium で 15,128 node、年月から開くと 419 node。数値と条件は [benchmarks.md](benchmarks.md) にある。thumbnail を 1x1 に差し替えた測定なので、decode 済み画像の memory は含まない。
 
+## upload した人の記録（2026-09-24）
+
+`0004_asset_uploaded_by` と manifest v3（[D-034](decisions.md)）を remote-test へ入れ、同じ日に確認した。対象は main の `127fb99`（#43）。
+
+### release
+
+運用の [更新](operations.md#8-更新release-と-migration) の「追加だけの migration」の手順で行った。
+
+- migration 前の D1 bookmark: `0000004e-00000000-000050f0-bd90af91599b32fc7c34520842b7ce2f`
+- migration: 未適用は `0004_asset_uploaded_by.sql` だけだった。`d1 migrations apply --remote` で適用に成功した
+- deploy: Worker version `5e140e3e-33d1-4c7c-a73b-9f27ae549585`。前回の deploy は 2026-09-22 なので、#35 以降の main もこの deploy で入った
+- 同じ日、production の Worker・D1・R2 が存在しないことを `wrangler` で確かめた（Worker は API の `10007`）。production に適用する migration はまだ無い
+
+### diagnose
+
+`EDGEPHOTOS_URL` と Access token を付けた `pnpm diagnose --env remote-test` の結果:
+
+- Worker の D1 が `0004_asset_uploaded_by.sql` まで適用済みであることを含め、1 件を除いて PASS した
+- 失敗は `r2: CORS — AllowedHeaders lacks: if-match` の 1 件だった。実 R2 に対しても、足りない header を名指しする message になった（[derivative の作り直しの往復](#derivative-の作り直しの往復) で記録を求めていた項目）
+- bucket の `allowed_headers` に `if-match` を加えて `cors set` し直した。origin・method・max age は変えていない
+- 直した後は `r2: CORS` を含めて全項目が PASS し、「no failures」になった
+
+### backup
+
+新しい CLI で `pnpm backup export` と `pnpm backup check` を実行した。
+
+- 300 枚と album 5 件を取得し、失敗は 0 件だった。`check` も `ok: true`、problems 0 件
+- `manifest.json` は `formatVersion: 3` で、300 枚すべてに `uploadedBy` の key があった。値はすべて `null`。どれも `0004` より前に入った写真で、推測で埋めていないことと一致する
+- restore は実行していない。空のライブラリが要るためで、round-trip は `tests/integration/export-restore.test.ts` で確認している
+- backup のコピーは確認後に削除した
+
+### smoke
+
+利用者が Browser で PNG を 1 枚 upload した。viewer の「最初に追加した人」に自分の email が表示されることを、利用者が確認した。
+
+同じ写真を API（`GET /api/v1/assets`）でも確かめた。最新の 1 枚（2026-09-24 03:03 UTC）の `uploadedBy` には email が入り、それより前の写真は `null` だった。
+
+2 人目の member による upload は、実環境では確かめていない（[2 人の household での利用](#2-人の-household-での利用)）。
+
 ## 未検証
 
 ### iPhone / Android 実機での取り込み
@@ -619,7 +658,7 @@ Android: 上と同じ項目のうち該当するもの（HEIF 設定の端末を
 
 bucket の CORS 設定と実 R2 の preflight までは確認済みです（上）。Browser からの往復は未実施です（[D-026](decisions.md)）。
 
-先に remote-test の bucket の CORS へ `if-match` を加えて `cors set` し直します（[R2 CORS](operations.md#6-r2-cors)）。今の設定のままでは、下の `If-Match` の項目は preflight で失敗します。
+remote-test の bucket の CORS には、2026-09-24 に `if-match` を加えました（[upload した人の記録](#upload-した人の記録2026-09-24)）。
 
 remote-test への deploy と Access login（対話操作）が要ります。presigned URL の署名には Worker secret の R2 credential が要るため、`wrangler` だけでは代用できません（`wrangler r2 object put` に条件付きの option はありません）。
 
@@ -630,7 +669,6 @@ remote-test への deploy と Access login（対話操作）が要ります。pr
 - 作り直した derivative の PUT（`Content-Type` + `If-None-Match: *`）が通り、同じ URL への 2 回目が `412` になること
 - 実 R2 の `head().checksums.sha256` を使った original の照合が、作り直しの入口で期待どおり働くこと（`409 REPAIR_SOURCE_UNUSABLE`）
 - **`If-Match` 付き presigned PUT**（この経路で初めて使う条件）: 検査した ETag なら `200`、古い ETag なら `412`、先に保存された bytes が残ること
-- `pnpm diagnose` の `r2: CORS` が remote-test の bucket で PASS すること。`if-match` を加える前に一度実行し、FAIL の message が `AllowedHeaders lacks: if-match` になるかも記録する（実 R2 が preflight 全体を拒否するか、短い `Allow-Headers` で答えるかは未確認。どちらでも header を名指しするよう作ってある）
 - 確認に使った asset は trash へ移動する（この文書の他の項目と同じ扱い）
 
 表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。
@@ -649,3 +687,4 @@ remote-test に 2 アカウントを設定し、実機 2 台で次を確認し�
 - 片方が trash し、もう片方が restore する
 - logout / login しても続きから使える
 - 許可していない 3 つ目のアカウントは入れない
+- 2 人がそれぞれ upload した写真の「最初に追加した人」に、それぞれの email が出る（[D-034](decisions.md)）
