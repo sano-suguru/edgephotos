@@ -16,7 +16,7 @@ EdgePhotos v1 のセットアップ、更新、backup / restore、アンイン�
 5. Open EdgePhotos and verify setup
 ```
 
-Worker の hostname（`APP_ORIGIN`）は deploy 前から決まっています。workers.dev なら `https://<worker 名>.<account の subdomain>.workers.dev` です。
+Worker の hostname（`APP_ORIGIN`）は deploy 前から決まっています。workers.dev なら `https://<worker 名>.<account の subdomain>.workers.dev` です。subdomain は Dashboard の Workers & Pages に表示されます。
 
 Deploy to Cloudflare ボタンは Release polish の範囲です（[roadmap.md](roadmap.md)）。
 
