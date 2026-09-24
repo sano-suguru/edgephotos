@@ -929,11 +929,17 @@ reserve を選ぶのは、Worker が検証済みの identity を持ち、かつ 
 - finalize の再送と duplicate は、既存 asset の値を変えない（asset を作る INSERT は `pending` の upload にしか効かない）。同じ bytes を後から upload した member は、upload した人になりません
 - 別の member が finalize しても、storage cleanup が完了させても、reserve した member が残ります
 
-**restore は upload した人を明示して送る。** reserve の `metadata.uploadedBy` を省けば reserve した member、値を送ればその値（`null` は「記録なし」）を記録します。restore は manifest の値を必ず送ります。restore を実行した member は写真を upload した人ではないためです。
+**通常の upload では、client は upload した人を指定できない。** `POST /api/v1/uploads` の body には upload した人の field がありません。送っても読まず、reserve した member を記録します。`null` を送って「記録なし」にすることもできません。通常の upload の値は、client が変えられない事実です。
 
-`metadata.createdAt` の有無では判定しません。upload 時刻を送ることと、upload した人が誰かは別の事実です。時刻を持つ取り込みを後から作ったときに、upload した人が黙って消えることを避けます。
+**restore は別の endpoint で、upload した人を明示して送る。** `POST /api/v1/restore/uploads` は、`POST /api/v1/uploads` と同じ reserve に `uploadedBy`（必須、`null` を含む）を足したものです。`pnpm backup restore` は manifest の値を必ず送ります。restore を実行した member は写真を upload した人ではないためです。finalize は通常の upload と同じです。
 
-送られた値は、形式（`HOUSEHOLD_EMAILS` と同じ規則の小文字 email）だけを確かめます。今の `HOUSEHOLD_EMAILS` には照合しません。backup には、既に外した member が upload した写真も入っているからです。したがってこの値は client の申告です。member は信頼境界の内側にいるので（[D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける) と同じ）、それで足ります。値は表示にしか使いません。
+入口を分けるのは、「この request を送った member」という事実と、「backup が記録していた過去の値」を同じ field で受け付けないためです。1 つの field で両方を受けると、どの client も通常の upload で任意の値を書けます。
+
+`metadata.createdAt` の有無では判定しません。upload 時刻を送ることと、upload した人が誰かは別の事実です。通常の reserve に `createdAt` を送っても、reserve した member が記録されます。
+
+restore で送られた値は、形式（`HOUSEHOLD_EMAILS` と同じ規則の小文字 email）だけを確かめます。今の `HOUSEHOLD_EMAILS` には照合しません。backup には、既に外した member が upload した写真も入っているからです。したがってこの値は client の申告です。restore の endpoint はどの member も呼べるので、偽った値を書くことは技術的には止めていません。member は信頼境界の内側にいるので（[D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける) と同じ）、それで足ります。値は表示にしか使いません。
+
+**画面では「最初に追加した人」と表示する。** SHA-256 が同じ写真は 1 つの asset に収束し、後から同じ写真を upload した member は記録しません。記録しているのは、その写真を最初に追加した member だけです。
 
 **記録の無い写真は「記録なし」と表示し、推測で埋めない。** migration は既存の行を `NULL` のまま残します。backfill はしません。どの member が upload したかを示す記録が他に無いからです。
 
@@ -964,7 +970,8 @@ backup の `manifest.json` に member の email が入ります。backup ディ�
 - `sub` を記録する: 上のとおり、表示できず IdP の変更で意味を失う
 - restore を実行した member を記録する: upload した人を作り出すことになる
 - `metadata.createdAt` がある reserve を restore とみなし、`NULL` を記録する: 時刻の field が別の metadata の意味を暗黙に変える。時刻を送る別の client を作った時点で、upload した人が黙って消える
-- restore を示す `source: 'restore'` のような flag を足す: 値を運ぶ field が別に要る。upload した人をそのまま送れば flag は要らない
+- 通常の reserve に任意の `metadata.uploadedBy` を足し、restore だけがそれを送る: どの client も通常の upload で他の member の名前や `null` を書ける。Web が送らないことは、API がそれを許していないことにならない
+- restore を示す `source: 'restore'` のような flag を足す: 値を運ぶ field が別に要る。入口を分ければ flag は要らない
 - manifest には入れず、必要になってから v3 にする: その間の backup からは、後で直しても戻らない
 
 影響:
@@ -972,13 +979,15 @@ backup の `manifest.json` に member の email が入ります。backup ディ�
 - 更新時に `0004_asset_uploaded_by` を適用する。既存の写真は「記録なし」と表示される
 - 適用より前に reserve して、適用後に finalize した upload も「記録なし」になる。reserve の時点で記録していないため
 - API の asset に `uploadedBy` が増える。読むのは Web だけで、この repository と一緒に更新する
+- `POST /api/v1/restore/uploads` が増える。`pnpm backup restore` はこちらで reserve する
 - manifest が v3 になる。以前の CLI は新しい backup を読めない。この変更より前の backup（v1 / v2）から restore した写真は「記録なし」になる
+- 以前の CLI で v1 / v2 の backup を restore すると、`POST /api/v1/uploads` を使うので、restore を実行した member が記録される。互換の経路は置かず、CLI をこの repository と一緒に更新する（[D-033](#d-033-最終-backup-export-の記録を-export-の-get-から-post-に分ける) と同じ）
 
 残るリスク:
 
 - 記録は email なので、member の email が変わっても過去の写真は古い email のまま表示される。member を削除しても、その email は写真に残る
 - 通常の upload で記録するのは Access の検証済み identity で、account であって人ではない。同じ端末を 2 人で使えば、実際に撮った人とは一致しない
-- restore で記録するのは manifest の値で、server は検証しない。backup を手で書き換えれば、別の member の値にできる
+- restore で記録するのは manifest の値で、server は検証しない。backup を書き換えるか restore の endpoint を直接呼べば、どの member も別の member の値や `null` を書ける。記録された値が通常の upload のものか restore のものかは、D1 に残らない
 
 再検討する条件:
 

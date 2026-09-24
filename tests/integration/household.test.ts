@@ -328,37 +328,55 @@ describe('uploader attribution', () => {
     expect(asset.uploadedBy).toBe(MEMBER_A)
   })
 
-  it('records the uploader restore names, null included, instead of the member running it', async () => {
+  it('takes no uploader from a normal upload: it is always the member who reserved', async () => {
     const app = await makeApp()
-    const createdAt = '2020-01-02T03:04:05.000Z'
-    const named = (await uploadAs(app, MEMBER_B, undefined, { createdAt, uploadedBy: MEMBER_A })).result
-    expect(named.asset.uploadedBy).toBe(MEMBER_A)
-    const unrecorded = (await uploadAs(app, MEMBER_B, undefined, { createdAt, uploadedBy: null })).result
-    expect(unrecorded.asset.uploadedBy).toBeNull()
-  })
-
-  it('does not read an upload time as a restore: without uploadedBy, the reserving member is recorded', async () => {
-    const app = await makeApp()
+    // A client naming someone else, or asking for "not recorded", does not change what is recorded.
+    const claimsA = (await uploadAs(app, MEMBER_B, undefined, { uploadedBy: MEMBER_A })).result
+    expect(claimsA.asset.uploadedBy).toBe(MEMBER_B)
+    const claimsNone = (await uploadAs(app, MEMBER_B, undefined, { uploadedBy: null })).result
+    expect(claimsNone.asset.uploadedBy).toBe(MEMBER_B)
+    // Sending an upload time (what restore also sends) does not make an upload a restore.
     const withTime = (await uploadAs(app, MEMBER_B, undefined, { createdAt: '2020-01-02T03:04:05.000Z' })).result
     expect(withTime.asset.uploadedBy).toBe(MEMBER_B)
   })
 
-  it('refuses an uploader that is not a stored member email', async () => {
-    const app = await makeApp()
-    const p = await photo()
-    const token = await memberToken(MEMBER_A)
-    for (const uploadedBy of ['not an email', 'Member-B@example.test', '']) {
-      const res = await call(app, 'POST', '/api/v1/uploads', {
+  describe('restore reservation', () => {
+    async function restoreAs(email: string, uploadedBy: unknown, expect = 201) {
+      const app = await makeApp()
+      const p = await photo()
+      const token = await memberToken(email)
+      const body: Record<string, unknown> = {
+        original: { size: p.original.byteLength, contentType: 'image/jpeg', sha256: p.sha256 },
+        thumbnail: { size: p.thumbnail.byteLength },
+        preview: { size: p.preview.byteLength },
+        metadata: { createdAt: '2020-01-02T03:04:05.000Z' },
+      }
+      if (uploadedBy !== undefined) body.uploadedBy = uploadedBy
+      const reservation = await callJson<UploadReservation>(app, 'POST', '/api/v1/restore/uploads', {
+        expect,
         token,
-        body: {
-          original: { size: p.original.byteLength, contentType: 'image/jpeg', sha256: p.sha256 },
-          thumbnail: { size: p.thumbnail.byteLength },
-          preview: { size: p.preview.byteLength },
-          metadata: { uploadedBy },
-        },
+        body,
       })
-      expect(res.status).toBe(400)
+      if (expect !== 201) return null
+      for (const v of ['original', 'thumbnail', 'preview'] as const) {
+        await putObject(app, reservation.targets[v], p[v])
+      }
+      return callJson<UploadFinalizeResult>(app, 'POST', `/api/v1/uploads/${reservation.upload.id}/finalize`, {
+        expect: 200,
+        token,
+      })
     }
+
+    it('records the uploader the backup names, null included, instead of the member restoring', async () => {
+      expect((await restoreAs(MEMBER_B, MEMBER_A))?.asset.uploadedBy).toBe(MEMBER_A)
+      expect((await restoreAs(MEMBER_B, null))?.asset.uploadedBy).toBeNull()
+    })
+
+    it('requires the uploader to be stated, and to be a stored member email', async () => {
+      for (const uploadedBy of [undefined, 'not an email', 'Member-B@example.test', '']) {
+        await restoreAs(MEMBER_A, uploadedBy, 400)
+      }
+    })
   })
 
   it('serves a photo stored before attribution existed, with no uploader, to either member', async () => {

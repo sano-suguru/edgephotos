@@ -25,9 +25,9 @@ export const assets = sqliteTable(
     trashed_at: text(),
     created_at: text().notNull(),
     updated_at: text().notNull(),
-    // Copied from uploads.uploaded_by when the asset is created. Attribution only: it never decides who may
-    // read or change the asset (docs/decisions.md D-034). NULL when it was not recorded: assets from before
-    // 0004, or restored from a backup.
+    // Copied from uploads.uploaded_by when the asset is created, so it names who first uploaded these bytes.
+    // Attribution only: it never decides who may read or change the asset (docs/decisions.md D-034). NULL when
+    // it was not recorded: assets from before 0004, or restored from a backup that did not record it.
     uploaded_by: text(),
   },
   (t) => [
@@ -74,8 +74,10 @@ export const uploads = sqliteTable(
     finalized_at: text(),
     // assets.created_at to use instead of this row's created_at (restore keeps the original upload time).
     asset_created_at: text(),
-    // The member (normalized AppPrincipal.email) who reserved this upload: the only request that both carries
-    // a verified identity and starts the upload (the PUTs go straight to R2). NULL for a restore (D-034).
+    // Who uploaded the photo, fixed at reserve (D-034). For POST /uploads it is the member who reserved
+    // (normalized AppPrincipal.email): the only request that both carries a verified identity and starts the
+    // upload (the PUTs go straight to R2). For POST /restore/uploads it is the value the backup recorded, which
+    // may be any member's email or NULL (not recorded).
     uploaded_by: text(),
   },
   (t) => [

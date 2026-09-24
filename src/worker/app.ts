@@ -16,6 +16,7 @@ import {
   ExportMembershipPageSchema,
   IdSchema,
   LIMITS,
+  RestoreUploadReserveSchema,
   ShareCreatedSchema,
   ShareCreateSchema,
   SharedAlbumSchema,
@@ -211,6 +212,25 @@ export function createApp(options: AppOptions) {
       },
     }),
     async (c) => c.json(await uploads.reserveUpload(svc(c), c.req.valid('json'), c.get('principal').email), 201),
+  )
+
+  // Restore's reservation (D-034). Finalize is the same as for any upload.
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/api/v1/restore/uploads',
+      tags: tag('uploads'),
+      request: { body: jsonBody(RestoreUploadReserveSchema) },
+      responses: {
+        201: json(UploadReservationSchema, 'Upload reserved with the uploader the backup recorded'),
+        409: json(ErrorSchema, 'Duplicate original'),
+        ...errorResponses,
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid('json')
+      return c.json(await uploads.reserveUpload(svc(c), input, input.uploadedBy), 201)
+    },
   )
 
   app.openapi(

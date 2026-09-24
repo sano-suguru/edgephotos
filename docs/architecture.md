@@ -153,6 +153,7 @@ Web も将来の Native client も、同じ API を使います。
 ```text
 GET    /api/v1/me
 POST   /api/v1/uploads                          reserve
+POST   /api/v1/restore/uploads                  reserve for restore, with the backup's uploadedBy (D-034)
 POST   /api/v1/uploads/{uploadId}/finalize      idempotent
 GET    /api/v1/assets?cursor&limit&direction&favorite&trashed
 GET    /api/v1/assets/months                    写真のある年月と件数（D-031）
@@ -223,7 +224,7 @@ D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transacti
 
 asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
 
-reserve した member を `uploads.uploaded_by` に記録し、finalize が asset を作るときに `assets.uploaded_by` へ写します。finalize を呼んだ member は見ないので、別の member や storage cleanup が finalize しても変わりません。再送や duplicate は既存 asset の値を変えません。restore は reserve の `metadata.uploadedBy` で manifest の値を送り、それがそのまま記録されます（`null` を含む）。0004 より前の asset は `NULL` です。どちらも `NULL` なら API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。
+reserve した member を `uploads.uploaded_by` に記録し、finalize が asset を作るときに `assets.uploaded_by` へ写します。finalize を呼んだ member は見ないので、別の member や storage cleanup が finalize しても変わりません。再送や duplicate は既存 asset の値を変えません。通常の reserve は upload した人を body から受け取りません。restore は `POST /api/v1/restore/uploads` で reserve し、manifest の値を `uploadedBy` で送ります（`null` を含む）。0004 より前の asset は `NULL` です。どちらも `NULL` なら API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。
 
 presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。
 

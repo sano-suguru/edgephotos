@@ -76,7 +76,7 @@ JWT は存在するだけで信用しません。署名、issuer、audience、�
 
 ### member 間の信頼
 
-member は互いに対等で、library 全体に同じ権限を持ちます。写真をどの member が upload したかは記録しますが（[D-034](decisions.md)）、表示のためだけの値です。認可・絞り込みには使いません。member の email は private API の asset と backup の `manifest.json` に入ります。共有ページの response には入りません。
+member は互いに対等で、library 全体に同じ権限を持ちます。写真をどの member が upload したかは記録しますが（[D-034](decisions.md)）、表示のためだけの値です。認可・絞り込みには使いません。通常の upload では reserve した member を記録し、client は値を指定できません。restore の endpoint は backup の値を申告として受け付けるので、どの member も任意の値を書けます。member の email は private API の asset と backup の `manifest.json` に入ります。共有ページの response には入りません。
 
 したがって次は設計上の前提です（[D-028](decisions.md)）。
 
@@ -254,7 +254,7 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - 未認証 private API が拒否される。
 - Access user でも household 外の email は拒否される。
 - 設定した 2 人の member がどちらも同じ library を読み書きできる。
-- 2 人の member が upload した写真は、それぞれの upload した人を区別して記録する。別の member や storage cleanup が finalize しても、reserve した member が残る。backup から restore しても残り、restore を実行した member にならない。記録の無い写真も読み書きでき、upload した人を補わない（[D-034](decisions.md)）。
+- 2 人の member が upload した写真は、それぞれの upload した人を区別して記録する。別の member や storage cleanup が finalize しても、reserve した member が残る。backup から restore しても残り、restore を実行した member にならない。通常の upload で client が送った値は記録しない。記録の無い写真も読み書きでき、upload した人を補わない（[D-034](decisions.md)）。
 - Access 設定異常時に private data を返さない。
 - share secret 不正 / expired / revoked を拒否する。
 - 別 album の asset を share から取得できない。

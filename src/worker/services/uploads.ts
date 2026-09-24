@@ -23,8 +23,9 @@ function duplicateError(existing: AssetRow) {
 }
 
 // Step 1 of reserve -> presigned PUT -> finalize. The server chooses ids and object keys.
-// `member` is who reserves: the uploader, whoever later finalizes, unless restore names one (D-034).
-export async function reserveUpload(ctx: ServiceContext, input: ReserveInput, member: string) {
+// `uploadedBy` is fixed here, whoever later finalizes (D-034): the reserving member for a normal upload, the
+// backup's value for a restore. The route decides which; nothing in the request body can change a normal one.
+export async function reserveUpload(ctx: ServiceContext, input: ReserveInput, uploadedBy: string | null) {
   const existing = await findStoredAsset(ctx, input.original.sha256)
   if (existing) throw duplicateError(existing)
 
@@ -59,7 +60,7 @@ export async function reserveUpload(ctx: ServiceContext, input: ReserveInput, me
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
     asset_created_at: assetCreatedAt,
-    uploaded_by: meta.uploadedBy === undefined ? member : meta.uploadedBy,
+    uploaded_by: uploadedBy,
   })
 
   const keys = assetObjectKeys(assetId)

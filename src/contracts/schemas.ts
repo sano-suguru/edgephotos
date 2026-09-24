@@ -70,9 +70,10 @@ export const AssetSummarySchema = z
     isFavorite: z.boolean(),
     trashedAt: z.string().nullable(),
     createdAt: z.string(),
-    // Email of the household member who uploaded the photo (D-034). Null when it was not recorded: photos
-    // from before it was recorded, or restored from a backup that did not carry it. Display only: every
-    // member has the same rights over every asset.
+    // Email of the household member who first uploaded these bytes (D-034): the member who reserved the upload,
+    // or for a restored photo the value its backup recorded. Null when it was not recorded: photos from before
+    // it was recorded, or restored from a backup that did not carry it. Display only: every member has the
+    // same rights over every asset.
     uploadedBy: MemberEmailSchema.nullable(),
     thumbnailUrl: z.url(),
     urlsExpireAt: z.string(),
@@ -132,14 +133,18 @@ export const UploadReserveSchema = z
         // When the photo was first added to a library. Restore sends the value from the backup so that the
         // timeline order of photos without a capture time survives; other clients omit it (= now).
         createdAt: z.iso.datetime({ offset: true }).optional(),
-        // Who uploaded the photo (docs/decisions.md D-034). Omitted: the member making this request, which is
-        // what every client but restore does. Restore sends the value from the backup, null included (not
-        // recorded). The server cannot check it: a restored photo may come from a member no longer listed.
-        uploadedBy: MemberEmailSchema.nullable().optional(),
       })
       .default({}),
   })
   .openapi('UploadReserve')
+
+// POST /api/v1/restore/uploads: the same reservation, for restoring a backup into a library (D-034). A normal
+// upload records the member who reserves it and takes no uploader from the client; only here is the uploader
+// a stated value, the one the backup recorded. Required, null (not recorded) included, so a restore never
+// credits the member running it. The server cannot check it: the photo may come from a member no longer listed.
+export const RestoreUploadReserveSchema = UploadReserveSchema.extend({
+  uploadedBy: MemberEmailSchema.nullable(),
+}).openapi('RestoreUploadReserve')
 
 export const UploadTargetSchema = z
   .object({
@@ -509,6 +514,7 @@ export type Asset = z.infer<typeof AssetSchema>
 export type AssetPage = z.infer<typeof AssetPageSchema>
 export type AssetMonth = z.infer<typeof AssetMonthSchema>
 export type UploadReserve = z.input<typeof UploadReserveSchema>
+export type RestoreUploadReserve = z.input<typeof RestoreUploadReserveSchema>
 export type UploadReservation = z.infer<typeof UploadReservationSchema>
 export type UploadFinalizeResult = z.infer<typeof UploadFinalizeResultSchema>
 export type Album = z.infer<typeof AlbumSchema>

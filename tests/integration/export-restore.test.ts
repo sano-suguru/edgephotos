@@ -266,7 +266,7 @@ describe('export and restore to an empty environment', () => {
           retryDelayMs: () => 0,
           // Every third API call fails before reaching the Worker. Creating POSTs are never repeated, so spare them.
           api: async (path: string, init?: RequestInit) => {
-            const creates = init?.method === 'POST' && (path === '/api/v1/albums' || path === '/api/v1/uploads')
+            const creates = init?.method === 'POST' && (path === '/api/v1/albums' || path === '/api/v1/restore/uploads')
             if (++calls % 3 === 0 && !creates) {
               injected.unavailable++
               return new Response('unavailable', { status: 503 })
@@ -318,7 +318,7 @@ describe('export and restore to an empty environment', () => {
       // The reservation is created, then the response is lost.
       api: async (path: string, init?: RequestInit) => {
         const res = await inner.api(path, init)
-        if (path === '/api/v1/uploads' && init?.method === 'POST') {
+        if (path === '/api/v1/restore/uploads' && init?.method === 'POST') {
           reserves++
           throw new TypeError('network connection lost')
         }

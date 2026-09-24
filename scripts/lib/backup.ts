@@ -14,6 +14,7 @@ import {
   ExportManifestSchema,
   IdSchema,
   InstantSchema,
+  type RestoreUploadReserve,
   type StorageAuditIssue,
   type StorageAuditPage,
   type UploadFinalizeResult,
@@ -421,7 +422,7 @@ export async function restoreLibrary(
     let newId: string
     try {
       // Not repeated: each reserve creates a new upload, so a lost response would leave a stray reservation.
-      const reservation = await apiJson<UploadReservation>(client, '/api/v1/uploads', {
+      const reservation = await apiJson<UploadReservation>(client, '/api/v1/restore/uploads', {
         method: 'POST',
         once: true,
         body: JSON.stringify({
@@ -434,10 +435,10 @@ export async function restoreLibrary(
             ...(asset.height ? { height: asset.height } : {}),
             ...(asset.takenAt ? { takenAt: asset.takenAt } : {}),
             createdAt: asset.createdAt,
-            // null (not recorded) for a v1 / v2 backup; omitting it would credit the member running restore.
-            uploadedBy: asset.uploadedBy,
           },
-        }),
+          // null (not recorded) for a v1 / v2 backup (D-034).
+          uploadedBy: asset.uploadedBy,
+        } satisfies RestoreUploadReserve),
       })
       await putTarget(client, reservation.targets.original, original)
       await putTarget(client, reservation.targets.thumbnail, thumbnail)
