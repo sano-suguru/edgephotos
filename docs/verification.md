@@ -12,7 +12,7 @@
 
 - 最終確認: 2026-09-24
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`
-- 未確認: production 環境の作成と deploy、iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
+- 未確認: production 環境の作成と deploy（初回 deploy の secret の渡し方は[確認済み](#初回-deploy-の-secret-の渡し方2026-09-24)）、iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
 各項目に日付がある場合は、その日付が優先します。
 
@@ -633,6 +633,19 @@ CI は Linux runner の WebKit で HEIC を decode できないため、この a
 同じ写真を API（`GET /api/v1/assets`）でも確かめた。最新の 1 枚（2026-09-24 03:03 UTC）の `uploadedBy` には email が入り、それより前の写真は `null` だった。
 
 2 人目の member による upload は、実環境では確かめていない（[2 人の household での利用](#2-人の-household-での利用)）。
+
+## 初回 deploy の secret の渡し方（2026-09-24）
+
+production の作成前に、Worker がまだ無い状態からの初回 deploy を確かめた。remote-test は Worker が既にあるため使えない。
+
+使い捨ての Worker `edgephotos-bootstrap-test` を使った。数行の Worker で、`secrets.required` は production と同じ 7 つ。D1 / R2 の binding は持たず、`workers_dev: false` で URL も持たない。secret の値はすべてダミー。wrangler 4.131.2。
+
+- `--secrets-file` を付けない初回 deploy は、7 つの名前を挙げた `The following required secrets have not been set` で失敗した
+- `wrangler deploy --secrets-file <.env 形式>` は初回 deploy として成功した。`wrangler secret list` に 7 つの名前が出た
+- 続けて `--secrets-file` を付けずに deploy し直しても成功し、`secret list` の 7 つは残った
+- 確認後に Worker を `wrangler delete` で削除し、`10007`（存在しない）を確認した
+
+この結果を [初回の deploy で secret を渡す](operations.md#初回の-deploy-で-secret-を渡す) に反映した。
 
 ## 未検証
 

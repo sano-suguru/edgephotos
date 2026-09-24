@@ -9,11 +9,14 @@ EdgePhotos v1 のセットアップ、更新、backup / restore、アンイン�
 安全性を下げて完全ワンクリックを目指しません。利用者が自分の Cloudflare account に必要な設定を明示的に確認できる構成にします。
 
 ```text
-1. Create D1 / R2 and deploy the Worker
+1. Create D1 / R2 and apply migrations
 2. Configure Cloudflare Access
-3. Configure R2 signing credentials and CORS
-4. Open EdgePhotos and verify setup
+3. Create R2 signing credentials
+4. Deploy the Worker with secrets, then configure R2 CORS
+5. Open EdgePhotos and verify setup
 ```
+
+Worker の hostname（`APP_ORIGIN`）は deploy 前から決まっています。workers.dev なら `https://<worker 名>.<account の subdomain>.workers.dev` です。
 
 Deploy to Cloudflare ボタンは Release polish の範囲です（[roadmap.md](roadmap.md)）。
 
@@ -43,8 +46,10 @@ pnpm wrangler r2 bucket create edgephotos-remote-test
 
 pnpm wrangler d1 migrations apply edgephotos-remote-test --env remote-test --remote
 CLOUDFLARE_ENV=remote-test pnpm build
-pnpm wrangler deploy --config dist/edgephotos/wrangler.json
+pnpm wrangler deploy --config dist/edgephotos/wrangler.json --secrets-file <secrets.env>   # 初回のみ --secrets-file
 ```
+
+初回の deploy には 7 つの secret の値が要ります（[初回の deploy で secret を渡す](#初回の-deploy-で-secret-を渡す)）。そのため、deploy の前に [Cloudflare Access](#4-cloudflare-access) の application と R2 API token を作っておきます。
 
 `wrangler.jsonc` に `database_id` を書かなくても deploy できます。wrangler が `database_name` で既存 D1 を解決します。
 
@@ -124,7 +129,7 @@ member を削除しても、その人が upload した写真は library に残�
 
 ### `OWNER_EMAIL` から移行する
 
-`OWNER_EMAIL` を設定した Worker を更新する場合は、deploy の前に新しい secret を入れます。`secrets.required` に `HOUSEHOLD_EMAILS` があるため、設定しないまま deploy すると失敗します（データは変わりません）。Worker がすでにある更新なので、下の「secret は deploy のあとに設定する」（初回 deploy の注意）は当たりません。
+`OWNER_EMAIL` を設定した Worker を更新する場合は、deploy の前に新しい secret を入れます。`secrets.required` に `HOUSEHOLD_EMAILS` があるため、設定しないまま deploy すると失敗します（データは変わりません）。Worker がすでにある更新なので、下の「初回の deploy で secret を渡す」は当たりません。
 
 ```bash
 pnpm wrangler secret put HOUSEHOLD_EMAILS [--env <env>]   # 旧 OWNER_EMAIL の値を含める
@@ -134,11 +139,15 @@ pnpm wrangler secret delete OWNER_EMAIL [--env <env>]     # deploy と diagnose 
 
 D1 の migration はありません。library は元から 1 つで、asset に所有者の列を持たないためです。
 
-### secret は deploy のあとに設定する
+### 初回の deploy で secret を渡す
 
-`wrangler secret put` は Worker が無ければ作ります。しかしそのあとで `wrangler deploy` すると、deploy 前に入れた secret は残りませんでした（2026-09-18 に `restore-test` で確認）。
+Worker がまだ無い初回は、`wrangler deploy --secrets-file <file>` で 7 つの secret を deploy と同時に渡します。file は `.env` 形式（`NAME=value` を 1 行ずつ）で、repository の外に置き、deploy が終わったら削除します。
 
-また、標準入力が端末でない環境（CI、エディタ内のシェル）では、値の入力を求められないまま空の secret が「Success」として保存されます。値が入ったかどうかは `pnpm diagnose` で確認してください。
+`--secrets-file` の無い初回 deploy は `secrets.required` で失敗します。2 回目以降の deploy では `--secrets-file` を付けません。secret は前回の deploy から引き継がれます（[verification.md](verification.md#初回-deploy-の-secret-の渡し方2026-09-24)）。
+
+`wrangler secret put` で先に Worker を作る方法は使いません。そのあとで `wrangler deploy` すると、deploy 前に入れた secret は残りませんでした（2026-09-18 に `restore-test` で確認）。Worker ができたあとの値の変更は `wrangler secret put` で構いません。
+
+また、標準入力が端末でない環境（CI、エディタ内のシェル）では、`wrangler secret put` が値の入力を求めないまま空の secret を「Success」として保存します。値が入ったかどうかは `pnpm diagnose` で確認してください。
 
 R2 credential は、対象 bucket だけの Object Read & Write 権限を持つ R2 API token から作成します。Cloudflare account 全体を管理できる token を EdgePhotos へ設定しません。
 
