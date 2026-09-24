@@ -200,7 +200,13 @@ export type FinalizeOutcome = { result: 'created' | 'duplicate'; asset: AssetRow
 
 // Step 3. Idempotent: replays converge on the same asset. D1 and R2 are not one transaction;
 // on any D1 failure the upload stays pending and objects are left in place for a retry.
-export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Promise<FinalizeOutcome> {
+// `uploadedBy` is the member finalizing, or null when nobody's request is the upload (storage cleanup).
+// Only the call that creates the asset records it; a replay or a duplicate leaves the existing asset alone.
+export async function finalizeUpload(
+  ctx: ServiceContext,
+  uploadId: string,
+  uploadedBy: string | null,
+): Promise<FinalizeOutcome> {
   const upload = await getUploadRow(ctx.db, uploadId)
   if (!upload) throw new ApiError(404, 'UPLOAD_NOT_FOUND', 'Upload not found.')
 
@@ -214,6 +220,9 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
   const now = ctx.now()
   const ts = now.toISOString()
   const createdAt = upload.asset_created_at ?? upload.created_at
+  // A restore sends the original upload time; the member running it did not upload the photo, and the
+  // backup does not say who did (D-034).
+  const attributedTo = upload.asset_created_at === null ? uploadedBy : null
   try {
     // The asset is created from the upload row only while that row is still pending, in the same transaction
     // that settles it. Storage cleanup settles expired uploads first and then removes their objects, so an
@@ -238,6 +247,7 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
               trashed_at: sql<null>`NULL`.as('trashed_at'),
               created_at: sql<string>`${createdAt}`.as('created_at'),
               updated_at: sql<string>`${ts}`.as('updated_at'),
+              uploaded_by: sql<string | null>`${attributedTo}`.as('uploaded_by'),
             })
             .from(uploads)
             .where(and(eq(uploads.id, upload.id), eq(uploads.status, 'pending'))),

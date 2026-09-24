@@ -117,7 +117,7 @@ Cloudflare Access 固有の token・assertion・Cookie は HTTP 層で検証し�
 
 EdgePhotos が想定する利用者は 1 つの household です。Access を通過しただけでは member とみなしません。`HOUSEHOLD_EMAILS` に設定した email と一致する principal だけが private API を使えます（[D-028](decisions.md)）。
 
-member は互いに対等で、1 つの library を共同利用します。`AppPrincipal` は role を持たず、asset・album・share のどの行にも「誰が作ったか」を記録しません。したがって認可の判断は「member かどうか」だけです。
+member は互いに対等で、1 つの library を共同利用します。`AppPrincipal` は role を持ちません。asset は upload した member の email を `uploadedBy` として持ちますが、表示のためだけの値で、認可にも絞り込みにも使いません（[D-034](decisions.md)）。album・share には「誰が作ったか」を記録しません。したがって認可の判断は「member かどうか」だけです。
 
 将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とします。Native 固有の token を Worker の中で直接解釈しない形は変えません。
 
@@ -222,6 +222,8 @@ finalize での確認内容（[D-012](decisions.md)）:
 D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transaction）で行います。asset は upload 行がまだ `pending` の場合だけ作ります（`INSERT ... SELECT ... WHERE status = 'pending'`。[D-023](decisions.md)）。
 
 asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
+
+asset を作った finalize の request の member を `assets.uploaded_by` に記録します。再送や duplicate は既存 asset の値を変えません。restore（`metadata.createdAt` 付き）と storage cleanup が作った asset、および 0004 より前の asset は `NULL` で、API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。
 
 presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。
 

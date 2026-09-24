@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import type { UploadFinalizeResult, UploadReservation } from '../../src/contracts/schemas'
+import type { Asset, UploadFinalizeResult, UploadReservation } from '../../src/contracts/schemas'
 import {
   assetIdFromTarget,
   call,
@@ -14,8 +14,9 @@ import {
   putObject,
 } from '../helpers'
 
-// The household is a set of Access identities that share one library. No row records who created an
-// asset, so these tests assert the consequence: whatever one member does, the other sees and can undo.
+// The household is a set of Access identities that share one library. An asset records who uploaded it
+// (D-034) for display only; nothing decides access by it, so these tests assert the consequence: whatever
+// one member does, the other sees and can undo.
 // These tests share one D1 per file, so each test works on the assets it created.
 
 type App = Awaited<ReturnType<typeof makeApp>>
@@ -247,5 +248,104 @@ describe('duplicate originals across members', () => {
     for (const member of [MEMBER_A, MEMBER_B]) {
       expect((await timelineIds(app, member)).filter((id) => id === first.asset.id)).toEqual([first.asset.id])
     }
+  })
+})
+
+describe('uploader attribution', () => {
+  it('records which member finalized each upload, and shows it to every member', async () => {
+    const app = await makeApp()
+    const fromA = (await uploadAs(app, MEMBER_A)).result.asset
+    const fromB = (await uploadAs(app, MEMBER_B)).result.asset
+    expect(fromA.uploadedBy).toBe(MEMBER_A)
+    expect(fromB.uploadedBy).toBe(MEMBER_B)
+
+    for (const member of [MEMBER_A, MEMBER_B]) {
+      const token = await memberToken(member)
+      for (const [id, uploader] of [
+        [fromA.id, MEMBER_A],
+        [fromB.id, MEMBER_B],
+      ]) {
+        expect((await callJson<Asset>(app, 'GET', `/api/v1/assets/${id}`, { expect: 200, token })).uploadedBy).toBe(
+          uploader,
+        )
+      }
+      const page = await callJson<{ items: Asset[] }>(app, 'GET', '/api/v1/assets?limit=200', { expect: 200, token })
+      expect(page.items.find((i) => i.id === fromA.id)?.uploadedBy).toBe(MEMBER_A)
+      expect(page.items.find((i) => i.id === fromB.id)?.uploadedBy).toBe(MEMBER_B)
+    }
+  })
+
+  it('keeps the first uploader when the other member uploads the same bytes', async () => {
+    const app = await makeApp()
+    const p = await photo()
+    // Both reserved before either finalized, so the second one reaches finalize as a duplicate.
+    const a = await reserveAs(app, MEMBER_A, p)
+    const b = await reserveAs(app, MEMBER_B, p)
+    for (const r of [a, b]) {
+      for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
+    }
+    const finalize = async (id: string, email: string) =>
+      callJson<UploadFinalizeResult>(app, 'POST', `/api/v1/uploads/${id}/finalize`, {
+        expect: 200,
+        token: await memberToken(email),
+      })
+    const first = await finalize(a.upload.id, MEMBER_A)
+    const second = await finalize(b.upload.id, MEMBER_B)
+    expect(second.result).toBe('duplicate')
+    expect(second.asset.id).toBe(first.asset.id)
+    expect(second.asset.uploadedBy).toBe(MEMBER_A)
+    // A replay by the other member does not rewrite it either.
+    expect((await finalize(a.upload.id, MEMBER_B)).asset.uploadedBy).toBe(MEMBER_A)
+  })
+
+  it('does not attribute a restored photo to the member running the restore', async () => {
+    const app = await makeApp()
+    const restored = (await uploadAs(app, MEMBER_B, undefined, { createdAt: '2020-01-02T03:04:05.000Z' })).result
+    expect(restored.result).toBe('created')
+    expect(restored.asset.uploadedBy).toBeNull()
+  })
+
+  it('serves a photo stored before attribution existed, with no uploader, to either member', async () => {
+    const app = await makeApp()
+    const { result, fixture } = await uploadAs(app, MEMBER_A)
+    const id = result.asset.id
+    // What 0004 leaves on every earlier row.
+    await env.DB.prepare('UPDATE assets SET uploaded_by = NULL WHERE id = ?').bind(id).run()
+
+    const token = await memberToken(MEMBER_B)
+    const asset = await callJson<Asset>(app, 'GET', `/api/v1/assets/${id}`, { expect: 200, token })
+    expect(asset.uploadedBy).toBeNull()
+    const page = await callJson<{ items: Asset[] }>(app, 'GET', '/api/v1/assets?limit=200', { expect: 200, token })
+    expect(page.items.find((i) => i.id === id)?.uploadedBy).toBeNull()
+
+    const original = await callJson<{ url: string }>(app, 'GET', `/api/v1/assets/${id}/original`, {
+      expect: 200,
+      token,
+    })
+    expect(new Uint8Array(await (await app.request(original.url)).arrayBuffer())).toEqual(fixture.original)
+
+    const favorite = await callJson<Asset>(app, 'PATCH', `/api/v1/assets/${id}`, {
+      expect: 200,
+      token,
+      body: { isFavorite: true },
+    })
+    expect(favorite.isFavorite).toBe(true)
+    expect(favorite.uploadedBy).toBeNull()
+
+    // Still the one asset for these bytes: uploading them again is reported as this photo, not claimed.
+    const res = await call(app, 'POST', '/api/v1/uploads', {
+      token,
+      body: {
+        original: { size: fixture.original.byteLength, contentType: 'image/jpeg', sha256: fixture.sha256 },
+        thumbnail: { size: fixture.thumbnail.byteLength },
+        preview: { size: fixture.preview.byteLength },
+        metadata: {},
+      },
+    })
+    expect(res.status).toBe(409)
+    const body = (await res.json()) as { error: { code: string; details: { assetId: string } } }
+    expect(body.error.code).toBe('DUPLICATE_ASSET')
+    expect(body.error.details.assetId).toBe(id)
+    expect((await callJson<Asset>(app, 'GET', `/api/v1/assets/${id}`, { expect: 200, token })).uploadedBy).toBeNull()
   })
 })

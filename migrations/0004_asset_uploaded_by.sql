@@ -1,0 +1,1 @@
+ALTER TABLE `assets` ADD `uploaded_by` text;

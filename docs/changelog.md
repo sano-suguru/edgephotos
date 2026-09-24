@@ -6,6 +6,14 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## upload した人の記録（2026-09-24）
+
+finalize で新しく作られた写真に、finalize した household member の email を記録します。viewer の「情報」に「追加した人」として表示します。記録の無い写真（この変更より前の写真、backup から restore した写真、storage cleanup が完了させた写真）は「記録なし」と表示します。
+
+API の asset（一覧と 1 件）に `uploadedBy`（email または `null`）が増えます。権限・一覧・favorite・album・trash・share・backup の manifest は変わりません（[D-034](decisions.md)）。
+
+更新時は `0004_asset_uploaded_by` の migration を deploy の前に適用します。既存の写真は `NULL` のまま残り、後から埋めません。production での migration の適用と確認はまだです。
+
 ## derivative 検査の allowlist 化と CLI の https 必須化（2026-09-23）
 
 finalize は derivative の header segment を allowlist で検査します。allowlist 外の segment（COM、ICC profile、MPF、JUMBF など）を含む thumbnail / preview と、SOF の無い bytes は `422` です。APP0 / APP14 は決まった形の JFIF / Adobe だけを受け付けます。Client は PUT 前に同じ判定関数で取り除くため、正規の upload と作り直しは通ります。

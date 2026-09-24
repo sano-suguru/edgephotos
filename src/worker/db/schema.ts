@@ -25,6 +25,10 @@ export const assets = sqliteTable(
     trashed_at: text(),
     created_at: text().notNull(),
     updated_at: text().notNull(),
+    // The member (normalized AppPrincipal.email) whose request finalized the upload. Attribution only: it
+    // never decides who may read or change the asset (docs/decisions.md D-034). NULL when it was not
+    // recorded: assets from before 0004, restored from a backup, or completed by storage cleanup.
+    uploaded_by: text(),
   },
   (t) => [
     // One asset per original byte sequence. Re-uploads converge on the existing asset.

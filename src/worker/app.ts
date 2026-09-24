@@ -228,7 +228,7 @@ export function createApp(options: AppOptions) {
       },
     }),
     async (c) => {
-      const outcome = await uploads.finalizeUpload(svc(c), c.req.valid('param').uploadId)
+      const outcome = await uploads.finalizeUpload(svc(c), c.req.valid('param').uploadId, c.get('principal').email)
       return c.json({ result: outcome.result, asset: await assets.toAsset(svc(c), outcome.asset) }, 200)
     },
   )

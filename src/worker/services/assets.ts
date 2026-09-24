@@ -24,6 +24,7 @@ export async function toAssetSummary(ctx: ServiceContext, row: AssetRow): Promis
     isFavorite: row.is_favorite === 1,
     trashedAt: row.trashed_at,
     createdAt: row.created_at,
+    uploadedBy: row.uploaded_by,
     thumbnailUrl: thumbnail.url,
     urlsExpireAt: thumbnail.expiresAt.toISOString(),
   }

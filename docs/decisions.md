@@ -911,3 +911,49 @@ POST に分けると、backup CLI が backup export を終えたときだけ記�
 残るリスク:
 
 - 記録は run が終わった時点のもので、その後に backup ディレクトリが壊れても変わらない。揃っているかは `pnpm backup check` が判断する
+
+## D-034: 写真を upload した member を記録し、viewer に表示する
+
+**状態:** 採用（2026-09-24）
+
+household の 2 人が同じ library に写真を入れるので、viewer で「どちらが追加した写真か」を見分けたい、という要求が出ました。[D-028](#d-028-許可した複数の-email-が-1-つの-library-を対等に共同利用する) は `created_by` を「誰も読まない列」として見送り、「member ごとの表示を実際に必要としたとき」を再検討の条件にしていました。その条件が満たされたので、表示のための列を足します。D-028 の本文は書き換えません。
+
+`assets` に nullable な `uploaded_by`（text）を足します（`0004_asset_uploaded_by`）。API の asset（`AssetSummary` / `Asset`）は `uploadedBy: string | null` を返します。
+
+**記録するのは、asset を作った finalize の request の member。** 値は `AppPrincipal.email`（正規化済み）です。Access の `sub` は IdP を変えると変わり、`HOUSEHOLD_EMAILS` とも照合できないので使いません。reserve と PUT と finalize は通常同じ client が続けて行うので、finalize した member が upload した member です。
+
+- finalize の再送と duplicate は、既存 asset の値を変えない（asset を作る INSERT は `pending` の upload にしか効かない）。同じ bytes を後から upload した member は、upload した人になりません
+- restore（reserve に `metadata.createdAt` がある）で作った asset は `NULL`。restore を実行した member は写真を upload した人ではなく、manifest v1 は upload した人を持たないため
+- storage cleanup が完了させた upload も `NULL`。cleanup を実行した member の request は、その upload ではないため
+
+**記録の無い写真は「記録なし」と表示し、推測で埋めない。** migration は既存の行を `NULL` のまま残します。backfill はしません。どの member が upload したかを示す記録が他に無いからです。
+
+**D-028 の対等なモデルは変えない。** `uploaded_by` は表示だけに使います。
+
+- 認可に使わない。どの member も、他の member が upload した写真を D-028 と同じく操作できる
+- 絞り込み・並べ替え・member ごとの timeline / favorite / album / trash を作らない。index も張らない
+- role・招待・user ごとの library を入れない
+
+**公開面と backup には出さない。** 共有ページの response（`SharedAsset`）と export の manifest（`ExportAsset`）は変えません。member の email を共有相手へ渡さないためです。manifest v1 は「無視しても restore でデータを失わない optional field だけを足せる」契約なので（[D-025](#d-025-backup-manifest-を-v1-として確定し読み込み時に検証する)）、upload した人を足すなら formatVersion を上げることになります。今回はそこまで広げません。
+
+却下した案:
+
+- reserve 時に `uploads` にも記録して finalize で写す: 列が 2 つになる。reserve と finalize を別の member が行う client は無い
+- `sub` を記録する: 上のとおり、表示できず IdP の変更で意味を失う
+- restore を実行した member を記録する: upload した人を作り出すことになる
+
+影響:
+
+- 更新時に `0004_asset_uploaded_by` を適用する。既存の写真は「記録なし」と表示される
+- API の asset に `uploadedBy` が増える。読むのは Web だけで、この repository と一緒に更新する
+
+残るリスク:
+
+- backup から restore すると、upload した人は失われて「記録なし」になる
+- 記録は email なので、member の email が変わっても過去の写真は古い email のまま表示される。member を削除しても、その email は写真に残る
+- 記録は request を送った member の申告ではなく Access の検証済み identity だが、同じ端末を 2 人で使えば実際に撮った人とは一致しない
+
+再検討する条件:
+
+- backup をまたいで upload した人を残す必要が出たとき（manifest の formatVersion を上げる）
+- 表示だけでなく、upload した人で権限や一覧を分ける要求が出たとき（D-028 の見直しとして扱う）

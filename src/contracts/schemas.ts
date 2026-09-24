@@ -61,6 +61,10 @@ export const AssetSummarySchema = z
     isFavorite: z.boolean(),
     trashedAt: z.string().nullable(),
     createdAt: z.string(),
+    // Email of the household member who uploaded the photo. Null when it was not recorded (photos from
+    // before this was recorded, restored from a backup, or completed by storage cleanup). Display only:
+    // every member has the same rights over every asset.
+    uploadedBy: z.string().nullable(),
     thumbnailUrl: z.url(),
     urlsExpireAt: z.string(),
   })
@@ -117,7 +121,8 @@ export const UploadReserveSchema = z
         height: z.number().int().positive().optional(),
         takenAt: TakenAtSchema.optional(),
         // When the photo was first added to a library. Restore sends the value from the backup so that the
-        // timeline order of photos without a capture time survives; other clients omit it (= now).
+        // timeline order of photos without a capture time survives; other clients omit it (= now). Sending it
+        // also leaves the uploader unrecorded (docs/decisions.md D-034), so a normal upload must not.
         createdAt: z.iso.datetime({ offset: true }).optional(),
       })
       .default({}),

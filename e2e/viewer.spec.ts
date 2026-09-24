@@ -98,3 +98,37 @@ test('a long album menu stays inside the viewport and scrolls from the keyboard'
   await expect(menu).toBeHidden()
   await expect(trigger).toBeFocused()
 })
+
+test('the info panel names who added the photo, and says so when that was not recorded', async ({ page }) => {
+  await openApp(page)
+  const name = `${uniqueName('uploader')}.jpg`
+  await uploadPhoto(page, name)
+  const id = await tile(page, name).getAttribute('data-asset-id')
+
+  await tile(page, name).click()
+  const viewer = page.getByRole('dialog', { name })
+  await viewer.getByRole('button', { name: '情報', exact: true }).click()
+  const info = viewer.getByRole('complementary', { name: '写真の情報' })
+  // vite dev signs in as the first DEV_HOUSEHOLD_EMAILS entry (vite.config.ts).
+  await expect(info.getByRole('definition').last()).toHaveText('you@localhost.test')
+  await page.keyboard.press('Escape')
+  await expect(viewer).toBeHidden()
+
+  // A photo stored before attribution existed comes back with uploadedBy null, in the list and on its own.
+  const legacy = (asset: { id: string }) => (asset.id === id ? { ...asset, uploadedBy: null } : asset)
+  await page.route(
+    (url) => url.pathname.startsWith('/api/v1/assets'),
+    async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      const response = await route.fetch()
+      const body = await response.json()
+      const json = Array.isArray(body.items) ? { ...body, items: body.items.map(legacy) } : legacy(body)
+      return route.fulfill({ response, json })
+    },
+  )
+  await page.reload()
+  await tile(page, name).click()
+  await viewer.getByRole('button', { name: '情報', exact: true }).click()
+  await expect(info.getByRole('definition').last()).toHaveText('記録なし')
+  await expect(info).not.toContainText('you@localhost.test')
+})
