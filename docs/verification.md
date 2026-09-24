@@ -11,7 +11,7 @@
 ## 現在の状況
 
 - 最終確認: 2026-09-24
-- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[作成と初回 deploy](#production-の作成と初回-deploy2026-09-24)）
+- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload）
 - 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
 各項目に日付がある場合は、その日付が優先します。
@@ -667,7 +667,7 @@ production の作成前に、Worker がまだ無い状態からの初回 deploy 
 ### deploy と CORS
 
 - 7 つの secret を `.env` 形式の file にまとめ、`wrangler deploy --config dist/edgephotos/wrangler.json --secrets-file <file>` の初回 deploy が成功した。`wrangler secret list` では 7 つとも `secret_text`
-- file は repository 内の git が無視する path に置き（運用の手順は repository の外）、deploy の直後に削除した
+- file の置き場所だけ、運用の手順（repository の外）から外れた。repository 内の git が無視する path に置き、deploy の直後に削除した。commit には入っていない
 - R2 CORS は、運用の [R2 CORS](operations.md#6-r2-cors) の規則を `APP_ORIGIN` の origin だけで `cors set` し、`cors list` で読み戻した。設定前の bucket に CORS 規則は無かった
 
 ### diagnose と smoke
