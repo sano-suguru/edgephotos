@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import preact from '@preact/preset-vite'
 import tailwindcss from '@tailwindcss/vite'
@@ -7,12 +8,15 @@ import { createDevAccess } from './scripts/vite-dev-access.ts'
 export default defineConfig(async ({ command }) => {
   const plugins: PluginOption[] = []
   let devVars: Record<string, string> | undefined
+  // `vite dev` injects <script>/<style> tags. They carry this nonce, and the Worker adds it to the CSP, so
+  // dev runs under the production policy instead of one relaxed with 'unsafe-inline'.
+  const devCspNonce = command === 'serve' ? randomBytes(16).toString('base64url') : undefined
 
   if (command === 'serve') {
     const devAccess = await createDevAccess(
       process.env.DEV_HOUSEHOLD_EMAILS ?? 'you@localhost.test,partner@localhost.test',
     )
-    devVars = devAccess.vars
+    devVars = { ...devAccess.vars, DEV_CSP_NONCE: devCspNonce as string }
     // Must run before the Cloudflare plugin so the emulated Access header reaches the Worker.
     plugins.push(devAccess.plugin)
   }
@@ -31,6 +35,7 @@ export default defineConfig(async ({ command }) => {
     plugins,
     server: { port: 5173, strictPort: true },
     preview: { port: 4173, strictPort: true },
+    html: devCspNonce ? { cspNonce: devCspNonce } : undefined,
     environments: {
       client: {
         build: {

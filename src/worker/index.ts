@@ -13,6 +13,7 @@ async function buildApp(env: Env) {
       const keys = createLocalJWKSet(JSON.parse(env.DEV_ACCESS_JWKS))
       options.accessKeys = () => keys
     }
+    options.devCspNonce = env.DEV_CSP_NONCE
     if (env.DEV_BLOB_SIGNING_KEY && env.APP_ORIGIN) {
       const local = await import('./storage/local-blobs')
       options.signer = local.createLocalSigner(env.APP_ORIGIN, env.DEV_BLOB_SIGNING_KEY)

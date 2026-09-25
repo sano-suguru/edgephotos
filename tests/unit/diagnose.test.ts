@@ -6,13 +6,18 @@ import {
   checkCorsPreflight,
   checkDeployment,
   checkMigrations,
+  checkPrivateAppCsp,
   checkPublicAccess,
   type Fetch,
   parseDiagnoseArgs,
   REQUIRED_SECRETS,
 } from '../../scripts/lib/diagnose'
+import { privateContentSecurityPolicy } from '../../src/worker/http/security'
 import { readR2SignerConfig } from '../../src/worker/storage/signer'
 import { APP_ORIGIN, assertion, makeApp } from '../helpers'
+
+// The policy the Worker actually sends for an account, so the check follows changes to it.
+const PRIVATE_CSP = privateContentSecurityPolicy(['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com'])
 
 const status = (checks: Check[], name: string) => checks.find((c) => c.name === name)?.status
 
@@ -137,6 +142,7 @@ describe('setup diagnostics', () => {
         return new Response('<html>', { headers: { 'content-security-policy': "default-src 'self'" } })
       }
       if (!member) return redirect()
+      if (path === '/') return new Response('<html>', { headers: { 'content-security-policy': PRIVATE_CSP } })
       if (path === '/api/v1/me') return Response.json({ email: 'o@example.test' })
       if (path === '/api/v1/diagnostics') {
         // Pending uploads that have not expired are in flight and not worth a warning.
@@ -155,6 +161,7 @@ describe('setup diagnostics', () => {
       latestLocalMigration: '0002_next.sql',
     })
     expect(status(checks, 'private API')).toBe('pass')
+    expect(status(checks, 'private app: CSP')).toBe('pass')
     expect(status(checks, 'worker: D1 schema')).toBe('fail')
     expect(status(checks, 'library: interrupted uploads')).toBeUndefined()
     expect(status(checks, 'library: unfinished deletes')).toBeUndefined()
@@ -205,6 +212,25 @@ describe('setup diagnostics', () => {
     expect(failed?.status).toBe('fail')
     expect(failed?.detail).toContain('https://photos.other.test')
     expect(await albums()).toBe(before)
+  })
+})
+
+describe('private app CSP check', () => {
+  const answer =
+    (res: Response): Fetch =>
+    async () =>
+      res.clone()
+  const html = (csp?: string) =>
+    new Response('<html>', { headers: csp ? { 'content-security-policy': csp } : undefined })
+
+  it("passes only when the shell carries the CSP with this account's R2 endpoint", async () => {
+    expect((await checkPrivateAppCsp(answer(html(PRIVATE_CSP)), {})).status).toBe('pass')
+    // A deploy from before the Worker served the shell: the static asset has no CSP.
+    expect((await checkPrivateAppCsp(answer(html()), {})).status).toBe('fail')
+    // R2 missing from connect-src: presigned PUT and original download would be blocked.
+    expect((await checkPrivateAppCsp(answer(html(privateContentSecurityPolicy([]))), {})).status).toBe('fail')
+    const redirect = new Response(null, { status: 302, headers: { location: 'https://t.cloudflareaccess.com/' } })
+    expect((await checkPrivateAppCsp(answer(redirect), {})).status).toBe('fail')
   })
 })
 

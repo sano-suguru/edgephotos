@@ -38,6 +38,7 @@ import { ApiError, errorResponse, requestId } from './http/errors'
 import {
   checkWriteOrigin,
   PRIVATE_HEADERS,
+  privateContentSecurityPolicy,
   SHARE_HEADERS,
   shareContentSecurityPolicy,
   withHeaders,
@@ -60,6 +61,8 @@ export type AppOptions = {
   signer?: BlobSigner
   // Extra routes mounted before everything else (local development blob endpoint and tests only).
   localRoutes?: { prefix: string; app: Hono }
+  // `vite dev` only: the nonce its client puts on the <style>/<script> tags it injects.
+  devCspNonce?: string
 }
 
 type Vars = {
@@ -783,15 +786,35 @@ export function createApp(options: AppOptions) {
     ),
   )
 
+  // The R2 S3 endpoint presigned URLs point at: one account, never a wildcard. Local development has no
+  // R2 settings and signs same-origin /__local URLs, which 'self' already allows.
+  const r2Sources = () => {
+    const r2 = readR2SignerConfig(env)
+    return r2 ? [`https://${r2.accountId}.r2.cloudflarestorage.com`] : []
+  }
+
   // Share page shell. Served by the Worker so share-specific headers always apply.
   app.get('/share/:shareId{[A-Za-z0-9_-]{22}}', async (c) => {
     if (!env.ASSETS) throw new ApiError(404, 'NOT_FOUND', 'Not found.')
     const asset = await env.ASSETS.fetch(new URL('/share', c.req.url))
     const res = new Response(asset.body, asset)
-    const r2 = readR2SignerConfig(env)
-    const imgSources = r2 ? [`https://${r2.accountId}.r2.cloudflarestorage.com`] : []
     for (const [k, v] of Object.entries(SHARE_HEADERS)) res.headers.set(k, v)
-    res.headers.set('Content-Security-Policy', shareContentSecurityPolicy(imgSources))
+    res.headers.set('Content-Security-Policy', shareContentSecurityPolicy(r2Sources(), options.devCspNonce))
+    return res
+  })
+
+  // Private app shell. run_worker_first sends every path except /share/assets/* here, so each HTML
+  // document of the private app (/, /albums/..., and any unknown path the SPA fallback answers) carries
+  // the CSP. Unmatched API, share and dev blob paths stay JSON 404s instead of becoming the app.
+  app.get('*', async (c) => {
+    if (!env.ASSETS || /^\/(api|share|__local)(\/|\.|$)/.test(c.req.path)) {
+      throw new ApiError(404, 'NOT_FOUND', 'Not found.')
+    }
+    const asset = await env.ASSETS.fetch(c.req.raw)
+    const res = new Response(asset.body, asset)
+    res.headers.set('Referrer-Policy', 'no-referrer')
+    res.headers.set('X-Content-Type-Options', 'nosniff')
+    res.headers.set('Content-Security-Policy', privateContentSecurityPolicy(r2Sources(), options.devCspNonce))
     return res
   })
 

@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test'
-import { makeJpeg, openApp, tile, uniqueName, uploadFiles } from './fixtures'
+import { expect, makeJpeg, openApp, test, tile, uniqueName, uploadFiles } from './fixtures'
 
 // Base UI through preact/compat: focus trap, Escape, focus restore and menu keyboard navigation
 // (docs/development.md §5). These only exist in a real browser.

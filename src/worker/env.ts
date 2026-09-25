@@ -15,6 +15,7 @@ export interface Env {
   // Local development only (injected by the Vite dev server, ignored in production builds).
   DEV_ACCESS_JWKS?: string
   DEV_BLOB_SIGNING_KEY?: string
+  DEV_CSP_NONCE?: string
 }
 
 export type AccessConfig = {

@@ -1,5 +1,5 @@
-import { expect, type Page, test } from '@playwright/test'
-import { openApp } from './fixtures'
+import type { Page } from '@playwright/test'
+import { expect, openApp, test } from './fixtures'
 
 // Month navigation in a real browser: the jump, the sticky heading, reading back up the timeline, and the
 // address bar (docs/decisions.md D-031). The library is answered by the test, so it can be thousands of
@@ -10,8 +10,10 @@ const PAGE_SIZE = 60
 const MONTHS = 25
 const PER_MONTH = 200
 
-// A 1x1 GIF, so every tile decodes and nothing retries a presigned URL.
-const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+// A 1x1 GIF, so every tile decodes and nothing retries a presigned URL. Answered by the test from the app's
+// own origin: the CSP allows images from there and from R2, not data: URLs.
+const PIXEL = '/__e2e/pixel.gif'
+const PIXEL_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
 
 type Item = { id: string; month: string; takenAt: string; name: string }
 
@@ -61,6 +63,7 @@ const gone = new Set<string>()
 
 async function serveLibrary(page: Page) {
   gone.clear()
+  await page.route('**/__e2e/pixel.gif', (route) => route.fulfill({ contentType: 'image/gif', body: PIXEL_GIF }))
   await page.route('**/api/v1/assets**', async (route) => {
     const url = new URL(route.request().url())
     const ITEMS = gone.size === 0 ? ALL_ITEMS : ALL_ITEMS.filter((i) => !gone.has(i.id))

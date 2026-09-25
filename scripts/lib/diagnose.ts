@@ -184,6 +184,24 @@ async function checkAppOrigin(api: Fetch, auth: Record<string, string>, origin: 
   return check(name, 'warn', `origin probe got ${res.status} ${code}`)
 }
 
+// The private app's HTML must come from the Worker with its CSP (wrangler.jsonc run_worker_first), and the
+// policy must let the browser reach this account's R2 endpoint, or uploads and photos break under it.
+export async function checkPrivateAppCsp(api: Fetch, auth: Record<string, string>): Promise<Check> {
+  const res = await api('/', { headers: auth })
+  const csp = res.headers.get('content-security-policy') ?? ''
+  if (res.status !== 200 || !csp.includes("frame-ancestors 'none'")) {
+    return check(
+      'private app: CSP',
+      'fail',
+      `got ${res.status}${csp ? '' : ' without a CSP'}; deploy the current build`,
+    )
+  }
+  const connect = csp.split(';').find((d) => d.trim().startsWith('connect-src')) ?? ''
+  return /https:\/\/[0-9a-f]{32}\.r2\.cloudflarestorage\.com/.test(connect)
+    ? check('private app: CSP', 'pass', "served by the Worker with the CSP, which allows this account's R2 endpoint")
+    : check('private app: CSP', 'fail', 'the CSP does not name the R2 endpoint (R2_ACCOUNT_ID)')
+}
+
 const PROBE_SHARE_ID = 'diagnoseProbe'.padEnd(22, '0')
 const PROBE_SECRET = 'diagnoseProbe'.padEnd(43, '0')
 
@@ -277,6 +295,7 @@ export async function checkDeployment(opts: {
     return results
   }
   results.push(check('private API', 'pass', 'member token accepted (ACCESS_AUD, ACCESS_TEAM_DOMAIN, HOUSEHOLD_EMAILS)'))
+  results.push(await checkPrivateAppCsp(api, auth))
 
   if (origin) results.push(await checkAppOrigin(api, auth, origin))
 

@@ -1,6 +1,5 @@
 import { statSync } from 'node:fs'
-import { expect, test } from '@playwright/test'
-import { naturalSize, openApp, tile, uniqueName, uploadPhoto } from './fixtures'
+import { expect, naturalSize, openApp, test, tile, uniqueName, uploadPhoto } from './fixtures'
 
 test('a preview that cannot be fetched says so and can be retried', async ({ page }) => {
   await openApp(page)
