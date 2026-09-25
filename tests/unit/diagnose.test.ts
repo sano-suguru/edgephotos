@@ -26,6 +26,8 @@ const goodConfig = {
   secretsRequired: [...REQUIRED_SECRETS],
   previewUrls: false,
   bucketName: 'photos',
+  runWorkerFirst: ['/*', '!/share/assets/*'],
+  notFoundHandling: 'none',
 }
 
 describe('setup diagnostics', () => {
@@ -45,8 +47,16 @@ describe('setup diagnostics', () => {
       secretsRequired: ['HOUSEHOLD_EMAILS'],
       previewUrls: undefined,
       bucketName: 'photos',
+      runWorkerFirst: ['/api/*', '/share/*', '!/share/assets/*'],
+      notFoundHandling: 'single-page-application',
     })
-    expect(bad.map((c) => c.status)).toEqual(['fail', 'fail', 'fail', 'fail'])
+    expect(bad.map((c) => c.status)).toEqual(['fail', 'fail', 'fail', 'fail', 'fail'])
+    // Either half of the routing alone reopens a page without the CSP.
+    const routing = (runWorkerFirst: string[], notFoundHandling: string) =>
+      checkConfig({ ...goodConfig, runWorkerFirst, notFoundHandling }).find((c) => c.name === 'config: assets routing')
+    expect(routing(['/*', '!/share/assets/*'], 'single-page-application')?.status).toBe('fail')
+    expect(routing(['/api/*', '/share/*', '!/share/assets/*'], 'none')?.status).toBe('fail')
+    expect(routing(['/*'], 'none')?.status).toBe('fail')
     expect(bad[1].detail).toContain('HOUSEHOLD_EMAILS')
   })
 

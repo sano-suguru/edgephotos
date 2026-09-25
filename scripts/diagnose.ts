@@ -81,6 +81,8 @@ async function main() {
     secretsRequired: config.secrets?.required ?? [],
     previewUrls: config.preview_urls,
     bucketName: bucket,
+    runWorkerFirst: config.assets?.run_worker_first,
+    notFoundHandling: config.assets?.not_found_handling,
   })
 
   if (!offline) {

@@ -305,6 +305,8 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - share secret 不正 / expired / revoked を拒否する。
 - 別 album の asset を share から取得できない。
 - 共有ページで album 名が markup として解釈されない（`e2e/share.spec.ts`）。
+- private app の HTML（未知の path を含む）は CSP 付きで返り、`/api`・`/share`・`/__local` 配下の route の無い path は app にならない（`tests/integration/app-shell.test.ts`、`e2e/csp.spec.ts`）。Browser E2E は CSP 違反 1 件で失敗する。
+- `/share/assets/*` に無いファイルが private app にならない。`wrangler.jsonc` の `run_worker_first` と `not_found_handling` を `pnpm diagnose --offline`（`pnpm check` に含む）が検査する。
 - share から original を取得できない。
 - preview / thumbnail から GPS が除去される。
 - upload finalize 再送で重複 asset が生じない。

@@ -42,6 +42,9 @@ export type WorkerConfig = {
   secretsRequired: string[]
   previewUrls: boolean | undefined
   bucketName: string | undefined
+  // assets.run_worker_first / assets.not_found_handling
+  runWorkerFirst: boolean | string[] | undefined
+  notFoundHandling: string | undefined
 }
 
 export function checkConfig(config: WorkerConfig): Check[] {
@@ -68,6 +71,19 @@ export function checkConfig(config: WorkerConfig): Check[] {
           'config: preview_urls',
           'fail',
           'must be false: preview hostnames are not covered by the Access application',
+        ),
+    // Every private HTML document reaches the Worker for its CSP, and a miss under the public
+    // /share/assets/* is a 404 rather than the app without its CSP (docs/decisions.md D-037).
+    Array.isArray(config.runWorkerFirst) &&
+    config.runWorkerFirst.length === 2 &&
+    config.runWorkerFirst.includes('/*') &&
+    config.runWorkerFirst.includes('!/share/assets/*') &&
+    config.notFoundHandling === 'none'
+      ? check('config: assets routing', 'pass', 'every page but /share/assets/* reaches the Worker; no SPA fallback')
+      : check(
+          'config: assets routing',
+          'fail',
+          'run_worker_first must be ["/*", "!/share/assets/*"] and not_found_handling "none", or pages lose their CSP',
         ),
   ]
 }

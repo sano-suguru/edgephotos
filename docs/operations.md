@@ -274,7 +274,7 @@ production は `--env` を付けません。確認する内容と、失敗時に
 
 | check | 失敗時に疑うもの |
 | --- | --- |
-| `config: *` | `secrets.required` の不足、secret 名の `vars` 宣言、`R2_BUCKET_NAME` と `BUCKET` binding の不一致、`preview_urls` |
+| `config: *` | `secrets.required` の不足、secret 名の `vars` 宣言、`R2_BUCKET_NAME` と `BUCKET` binding の不一致、`preview_urls`、`assets` の `run_worker_first` / `not_found_handling`（[D-037](decisions.md)） |
 | `worker: secrets` | `wrangler secret put` の漏れ（名前だけ確認。値の形式は下の probe で分かる） |
 | `d1: migrations` | `wrangler d1 migrations apply --remote` の実行漏れ |
 | `r2: r2.dev URL` / `custom domains` | bucket の公開設定（どちらも無効が正） |
