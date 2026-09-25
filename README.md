@@ -1,4 +1,4 @@
-# EdgePhotos
+# <img src="src/web/logo.svg" alt="" width="32" height="32"> EdgePhotos
 
 **Your photos. Your Cloudflare account. No server to manage.**
 
