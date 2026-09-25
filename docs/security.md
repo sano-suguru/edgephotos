@@ -82,7 +82,7 @@ member は互いに対等で、library 全体に同じ権限を持ちます。�
 
 - どの member も、他の member が upload した写真を trash・完全削除・export できます。
 - どの member も、他の member が作った share を revoke・再発行できます。
-- member 1 人のアカウントや端末が侵害されれば、library 全体が侵害されます。login は email に届く One-time PIN なので、ここでいうアカウントには member の email アカウントが含まれます。Access の independent MFA を足すと、authenticator の登録後は email だけでは入れなくなります。Worker はこれを検証できないため、EdgePhotos の必須設定にはしていません（[D-038](decisions.md)、[MFA を足す](operations.md#mfa-を足す推奨)）。member の削除は Access policy と `HOUSEHOLD_EMAILS` の両方から行います。
+- member 1 人のアカウントや端末が侵害されれば、library 全体が侵害されます。login は email に届く One-time PIN なので、ここでいうアカウントには member の email アカウントが含まれます。Access の independent MFA を足すと、authenticator の登録後は email だけでは入れなくなります。これは Access の設定で、Worker は検証しません（[D-038](decisions.md)、[MFA を足す](operations.md#mfa-を足す推奨)）。member の削除は Access policy と `HOUSEHOLD_EMAILS` の両方から行います。
 
 member 間で権限を分けたい場合、この設計では解決できません。
 
@@ -248,8 +248,6 @@ font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; for
 - CSS による情報の読み出しのうち、同じ origin の stylesheet で完結するもの
 - browser の拡張機能と、member の端末の侵害
 
-`vite dev` は Vite が挿入する tag にだけ nonce を付け、同じ policy で動きます。Browser E2E は CSP 違反が 1 件でもあれば失敗します（`e2e/fixtures.ts`）。
-
 ## 9. ログ
 
 ログへ残してよいもの:
@@ -277,7 +275,7 @@ font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; for
 
 上の規則は EdgePhotos が書くログの規則です。Cloudflare の Workers Logs（`wrangler.jsonc` の `observability`）は、これとは別に、Worker への各 request の URL・header を invocation log として Cloudflare account に保存します（[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[request metadata と header を記録する旨の changelog](https://developers.cloudflare.com/changelog/post/2025-04-07-increase-trace-events-limit/)）。share API の `Authorization`（share secret）、`Cf-Access-Jwt-Assertion`、CLI が送る `cf-access-token`（Access token）もこの header に含まれます。
 
-Tail Worker に渡る request では、名前に `auth` / `jwt` などを含む header の値が既定で伏せられます（[Tail Handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/tail/)）。Workers Logs に同じ処理が適用されるかは Cloudflare の文書に書かれていないため、production で確かめました。2026-09-25 の production では、observability API から読める `Authorization`・`Cf-Access-Jwt-Assertion`・`Cookie`・`cf-access-token` の値は伏せられていました（[verification.md](verification.md#workers-logs-が-credential-の-header-を伏せるか2026-09-25)）。Cloudflare の挙動が変わっても気付けるよう、家族の写真を入れる前と、その後も定期的に同じ手順で確かめます。伏せ方は Cloudflare の推定ルールによるもので、EdgePhotos が制御するものではありません。Workers Logs は Cloudflare account の中にあり、account の管理者は [信頼するもの](#信頼するものしないもの) に含まれます。presigned URL は Worker の response body にだけ入り、Worker への request には現れません。
+Tail Worker に渡る request では、名前に `auth` / `jwt` などを含む header の値が既定で伏せられます（[Tail Handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/tail/)）。Workers Logs に同じ処理が適用されるかは Cloudflare の文書に書かれていないため、production で確かめました。2026-09-25 の production では、observability API から読める `Authorization`・`Cf-Access-Jwt-Assertion`・`Cookie`・`cf-access-token` の値は伏せられ、response body は記録されていませんでした（[verification.md](verification.md#workers-logs-が-credential-の-header-を伏せるか2026-09-25)）。Cloudflare の挙動が変わっても気付けるよう、家族の写真を入れる前と、その後も定期的に同じ手順で確かめます。伏せ方は Cloudflare の推定ルールによるもので、EdgePhotos が制御するものではありません。Workers Logs は Cloudflare account の中にあり、account の管理者は [信頼するもの](#信頼するものしないもの) に含まれます。presigned URL は Worker の response body にだけ入り、Worker への request には現れません。
 
 ## 10. 削除
 
@@ -352,9 +350,9 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 | Browser の console | 防止（アプリが書く分） | `console.warn(err)` の err は URL を持たない。ただし browser 自身が、読み込みに失敗した画像や fetch の URL を開発者ツールに出す（許容。member の端末の中） |
 | CLI の出力 | 防止 | `pnpm diagnose` / `backup` / `storage` は token と presigned URL を出力しない（`tests/unit/diagnose.test.ts` が R2 の host を含まないことを確かめる） |
 | analytics / telemetry | 防止 | 送信先を持たない。CSP の `connect-src` / `img-src` が `'self'` と自分の R2 以外を拒否する |
-| Workers Logs の request header | 要確認 → 2026-09-25 は伏せられていた | Cloudflare の推定ルールで伏せられる（[ログ](#9-ログ)）。手順は [verification.md](verification.md#workers-logs-が-credential-の-header-を伏せるか2026-09-25) |
+| Workers Logs の request header | 要確認 | Cloudflare の推定ルールで伏せられる。2026-09-25 の結果は [ログ](#9-ログ) |
 | Workers Logs の request URL | 許容 | URL は伏せられない。share ID と private API の path / query（cursor、年月）が残る。share secret は fragment、presigned URL は response body にあり、Worker への request URL には現れない |
-| response の記録 | 防止（EdgePhotos）/ 要確認 → 2026-09-25 は記録されていなかった | EdgePhotos は response を書かない。presigned URL を返した production の invocation log に、署名（`X-Amz-Signature`）は現れなかった（[verification.md](verification.md#workers-logs-が-credential-の-header-を伏せるか2026-09-25)） |
+| response の記録 | 防止（EdgePhotos）/ 要確認（Workers Logs） | EdgePhotos は response を書かない。Workers Logs の結果は [ログ](#9-ログ) |
 | browser の履歴・address bar | 防止（private app）/ 許容（share） | private app は path と `?m=YYYY-MM` だけを履歴に入れ、presigned URL で navigation しない（[D-036](decisions.md)）。共有リンクの secret は fragment にあり、受け取り手の履歴に残る。link を持つことが閲覧の権限なので許容する |
 | Referer | 防止 | private app と共有ページの HTML・API に `Referrer-Policy: no-referrer`（header と `<meta>`）。original の fetch は `referrerPolicy: 'no-referrer'` |
 | HTTP cache | 防止（URL を返す response）/ 許容（画像の bytes） | presigned URL と share の response は `Cache-Control: private, no-store`。thumbnail / preview の bytes は browser の cache に残る。original のダウンロードは `cache: 'no-store'` |

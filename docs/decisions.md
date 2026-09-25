@@ -1067,9 +1067,9 @@ private app（Access の内側の SPA）には CSP がありませんでした�
 
 - CSP の `img-src` / `connect-src` には、presigned URL の宛先（`https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`）を 1 つだけ書く。`R2_ACCOUNT_ID` は Worker secret なので、build 時の静的ファイルには書けない
 - 未知の path も SPA fallback で `index.html` を返す。navigation request は、Worker を先に通さない限り static assets が直接答える（[SPA の routing](https://developers.cloudflare.com/workers/static-assets/routing/single-page-application/)）。`/`、`/albums` のような既知の path だけを Worker へ回すと、`/anything` で CSP の無い app を開かせられる。したがって全 path を Worker へ回す
-- SPA fallback は Worker が行い、`not_found_handling` は `"none"` にする。`/share/assets/*` は Worker を通らず Access の外にあるため、static assets の SPA fallback のままだと、そこに無いファイルの request に private app を CSP なしで返す（別のサイトの frame に埋め込める）。fresh-context の review で見つかった
+- SPA fallback は Worker が行い、`not_found_handling` は `"none"` にする。`/share/assets/*` は Worker を通らず Access の外にあるため、static assets の SPA fallback のままだと、そこに無いファイルの request に private app を CSP なしで返す（別のサイトの frame に埋め込める）
 - `/api`、`/share`、`/__local` の配下で route の無い path は、app ではなく JSON の `404` にする
-- `vite dev` は `html.cspNonce` の nonce を Vite が挿入する `<script>` / `<style>` に付け、Worker が同じ nonce を CSP に足す。dev と Browser E2E は `'unsafe-inline'` を足さずに production と同じ policy で動く。nonce は dev server の起動ごとに 1 つで、request ごとには変えない。dev server の HTML を読める人はその nonce を使えるが、dev は local だけで動く
+- `vite dev` は `html.cspNonce` の nonce を Vite が挿入する `<script>` / `<style>` に付け、Worker が同じ nonce を CSP に足す。dev と Browser E2E は `'unsafe-inline'` を足さずに production と同じ policy で動く。nonce は dev server の起動ごとに 1 つで、request ごとには変えない（dev は local だけで動く）
 
 却下した案:
 
@@ -1111,8 +1111,7 @@ member の login は email に届く One-time PIN（OTP）です（[operations.m
 
 残るリスク:
 
-- 最初の authenticator の登録には MFA が要らない（[Independent MFA](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/independent-mfa/)）。member が登録する前に email を乗っ取られていれば、攻撃者が先に登録できる。有効にしたら全員がすぐ登録し、管理者が dashboard で各 member の authenticator を確かめる
-- 管理者が authenticator を削除して再登録させる間は、OTP だけで登録できる状態に戻る
+- 最初の authenticator の登録には MFA が要らない（[Independent MFA](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/independent-mfa/)）。member が登録する前と、紛失で authenticator を削除した後は、email を乗っ取った攻撃者が先に登録できる（対処は [MFA を足す](operations.md#mfa-を足す推奨)）
 - 登録済みの端末（session）の乗っ取りは防がない
 - Access の plan ごとの提供範囲は、文書に書かれていない。有効にできなかった場合は OTP のみのまま
 
