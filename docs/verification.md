@@ -699,7 +699,7 @@ production の Workers Logs（invocation log）を、Cloudflare の observabilit
 - share API には、それまで request が無かった。存在しない share ID と偽の secret（`Bearer` と 43 文字）で `GET /share/api/v1/shares/{shareId}` を 1 回送り、`404` を確かめた。その log の `authorization` は `********` だった
 - 同じ log の request URL は伏せられず、share ID を含んだまま残る。share ID は secret ではない（secret は fragment にあり、request に載らない）
 
-Workers Logs は、この 3 つの header の値を保存しない。`invocation_logs` は有効のままにする（[ログ](security.md#9-ログ)）。
+Workers Logs では、この 3 つの header の値は伏せられた状態で記録され、observability API からも伏せられた値しか取得できなかった。Cloudflare の内部で値を保存していないことまでは確かめていない。`invocation_logs` は有効のままにする（[ログ](security.md#9-ログ)）。
 
 ## 未検証
 
