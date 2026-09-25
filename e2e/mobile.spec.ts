@@ -1,5 +1,5 @@
-import { devices, expect, type Page, test } from '@playwright/test'
-import { expectImageLoaded, openApp, tile, uniqueName, uploadPanel, uploadPhoto } from './fixtures'
+import { devices, type Page } from '@playwright/test'
+import { expect, expectImageLoaded, openApp, test, tile, uniqueName, uploadPanel, uploadPhoto } from './fixtures'
 
 const noHorizontalScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)

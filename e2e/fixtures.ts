@@ -1,5 +1,46 @@
 import { readFileSync } from 'node:fs'
-import { expect, type Locator, type Page } from '@playwright/test'
+import { type BrowserContext, test as base, expect, type Locator, type Page } from '@playwright/test'
+
+export { expect }
+
+// Every spec runs under the Content-Security-Policy the Worker sends (dev adds only Vite's nonce), and fails
+// on any violation: a blocked stylesheet, image or presigned R2 request would otherwise pass unnoticed as
+// long as the assertion it broke was not the one being checked. Contexts from browser.newContext() (the
+// share guest) are guarded too. A spec that provokes a violation on purpose takes it out of the list.
+export const test = base.extend<{ cspViolations: string[] }>({
+  cspViolations: [
+    async ({ context, browser }, use) => {
+      const violations: string[] = []
+      const guard = async (ctx: BrowserContext) => {
+        await ctx.exposeBinding('__cspViolation', (_source, v: string) => {
+          violations.push(v)
+        })
+        await ctx.addInitScript(() => {
+          document.addEventListener('securitypolicyviolation', (e) => {
+            // No query string: a presigned URL's signature does not belong in test output.
+            const blocked = e.blockedURI.split('?')[0]
+            const report = (window as unknown as { __cspViolation: (v: string) => void }).__cspViolation
+            report(`${e.effectiveDirective} blocked ${blocked || '(inline)'} on ${location.pathname}`)
+          })
+        })
+      }
+      await guard(context)
+      const newContext = browser.newContext.bind(browser)
+      browser.newContext = async (options) => {
+        const ctx = await newContext(options)
+        await guard(ctx)
+        return ctx
+      }
+      try {
+        await use(violations)
+      } finally {
+        browser.newContext = newContext
+      }
+      expect(violations, 'Content-Security-Policy violations').toEqual([])
+    },
+    { auto: true },
+  ],
+})
 
 // The same committed HEIC the worker tests use (tests/fixtures/README.md). Synthetic, 64x32 with EXIF
 // Orientation 6, so a browser that honours orientation reports 32x64.

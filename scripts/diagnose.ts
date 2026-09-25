@@ -81,6 +81,8 @@ async function main() {
     secretsRequired: config.secrets?.required ?? [],
     previewUrls: config.preview_urls,
     bucketName: bucket,
+    runWorkerFirst: config.assets?.run_worker_first,
+    notFoundHandling: config.assets?.not_found_handling,
   })
 
   if (!offline) {
@@ -133,6 +135,11 @@ async function main() {
   }
 
   if (baseUrl && !offline) {
+    // The R2 bucket lives in the account wrangler is logged in to (the same assumption as the CORS probe).
+    const r2Origin = await accountId().then(
+      (id) => `https://${id}.r2.cloudflarestorage.com`,
+      () => undefined,
+    )
     checks.push(
       ...(await checkDeployment({
         api: (path, init) => {
@@ -143,6 +150,7 @@ async function main() {
         token,
         latestLocalMigration: local.at(-1),
         origin: new URL(baseUrl).origin,
+        r2Origin,
       })),
     )
   } else if (!offline) {

@@ -82,7 +82,7 @@ member は互いに対等で、library 全体に同じ権限を持ちます。�
 
 - どの member も、他の member が upload した写真を trash・完全削除・export できます。
 - どの member も、他の member が作った share を revoke・再発行できます。
-- member 1 人のアカウントや端末が侵害されれば、library 全体が侵害されます。login は email に届く One-time PIN なので、ここでいうアカウントには member の email アカウントが含まれます。member の削除は Access policy と `HOUSEHOLD_EMAILS` の両方から行います。
+- member 1 人のアカウントや端末が侵害されれば、library 全体が侵害されます。login は email に届く One-time PIN なので、ここでいうアカウントには member の email アカウントが含まれます。Access の independent MFA を足すと、authenticator の登録後は email だけでは入れなくなります。これは Access の設定で、Worker は検証しません（[D-038](decisions.md)、[MFA を足す](operations.md#mfa-を足す推奨)）。member の削除は Access policy と `HOUSEHOLD_EMAILS` の両方から行います。
 
 member 間で権限を分けたい場合、この設計では解決できません。
 
@@ -218,9 +218,35 @@ CLI（`pnpm backup` / `storage` / `diagnose`）は Access token を header で�
 
 共有ページの CSP は `default-src 'self'` を基準にし、`img-src` だけ R2 の S3 endpoint を追加で許可します。
 
-private app（Access の内側の SPA）には、現在 CSP を付けていません。private app で script を実行されると、その member ができること（library 全体の削除・export）をすべてできます。
+### private app の CSP
 
-そのため、利用者の入力（album 名、ファイル名）は JSX の text として描画し、`innerHTML` / `dangerouslySetInnerHTML` を使いません。外部の script・analytics・font も読み込みません。private app への CSP は Release polish で検討します（[roadmap.md](roadmap.md)）。
+private app（Access の内側の SPA）で script を実行されると、その member ができること（library 全体の削除・export、presigned URL の取得）をすべてできます。一次の対策は、利用者の入力（album 名、ファイル名、upload した member の email）を JSX の text として描画し、`innerHTML` / `dangerouslySetInnerHTML` を使わないことです。外部の script・analytics・font も読み込みません。
+
+CSP はその次の層です。private app のすべての HTML（未知の path に SPA fallback が返すものを含む）を Worker が返し、次の policy を付けます（[D-037](decisions.md)）。
+
+```text
+default-src 'self'; script-src 'self'; style-src 'self';
+img-src 'self' https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com;
+connect-src 'self' https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com;
+font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'
+```
+
+`Referrer-Policy: no-referrer` と `X-Content-Type-Options: nosniff` も付けます。`'unsafe-inline'`、`'unsafe-eval'`、`data:`、`blob:`、wildcard は許可しません。
+
+防ぐもの:
+
+- 注入された markup の inline `<script>`、`onerror=` などの inline event handler、`eval()`、外部の script
+- 別の origin（R2 の他の account を含む）への `<img>` / `fetch()` による持ち出し
+- 別のサイトの frame に private app を埋め込むこと（clickjacking）
+- `<base>` の差し替え、`<form>` の送信先の差し替え、plugin
+
+防がないもの:
+
+- 同じ origin の script として動いてしまった攻撃（依存 package の侵害など）。そうした script は private API を member として呼べる
+- 自分の account の R2 への書き込み・読み出し。攻撃者の script は presigned URL を発行させて、その URL を画面や `'self'` 経由で扱える
+- `'self'` への送信。private API に書き込んだ値（album 名など）は、household の他の member にも見える
+- CSS による情報の読み出しのうち、同じ origin の stylesheet で完結するもの
+- browser の拡張機能と、member の端末の侵害
 
 ## 9. ログ
 
@@ -247,9 +273,9 @@ private app（Access の内側の SPA）には、現在 CSP を付けていま�
 
 例外オブジェクトの自動 dump や debug log も対象です。
 
-上の規則は EdgePhotos が書くログの規則です。Cloudflare の Workers Logs（`wrangler.jsonc` の `observability`）は、これとは別に、Worker への各 request の URL・header を invocation log として Cloudflare account に保存します（[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[request metadata と header を記録する旨の changelog](https://developers.cloudflare.com/changelog/post/2025-04-07-increase-trace-events-limit/)）。share API の `Authorization`（share secret）と `Cf-Access-Jwt-Assertion` もこの header に含まれます。
+上の規則は EdgePhotos が書くログの規則です。Cloudflare の Workers Logs（`wrangler.jsonc` の `observability`）は、これとは別に、Worker への各 request の URL・header を invocation log として Cloudflare account に保存します（[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[request metadata と header を記録する旨の changelog](https://developers.cloudflare.com/changelog/post/2025-04-07-increase-trace-events-limit/)）。share API の `Authorization`（share secret）、`Cf-Access-Jwt-Assertion`、CLI が送る `cf-access-token`（Access token）もこの header に含まれます。
 
-Tail Worker に渡る request では、名前に `auth` / `jwt` などを含む header の値が既定で伏せられます（[Tail Handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/tail/)）。Workers Logs に同じ処理が適用されるかは Cloudflare の文書に書かれていないため、production で確かめました。2026-09-25 の production では、observability API から読める `Authorization`・`Cf-Access-Jwt-Assertion`・`Cookie` の値は伏せられていました（[verification.md](verification.md#workers-logs-が-credential-の-header-を伏せるか2026-09-25)）。伏せ方は Cloudflare の推定ルールによるもので、EdgePhotos が制御するものではありません。Workers Logs は Cloudflare account の中にあり、account の管理者は [信頼するもの](#信頼するものしないもの) に含まれます。presigned URL は Worker の response body にだけ入り、Worker への request には現れません。
+Tail Worker に渡る request では、名前に `auth` / `jwt` などを含む header の値が既定で伏せられます（[Tail Handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/tail/)）。Workers Logs に同じ処理が適用されるかは Cloudflare の文書に書かれていないため、production で確かめました。2026-09-25 の production では、observability API から読める `Authorization`・`Cf-Access-Jwt-Assertion`・`Cookie`・`cf-access-token` の値は伏せられ、response body は記録されていませんでした（[verification.md](verification.md#workers-logs-が-credential-の-header-を伏せるか2026-09-25)）。家族の写真を入れる前、Cloudflare が Workers Logs の仕様を変えたとき、`observability` の設定を変えたときに、同じ手順で確かめ直します。伏せ方は Cloudflare の推定ルールによるもので、EdgePhotos が制御するものではありません。Workers Logs は Cloudflare account の中にあり、account の管理者は [信頼するもの](#信頼するものしないもの) に含まれます。presigned URL は Worker の response body にだけ入り、Worker への request には現れません。
 
 ## 10. 削除
 
@@ -277,6 +303,8 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - share secret 不正 / expired / revoked を拒否する。
 - 別 album の asset を share から取得できない。
 - 共有ページで album 名が markup として解釈されない（`e2e/share.spec.ts`）。
+- private app の HTML（未知の path を含む）は CSP 付きで返り、`/api`・`/share`・`/__local` 配下の route の無い path と、page の読み込みでない request の無いファイルは app にならない（`tests/integration/app-shell.test.ts`、`e2e/csp.spec.ts`）。Browser E2E は CSP 違反 1 件で失敗する。
+- `/share/assets/*` に無いファイルが private app にならない。`wrangler.jsonc` の `run_worker_first` と `not_found_handling` を `pnpm diagnose --offline`（`pnpm check` に含む）が検査する。
 - share から original を取得できない。
 - preview / thumbnail から GPS が除去される。
 - upload finalize 再送で重複 asset が生じない。
@@ -304,3 +332,33 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 `vite dev` の間だけ、Access assertion の付与と local blob URL を dev server で模擬します（[D-016](decisions.md)）。
 
 本番 build には含まれません。`vite preview`（production build）では、設定がない限り `503` で fail-closed になることを確認しています。
+
+## 13. credential の流出経路
+
+アプリが制御できる既知の経路と、その扱いです。「漏れない」ことの証明ではありません。
+
+- 防止: アプリの実装で閉じており、test か code で確かめられる
+- 許容: 設計上残し、理由を書いている
+- 要確認: Cloudflare の挙動に依存し、実環境で確かめる
+
+対象の credential: presigned URL（PUT / GET）、share secret、Access の JWT（`Cf-Access-Jwt-Assertion`、`CF_Authorization` Cookie、CLI の `cf-access-token`）、R2 の API token。
+
+| 経路 | 扱い | 根拠 |
+| --- | --- | --- |
+| Worker が書くログ（`console.*`） | 防止 | 設定の**名前**、request ID、route、例外の `name` だけを書く（`src/worker/app.ts` の `onError` と `misconfigured`）。例外の message は書かない |
+| 例外・error response | 防止 | 500 は `INTERNAL` とだけ返す。client の error は status と code から作り、URL を含めない（`src/web/lib/storage-transfer.ts`、`src/web/lib/api/client.ts`） |
+| Browser の console | 防止（アプリが書く分） | `console.warn(err)` の err は URL を持たない。ただし browser 自身が、読み込みに失敗した画像や fetch の URL を開発者ツールに出す（許容。member の端末の中） |
+| CLI の出力 | 防止 | `pnpm diagnose` / `backup` / `storage` は token と presigned URL を出力しない（`tests/unit/diagnose.test.ts` が R2 の host を含まないことを確かめる） |
+| analytics / telemetry | 防止 | 送信先を持たない。CSP の `connect-src` / `img-src` が `'self'` と自分の R2 以外を拒否する |
+| Workers Logs の request header | 要確認 | Cloudflare の推定ルールで伏せられる。2026-09-25 の結果は [ログ](#9-ログ) |
+| Workers Logs の request URL | 許容 | URL は伏せられない。share ID と private API の path / query（cursor、年月）が残る。share secret は fragment、presigned URL は response body にあり、Worker への request URL には現れない |
+| response の記録 | 防止（EdgePhotos）/ 要確認（Workers Logs） | EdgePhotos は response を書かない。Workers Logs の結果は [ログ](#9-ログ) |
+| browser の履歴・address bar | 防止（private app）/ 許容（share） | private app は path と `?m=YYYY-MM` だけを履歴に入れ、presigned URL で navigation しない（[D-036](decisions.md)）。共有リンクの secret は fragment にあり、受け取り手の履歴に残る。link を持つことが閲覧の権限なので許容する |
+| Referer | 防止 | private app と共有ページの HTML・API に `Referrer-Policy: no-referrer`（header と `<meta>`）。original の fetch は `referrerPolicy: 'no-referrer'` |
+| HTTP cache | 防止（URL を返す response）/ 許容（画像の bytes） | presigned URL と share の response は `Cache-Control: private, no-store`。thumbnail / preview の bytes は browser の cache に残る。original のダウンロードは `cache: 'no-store'` |
+| localStorage / sessionStorage / IndexedDB / Cache Storage / Service Worker | 防止 | どれも使わない（`src/` に呼び出しが無い） |
+| アプリの state（memory） | 許容 | presigned URL は画面の state と `<img src>` に期限（最大 600 秒）まで残る。同じ origin の script は読める（[CSP](#private-app-の-csp) が防がないもの） |
+| backup manifest | 防止 | URL・token・secret を持たない（`tests/integration/export-restore.test.ts`） |
+| clipboard | 許容 | 共有リンク（secret を含む）は利用者が copy して渡すもの |
+| Playwright の trace（CI の artifact） | 対象外 | `vite dev` の local URL と test 用の鍵だけで、実 R2 の URL や Access token を含まない |
+

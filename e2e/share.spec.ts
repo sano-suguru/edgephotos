@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test'
-import { expectImageLoaded, openApp, tile, uniqueName, uploadPhoto } from './fixtures'
+import { expect, expectImageLoaded, openApp, test, tile, uniqueName, uploadPhoto } from './fixtures'
 
 test('a guest opens a shared album and loses access after revoke', async ({ page, browser }) => {
   await openApp(page)

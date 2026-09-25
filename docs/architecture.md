@@ -465,7 +465,7 @@ Bypass 対象は `/share/*` に限定し、公開部分の認可責任は Worker
 
 Workers Static Assets 利用時の `ctx.access` だけには依存せず、Access assertion を Worker 側で検証します。
 
-静的 JS / CSS は `/share/assets/*` に出力し、共有ページも読み込めるようにします（[D-011](decisions.md)）。Worker は `/api/*`、`/share/*`（`/share/assets/*` を除く）を static assets より先に処理します。
+静的 JS / CSS は `/share/assets/*` に出力し、共有ページも読み込めるようにします（[D-011](decisions.md)）。Worker は `/share/assets/*` 以外のすべての path を static assets より先に処理します。private app の HTML も Worker が `ASSETS` から取り出し、CSP を付けて返します（[D-037](decisions.md)）。
 
 ## 12. Native client への拡張境界
 

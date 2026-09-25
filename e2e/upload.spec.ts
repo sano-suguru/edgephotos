@@ -1,10 +1,11 @@
-import { expect, test } from '@playwright/test'
 import {
   canDecodeHeic,
+  expect,
   expectImageLoaded,
   makeJpeg,
   naturalSize,
   openApp,
+  test,
   tile,
   uniqueHeic,
   uniqueName,

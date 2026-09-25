@@ -42,6 +42,9 @@ export type WorkerConfig = {
   secretsRequired: string[]
   previewUrls: boolean | undefined
   bucketName: string | undefined
+  // assets.run_worker_first / assets.not_found_handling
+  runWorkerFirst: boolean | string[] | undefined
+  notFoundHandling: string | undefined
 }
 
 export function checkConfig(config: WorkerConfig): Check[] {
@@ -68,6 +71,19 @@ export function checkConfig(config: WorkerConfig): Check[] {
           'config: preview_urls',
           'fail',
           'must be false: preview hostnames are not covered by the Access application',
+        ),
+    // Every private HTML document reaches the Worker for its CSP, and a miss under the public
+    // /share/assets/* is a 404 rather than the app without its CSP (docs/decisions.md D-037).
+    Array.isArray(config.runWorkerFirst) &&
+    config.runWorkerFirst.length === 2 &&
+    config.runWorkerFirst.includes('/*') &&
+    config.runWorkerFirst.includes('!/share/assets/*') &&
+    config.notFoundHandling === 'none'
+      ? check('config: assets routing', 'pass', 'every page but /share/assets/* reaches the Worker; no SPA fallback')
+      : check(
+          'config: assets routing',
+          'fail',
+          'run_worker_first must be ["/*", "!/share/assets/*"] and not_found_handling "none", or pages lose their CSP',
         ),
   ]
 }
@@ -184,6 +200,55 @@ async function checkAppOrigin(api: Fetch, auth: Record<string, string>, origin: 
   return check(name, 'warn', `origin probe got ${res.status} ${code}`)
 }
 
+// The private app's HTML must come from the Worker with its CSP (wrangler.jsonc run_worker_first), and both
+// img-src (thumbnails, previews) and connect-src (upload PUT, original download) must name exactly the R2
+// endpoint presigned URLs point at, or photos and uploads break under the policy. `r2Origin` is that endpoint
+// for the account diagnose runs against; without it the account cannot be confirmed and the check only warns.
+export async function checkPrivateAppCsp(
+  api: Fetch,
+  auth: Record<string, string>,
+  r2Origin: string | undefined,
+): Promise<Check> {
+  const res = await api('/', { headers: auth })
+  const csp = res.headers.get('content-security-policy') ?? ''
+  if (res.status !== 200 || !csp.includes("frame-ancestors 'none'")) {
+    return check(
+      'private app: CSP',
+      'fail',
+      `got ${res.status}${csp ? '' : ' without a CSP'}; deploy the current build`,
+    )
+  }
+  const sources = (name: string) => {
+    const directive = csp
+      .split(';')
+      .map((d) => d.trim().split(/\s+/))
+      .find((tokens) => tokens[0] === name)
+    return directive?.slice(1) ?? []
+  }
+  const img = sources('img-src')
+  const connect = sources('connect-src')
+  if (!r2Origin) {
+    const named = (list: string[]) => list.some((s) => /^https:\/\/[0-9a-f]{32}\.r2\.cloudflarestorage\.com$/.test(s))
+    return named(img) && named(connect)
+      ? check(
+          'private app: CSP',
+          'warn',
+          'CSP names an R2 endpoint, but the account is unknown: set CLOUDFLARE_ACCOUNT_ID',
+        )
+      : check('private app: CSP', 'fail', 'img-src or connect-src does not name the R2 endpoint (R2_ACCOUNT_ID)')
+  }
+  const missing = [img.includes(r2Origin) ? null : 'img-src', connect.includes(r2Origin) ? null : 'connect-src'].filter(
+    (d) => d !== null,
+  )
+  return missing.length === 0
+    ? check('private app: CSP', 'pass', "img-src and connect-src allow this account's R2 endpoint")
+    : check(
+        'private app: CSP',
+        'fail',
+        `${missing.join(' and ')} does not allow this account's R2 endpoint (R2_ACCOUNT_ID names another account?)`,
+      )
+}
+
 const PROBE_SHARE_ID = 'diagnoseProbe'.padEnd(22, '0')
 const PROBE_SECRET = 'diagnoseProbe'.padEnd(43, '0')
 
@@ -196,8 +261,10 @@ export async function checkDeployment(opts: {
   latestLocalMigration?: string
   // The origin the owner opens in the browser (EDGEPHOTOS_URL). Compared with APP_ORIGIN by the Worker.
   origin?: string
+  // https://<account>.r2.cloudflarestorage.com for the account diagnose runs against.
+  r2Origin?: string
 }): Promise<Check[]> {
-  const { api, blob, token, latestLocalMigration, origin } = opts
+  const { api, blob, token, latestLocalMigration, origin, r2Origin } = opts
   const results: Check[] = []
 
   const anonymous = await api('/api/v1/me')
@@ -256,6 +323,20 @@ export async function checkDeployment(opts: {
       : check('share page', 'fail', `got ${sharePage.status}${csp ? '' : ' without the share CSP'}`),
   )
 
+  // /share/assets/* is public and never reaches the Worker. A miss there must not be the private app
+  // (the assets' SPA fallback would serve it without its CSP): not_found_handling "none" (D-037).
+  const assetMiss = await api('/share/assets/diagnose-probe-missing')
+  const missType = assetMiss.headers.get('content-type') ?? ''
+  results.push(
+    assetMiss.status === 404 && !missType.includes('text/html')
+      ? check('share: asset miss', 'pass', 'a missing file under /share/assets is a 404')
+      : check(
+          'share: asset miss',
+          'fail',
+          `got ${assetMiss.status} ${missType || 'without a content type'}; set assets.not_found_handling to "none" and deploy`,
+        ),
+  )
+
   if (!token) {
     results.push(
       check('private API', 'skip', 'set EDGEPHOTOS_ACCESS_TOKEN to check the member path, migrations and R2 signing'),
@@ -277,6 +358,7 @@ export async function checkDeployment(opts: {
     return results
   }
   results.push(check('private API', 'pass', 'member token accepted (ACCESS_AUD, ACCESS_TEAM_DOMAIN, HOUSEHOLD_EMAILS)'))
+  results.push(await checkPrivateAppCsp(api, auth, r2Origin))
 
   if (origin) results.push(await checkAppOrigin(api, auth, origin))
 

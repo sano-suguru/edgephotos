@@ -6,13 +6,19 @@ import {
   checkCorsPreflight,
   checkDeployment,
   checkMigrations,
+  checkPrivateAppCsp,
   checkPublicAccess,
   type Fetch,
   parseDiagnoseArgs,
   REQUIRED_SECRETS,
 } from '../../scripts/lib/diagnose'
+import { privateContentSecurityPolicy } from '../../src/worker/http/security'
 import { readR2SignerConfig } from '../../src/worker/storage/signer'
 import { APP_ORIGIN, assertion, makeApp } from '../helpers'
+
+// The policy the Worker actually sends for an account, so the check follows changes to it.
+const R2_ORIGIN = 'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com'
+const PRIVATE_CSP = privateContentSecurityPolicy([R2_ORIGIN])
 
 const status = (checks: Check[], name: string) => checks.find((c) => c.name === name)?.status
 
@@ -21,6 +27,8 @@ const goodConfig = {
   secretsRequired: [...REQUIRED_SECRETS],
   previewUrls: false,
   bucketName: 'photos',
+  runWorkerFirst: ['/*', '!/share/assets/*'],
+  notFoundHandling: 'none',
 }
 
 describe('setup diagnostics', () => {
@@ -40,8 +48,16 @@ describe('setup diagnostics', () => {
       secretsRequired: ['HOUSEHOLD_EMAILS'],
       previewUrls: undefined,
       bucketName: 'photos',
+      runWorkerFirst: ['/api/*', '/share/*', '!/share/assets/*'],
+      notFoundHandling: 'single-page-application',
     })
-    expect(bad.map((c) => c.status)).toEqual(['fail', 'fail', 'fail', 'fail'])
+    expect(bad.map((c) => c.status)).toEqual(['fail', 'fail', 'fail', 'fail', 'fail'])
+    // Either half of the routing alone reopens a page without the CSP.
+    const routing = (runWorkerFirst: string[], notFoundHandling: string) =>
+      checkConfig({ ...goodConfig, runWorkerFirst, notFoundHandling }).find((c) => c.name === 'config: assets routing')
+    expect(routing(['/*', '!/share/assets/*'], 'single-page-application')?.status).toBe('fail')
+    expect(routing(['/api/*', '/share/*', '!/share/assets/*'], 'none')?.status).toBe('fail')
+    expect(routing(['/*'], 'none')?.status).toBe('fail')
     expect(bad[1].detail).toContain('HOUSEHOLD_EMAILS')
   })
 
@@ -118,6 +134,11 @@ describe('setup diagnostics', () => {
     expect(status(checks, 'share page')).toBe('fail')
     expect(status(checks, 'private API')).toBe('skip')
 
+    // The assets' SPA fallback answering a miss under the public /share/assets with the private app.
+    const spaFallback: Fetch = async () => new Response('<html>', { headers: { 'content-type': 'text/html' } })
+    const fallback = await checkDeployment({ api: spaFallback, blob: spaFallback })
+    expect(status(fallback, 'share: asset miss')).toBe('fail')
+
     const redirect = new Response(null, { status: 302, headers: { location: 'https://team.cloudflareaccess.com/x' } })
     const shareBehindAccess: Fetch = async () => redirect.clone()
     const behind = await checkDeployment({ api: shareBehindAccess, blob: shareBehindAccess, token: 't' })
@@ -133,10 +154,12 @@ describe('setup diagnostics', () => {
       if (path.startsWith('/share/api')) {
         return new Response(JSON.stringify({ error: { code: 'SHARE_UNAVAILABLE' } }), { status: 404 })
       }
+      if (path.startsWith('/share/assets/')) return new Response(null, { status: 404 })
       if (path.startsWith('/share/')) {
         return new Response('<html>', { headers: { 'content-security-policy': "default-src 'self'" } })
       }
       if (!member) return redirect()
+      if (path === '/') return new Response('<html>', { headers: { 'content-security-policy': PRIVATE_CSP } })
       if (path === '/api/v1/me') return Response.json({ email: 'o@example.test' })
       if (path === '/api/v1/diagnostics') {
         // Pending uploads that have not expired are in flight and not worth a warning.
@@ -153,8 +176,11 @@ describe('setup diagnostics', () => {
       blob: denied,
       token: 'token',
       latestLocalMigration: '0002_next.sql',
+      r2Origin: R2_ORIGIN,
     })
     expect(status(checks, 'private API')).toBe('pass')
+    expect(status(checks, 'private app: CSP')).toBe('pass')
+    expect(status(checks, 'share: asset miss')).toBe('pass')
     expect(status(checks, 'worker: D1 schema')).toBe('fail')
     expect(status(checks, 'library: interrupted uploads')).toBeUndefined()
     expect(status(checks, 'library: unfinished deletes')).toBeUndefined()
@@ -205,6 +231,40 @@ describe('setup diagnostics', () => {
     expect(failed?.status).toBe('fail')
     expect(failed?.detail).toContain('https://photos.other.test')
     expect(await albums()).toBe(before)
+  })
+})
+
+describe('private app CSP check', () => {
+  const answer =
+    (res: Response): Fetch =>
+    async () =>
+      res.clone()
+  const html = (csp?: string) =>
+    new Response('<html>', { headers: csp ? { 'content-security-policy': csp } : undefined })
+
+  it("passes only when img-src and connect-src both allow this account's R2 endpoint", async () => {
+    const run = (res: Response, ...r2: [string?]) => checkPrivateAppCsp(answer(res), {}, r2.length ? r2[0] : R2_ORIGIN)
+    expect((await run(html(PRIVATE_CSP))).status).toBe('pass')
+    // A deploy from before the Worker served the shell: the static asset has no CSP.
+    expect((await run(html())).status).toBe('fail')
+    // No R2 at all: presigned PUT, the original download and every photo would be blocked.
+    expect((await run(html(privateContentSecurityPolicy([])))).status).toBe('fail')
+    // Another account's endpoint: the shape is right, the account is not.
+    const other = privateContentSecurityPolicy([`https://${'a'.repeat(32)}.r2.cloudflarestorage.com`])
+    expect((await run(html(other))).status).toBe('fail')
+    // Only one of the two directives names it.
+    const imgOnly = PRIVATE_CSP.replace(`connect-src 'self' ${R2_ORIGIN}`, "connect-src 'self'")
+    const connectOnly = PRIVATE_CSP.replace(`img-src 'self' ${R2_ORIGIN}`, "img-src 'self'")
+    expect((await run(html(imgOnly))).detail).toContain('connect-src')
+    expect((await run(html(imgOnly))).status).toBe('fail')
+    expect((await run(html(connectOnly))).detail).toContain('img-src')
+    // A longer host that merely starts with the endpoint is not the endpoint.
+    expect((await run(html(privateContentSecurityPolicy([`${R2_ORIGIN}.evil.test`])))).status).toBe('fail')
+    // The account could not be determined: an R2 endpoint is there, but whose is unknown.
+    expect((await run(html(PRIVATE_CSP), undefined)).status).toBe('warn')
+    expect((await run(html(privateContentSecurityPolicy([])), undefined)).status).toBe('fail')
+    const redirect = new Response(null, { status: 302, headers: { location: 'https://t.cloudflareaccess.com/' } })
+    expect((await run(redirect)).status).toBe('fail')
   })
 })
 

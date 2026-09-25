@@ -187,6 +187,21 @@ OTP の挙動で、確認や問い合わせのときに知っておくこと:
 - 送信元は `noreply@notify.cloudflare.com` です。コードは 10 分で失効します
 - メールのセキュリティ製品がリンクを先読みすると、コードが使用済みになることがあります。その場合はコードを再送します
 
+### MFA を足す（推奨）
+
+OTP だけの login では、member の email アカウントを乗っ取られると library 全体を取られます。家族の写真を入れる前に、Access の independent MFA を足すことを勧めます（[D-038](decisions.md)）。EdgePhotos の Worker はこれを検証しません。Access の設定だけで効きます。
+
+1. Zero Trust の **Access controls > Access settings** の **Allow multi-factor authentication (MFA)** で、許可する方式を選ぶ。Authenticator application（TOTP）と、端末の passkey（Biometrics）または Security key を選ぶ。**Authentication duration** は application の session duration（24 時間）と揃える
+2. 1 の private application の **Authentication > MFA** を **Custom MFA settings** にし、同じ方式を指定する。2 の application（Bypass）は変更しない
+3. 各 member に App Launcher（`<team-name>.cloudflareaccess.com`、登録は `/AddMfaDevice`）で authenticator を登録してもらう。App Launcher の Access policy が household の email を含んでいることを確かめる。紛失に備えて 2 つ登録する（TOTP は 1 人 1 つまでなので、もう 1 つは passkey か security key）
+4. 全員の登録が済んだら、管理者が dashboard で各 member の authenticator が本人の登録したものだけであることを確かめる
+
+最初の authenticator の登録には MFA が要りません。有効にしてから登録するまでの間に email を乗っ取られていると、攻撃者が先に登録できます。有効にしたら、全員がすぐに登録します。
+
+authenticator を失くした member は、管理者が dashboard でその member の authenticator を削除し、本人が次の login で登録し直します。削除から再登録までは OTP だけで登録できる状態なので、本人と連絡を取りながら行います。
+
+確認と合格の条件は [verification.md](verification.md#access-の-independent-mfa) にあります。
+
 ### preview URL を無効にする
 
 Worker の preview URL は無効にします（`wrangler.jsonc` の `"preview_urls": false`）。
@@ -259,7 +274,7 @@ production は `--env` を付けません。確認する内容と、失敗時に
 
 | check | 失敗時に疑うもの |
 | --- | --- |
-| `config: *` | `secrets.required` の不足、secret 名の `vars` 宣言、`R2_BUCKET_NAME` と `BUCKET` binding の不一致、`preview_urls` |
+| `config: *` | `secrets.required` の不足、secret 名の `vars` 宣言、`R2_BUCKET_NAME` と `BUCKET` binding の不一致、`preview_urls`、`assets` の `run_worker_first` / `not_found_handling`（[D-037](decisions.md)） |
 | `worker: secrets` | `wrangler secret put` の漏れ（名前だけ確認。値の形式は下の probe で分かる） |
 | `d1: migrations` | `wrangler d1 migrations apply --remote` の実行漏れ |
 | `r2: r2.dev URL` / `custom domains` | bucket の公開設定（どちらも無効が正） |
@@ -267,6 +282,8 @@ production は `--env` を付けません。確認する内容と、失敗時に
 | `access: private path` | 匿名 request が Access login へ redirect されない（Access application の hostname） |
 | `access: share bypass + worker config` | `/share` の Bypass application。`503` なら secret の欠落か形式違い（`ACCESS_TEAM_DOMAIN` は host のみ、`R2_ACCOUNT_ID` は 32 桁 hex） |
 | `private API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `HOUSEHOLD_EMAILS` |
+| `share: asset miss` | `/share/assets/` の無いファイルに private app の HTML が返る。`assets.not_found_handling` が `"none"` でない（[D-037](decisions.md)） |
+| `private app: CSP` | HTML に CSP が無い（CSP を付ける前の build が deploy されている）、または `img-src` / `connect-src` に、wrangler で login している account の R2 endpoint が無い（`R2_ACCOUNT_ID` が別の account を指す）。WARN は account を決められなかった（`CLOUDFLARE_ACCOUNT_ID` を設定する）（[D-037](decisions.md)） |
 | `worker: APP_ORIGIN` | `APP_ORIGIN` が `EDGEPHOTOS_URL` の origin と一致しない（scheme、host、custom domain 追加後の更新漏れ） |
 | `worker: D1 schema` | Worker が見ている D1 の最新 migration と checkout の不一致（別 DB を bind している、migration 未適用） |
 | `r2: presigned GET` | Worker が署名した URL を R2 が拒否（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`）。library が空なら SKIP |
@@ -281,6 +298,8 @@ Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠�
 
 - 写真を 1 枚 upload して timeline に表示される（`pnpm diagnose` は PUT を実行しないため、upload の成立はここで確かめる）
 - 共有リンクを作成し、private window で表示でき、revoke 後は表示できない
+- 上の 2 つの間、開発者ツールの console に `Content Security Policy` の違反が出ない（[verification.md](verification.md#private-app-の-csp-を-production-で確かめる)）
+- 家族の写真を入れる前に、Workers Logs に credential が生で残っていないことを確かめる（[確認手順](verification.md#確認手順再実行用)）
 
 `pnpm diagnose` では見えない Access の設定は、Cloudflare dashboard と Browser で確認します。production の初回 deploy と、member を増減したあとに行います。
 
