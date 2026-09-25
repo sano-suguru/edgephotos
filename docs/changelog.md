@@ -8,7 +8,7 @@
 
 ## private app の CSP と credential の流出経路（2026-09-25）
 
-private app のすべての画面に CSP を付けました（[D-037](decisions.md)）。`wrangler.jsonc` の assets の routing が変わり、画面を開くたびに Worker の request が 1 回増えます。deploy 後に `pnpm diagnose` を token 付きで実行し、`share: asset miss` と `private app: CSP` を確かめます。
+private app のすべての画面に CSP を付けました（[D-037](decisions.md)）。`wrangler.jsonc` の assets の routing が変わりました。HTML の取得や `/favicon.ico` など、`/share/assets/*` 以外への request はすべて Worker を通ります。deploy 後に `pnpm diagnose` を token 付きで実行し、`share: asset miss` と `private app: CSP` を確かめます。
 
 credential の流出経路を [security.md](security.md#13-credential-の流出経路) にまとめ、Workers Logs の確認を再実行できる手順にしました。login は One-time PIN のままで、Access の independent MFA を推奨の追加手順にしました（[D-038](decisions.md)）。production への deploy と MFA を足すかの判断は [roadmap.md](roadmap.md) にあります。
 

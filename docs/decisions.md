@@ -1079,7 +1079,7 @@ private app（Access の内側の SPA）には CSP がありませんでした�
 
 影響:
 
-- 画面の navigation（HTML の取得）ごとに Worker の request が 1 回増える。JS / CSS（`/share/assets/*`）は static assets のまま
+- `/share/assets/*` 以外への request は、すべて Worker を通る。今の build で増えるのは、HTML の取得と、browser が自動で取りに行く `/favicon.ico` などの root 直下のファイル。JS / CSS（`/share/assets/*`）は static assets のまま。root 直下に static なファイルを増やせば、その分も Worker の request になる
 - HTML は Access の内側にあり、Worker は assertion を検証しない。HTML は library のデータを含まず、データは `/api/v1` を通る。`/api/v1` の fail-closed は変わらない
 - `vite dev` では Vite の module も Worker を経由する
 
