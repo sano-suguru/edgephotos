@@ -11,8 +11,8 @@
 ## 現在の状況
 
 - 最終確認: 2026-09-25
-- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login）
-- 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test、private app の CSP の実機での確認、Access の independent MFA（[未検証](#未検証)）
+- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login。[家族の写真を入れる前の確認](#家族の写真を入れる前の-production-確認2026-09-25): update の実走、edge の経路、desktop の Browser での CSP、Workers Logs、backup。derivative の作り直しは remote-test で往復）
+- 未確認: iPhone / Android 実機での取り込み、private app の CSP の実機での確認、2 人の household での日常の操作（[未検証](#未検証)）。Access の independent MFA は production で有効にしていない（[D-038](decisions.md)）
 
 各項目に日付がある場合は、その日付が優先します。
 
@@ -613,7 +613,7 @@ CI は Linux runner の WebKit で HEIC を decode できないため、この a
 `EDGEPHOTOS_URL` と Access token を付けた `pnpm diagnose --env remote-test` の結果:
 
 - Worker の D1 が `0004_asset_uploaded_by.sql` まで適用済みであることを含め、1 件を除いて PASS した
-- 失敗は `r2: CORS — AllowedHeaders lacks: if-match` の 1 件だった。実 R2 に対しても、足りない header を名指しする message になった（[derivative の作り直しの往復](#derivative-の作り直しの往復) で記録を求めていた項目）
+- 失敗は `r2: CORS — AllowedHeaders lacks: if-match` の 1 件だった。実 R2 に対しても、足りない header を名指しする message になった（[derivative の作り直し](#derivative-の作り直しremote-test) の確認で記録を求めていた項目）
 - bucket の `allowed_headers` に `if-match` を加えて `cors set` し直した。origin・method・max age は変えていない
 - 直した後は `r2: CORS` を含めて全項目が PASS し、「no failures」になった
 
@@ -746,6 +746,90 @@ local で確かめた後、remote-test と production に deploy した（[D-037
   - production の Browser で、開発者ツールの console を開いたまま写真を 1 枚 upload し、timeline・viewer・original のダウンロード・共有ページを開いた。CSP の違反は出なかった（利用者の報告。使った browser は記録していない）
 - `vite dev` では Vite の module も Worker を経由する。nonce を付けたことで、共有ページの `vite dev` で CSS が当たらない問題（[見た目の整理](#見た目の整理2026-09-17)）も起きなくなった
 
+## 家族の写真を入れる前の production 確認（2026-09-25）
+
+家族の写真を入れる前に、main の `8218a7e` を production に deploy し直し、Browser・Workers Logs・Access・backup を確かめた。derivative の作り直しは remote-test で往復した。実機・2 人での操作は下の「未検証」に残る。
+
+### deploy と diagnose
+
+運用の [更新](operations.md#8-更新release-と-migration) の「migration なし」の手順（check → deploy → diagnose）を、production で初めて実走した。
+
+- 前の version `14289e10`（#51）との差は docs だけだった。`pnpm check`（typecheck・lint・`db:check`・`cli:check`・unit / integration 496 件・build）と `pnpm test:e2e`（63 件）が通った
+- `pnpm build`（`CLOUDFLARE_ENV` なし）の D1・R2 の名前は `edgephotos`。deploy 後の version は `d560e0e8`。`wrangler secret list` の 7 つは残った
+- token 付きの `pnpm diagnose` は deploy の前後とも 19 項目すべて PASS（`r2: presigned GET`、`share: asset miss`、`private app: CSP` を含む）
+
+### Static Assets の経路（実際の edge）
+
+Access token を付けた `curl` の結果:
+
+| request | 結果 |
+| --- | --- |
+| `Sec-Fetch-Mode: navigate` の `/albums`、未知の path | `200`、CSP 付きの app |
+| `Sec-Fetch-Mode: no-cors` の `/missing.js`・`/missing.png`・`/missing.json`・`/favicon.ico` | `404`（body なし） |
+| `/api/v1/nope` | `404`（JSON） |
+| `Sec-Fetch-Mode` なし、`Accept: text/html` だけ | `200`、CSP 付きの app |
+| どちらの header も無い未知の path | `404` |
+| 匿名の `/share/assets/nope`・`nope.html`・`/share/assets/`・`x.js` | `404`（body なし） |
+
+「production の edge で header の無い client がどうなるか」（上の「private app の CSP」）は、これで確かめた。
+
+### Browser での CSP
+
+Playwright（Chromium 153 の headless、WebKit 26.6）で production を操作した。Access token は app の host の `CF_Authorization` Cookie にだけ置いた。写真は page の canvas で描いた合成画像と、repository の合成 HEIC（`tests/fixtures/still.heic`）。
+
+- 両方の engine で、upload（presigned PUT）→ timeline の thumbnail → viewer の preview → original のダウンロード → album の作成と共有リンクの発行 → 別 context（Access の Cookie なし）の共有ページで thumbnail と拡大表示 → revoke 後に「このリンクは無効か、期限切れです。」まで通った
+- ダウンロードした original は `blob:` URL 経由で、SHA-256 が upload した bytes と一致した
+- CSP 違反は、private app と共有ページのどちらでも 0 件。R2 への request の失敗も 0 件
+- 確認に使った 3 枚は trash へ移し、album は削除した
+
+### Workers Logs
+
+上の [確認手順](#確認手順再実行用) を、この日の 06:40 UTC 以降（上の diagnose・Browser 操作・偽の share secret の request を含む）について再実行した。件数だけを数えた。
+
+| needle | 件数 | 判定 |
+| --- | --- | --- |
+| `cf-access-jwt-assertion` | 79 | 記録あり |
+| `cf-access-token` | 36 | 記録あり |
+| `authorization` | 10 | 記録あり |
+| `REDACTED` | 115 | needle が header の値を読む |
+| `eyJ`（大文字小文字を区別） | 0 | 合格 |
+| `X-Amz-Signature` | 0 | 合格 |
+| 偽の share secret | 0 | 合格 |
+| `CF_Authorization` | 0 | Cookie の値ごと伏せられている |
+
+`invocation_logs` は有効のままにする。
+
+### Access の設定
+
+Cloudflare API で読み直した（GET のみ）。private application は 2026-09-24 10:37 UTC（One-time PIN への変更）から、`/share` の Bypass は作成時から更新されていない。
+
+- private: Allow policy の email は 2 件で、利用者の email を含む。identity provider は One-time PIN の 1 つ、session duration 24 時間。`require`（MFA などの追加条件）は無い
+- `/share`: Bypass・Everyone、path に wildcard なし
+- Allow policy の email と `HOUSEHOLD_EMAILS` の一致は、secret の値を読めないため、この日は再確認していない（2026-09-24 の作成時に確認）
+
+### derivative の作り直し（remote-test）
+
+remote-test（version `78807a9f`、production と同じ code）で、合成の JPEG を 1 枚 upload して往復した。Browser（Chromium）の `fetch()` から実 R2 へ送り、presigned URL はすべて bucket の CORS を通った。thumbnail の削除と壊れた object の配置は `wrangler r2 object`。
+
+- 正常な写真の repair は `ok`
+- thumbnail を削除すると `incomplete`・`missing: ["thumbnail"]` で、target の条件は `if-none-match: *`。original の presigned GET を Browser が CORS 越しに読み、SHA-256 が `source.sha256`（`assets.sha256`）と upload した bytes の両方に一致した
+- create-only の PUT は `200`。同じ URL への 2 回目は `412`。R2 には 1 回目の bytes が残った
+- thumbnail の key に JPEG でない object を置くと `rejected: not_jpeg` で、target は `if-match`（検査した ETag）。続けて 2 回 repair を呼ぶと、両方が同じ ETag を指した
+- 1 回目の target への PUT は `200`、2 回目の target（古くなった ETag）への PUT は `412`。R2 には 1 回目の bytes が残った。先の create-only の URL も `412`
+- この test で PUT した thumbnail は、page の canvas の出力を metadata の除去をせずに送ったため、次の repair が `rejected: metadata_segment` と判定した（Worker の検査が効いている。アプリは `stripJpegMetadata` を通す）
+- 最後に thumbnail を削除し、ライブラリ画面の「点検する」→「1 枚のサムネイルを作り直す」→ もう一度「点検する」で、作り直しのボタンが消えた。その後の repair は `ok`。CSP 違反は 0 件
+- 使った写真は trash へ移した
+
+`409 REPAIR_SOURCE_UNUSABLE` は、original を壊す必要があるため実環境では確かめていない（integration test で確認）。
+
+### backup
+
+production を `pnpm backup export` し、`pnpm backup check` した。
+
+- 4 枚（member の写真 1 枚と、上の確認で upload した合成画像 3 枚）、album 0 件。download 4、失敗 0、4 秒。`check` は `ok: true`、problems 0 件
+- `manifest.json` は `formatVersion: 3`。`X-Amz`・`Signature`・`eyJ`・`Bearer`・`CF_Authorization`・`cf-access`・R2 の host・`http://`・`https://`・`#` は 0 件
+- asset の key は `id, sha256, originalSize, contentType, filename, width, height, takenAt, isFavorite, trashedAt, createdAt, uploadedBy, objects`。`uploadedBy`（email）と `filename` は設計どおり入る（[backup ディレクトリ](security.md#backup-ディレクトリ)）
+
 ## 未検証
 
 ### private app の CSP を production で確かめる
@@ -754,7 +838,7 @@ deploy した後に行う。
 
 1. `pnpm diagnose` を token 付きで実行する。`share: asset miss` と `private app: CSP` が PASS。FAIL なら deploy が古いか、`R2_ACCOUNT_ID` が違う。2026-09-25 に production で済み（上の「private app の CSP」）
 2. Browser の開発者ツールの console を開いたまま、写真を 1 枚 upload し、timeline・viewer（preview）・original のダウンロード・共有ページを開く。`Content Security Policy` の違反が 0 件なら合格。1 件でもあれば、その directive と blocked URL（query を除く）を記録し、deploy を戻すか policy を直す。2026-09-25 に production の desktop で済み
-3. 実機（iPhone Safari、Android Chrome）でも 2 と同じ操作をする（[実機での取り込み](#iphone--android-実機での取り込み)）
+3. 実機（iPhone Safari、Android Chrome）でも 2 と同じ操作をする（[実機での取り込み](#iphone--android-実機での取り込み)）。desktop の Chromium・WebKit では 2026-09-25 に自動操作でも確かめた（上の「家族の写真を入れる前の production 確認」）
 
 ### Access の independent MFA
 
@@ -784,25 +868,6 @@ iPhone Safari:
 - 位置情報の扱いを確認する。original に GPS が残るか、ピッカーの「オプション」で外れるか
 
 Android: 上と同じ項目のうち該当するもの（HEIF 設定の端末を含む）。
-
-### derivative の作り直しの往復
-
-bucket の CORS 設定と実 R2 の preflight までは確認済みです（上）。Browser からの往復は未実施です（[D-026](decisions.md)）。
-
-remote-test の bucket の CORS には、2026-09-24 に `if-match` を加えました（[upload した人の記録](#upload-した人の記録2026-09-24)）。
-
-remote-test への deploy と Access login（対話操作）が要ります。presigned URL の署名には Worker secret の R2 credential が要るため、`wrangler` だけでは代用できません（`wrangler r2 object put` に条件付きの option はありません）。
-
-確認する項目:
-
-- 壊した写真（remote-test の bucket から thumbnail を 1 つ削除）を、ライブラリ画面の「サムネイルを作り直す」で直せること。作り直し後に audit が正常へ戻ること
-- 実 R2 の presigned GET を Browser の `fetch()` から CORS 越しに読み、body の SHA-256 が `assets.sha256` と一致すること（preflight は確認済み。実際に body を読むのはこの手順）
-- 作り直した derivative の PUT（`Content-Type` + `If-None-Match: *`）が通り、同じ URL への 2 回目が `412` になること
-- 実 R2 の `head().checksums.sha256` を使った original の照合が、作り直しの入口で期待どおり働くこと（`409 REPAIR_SOURCE_UNUSABLE`）
-- **`If-Match` 付き presigned PUT**（この経路で初めて使う条件）: 検査した ETag なら `200`、古い ETag なら `412`、先に保存された bytes が残ること
-- 確認に使った asset は trash へ移動する（この文書の他の項目と同じ扱い）
-
-表示が崩れた場合に見る箇所は `src/web/lib/image.ts` の `createImageBitmap(file, { imageOrientation: 'from-image' })` です。original は byte 単位で保持されるので、derivative を作り直せば復旧します。
 
 ### 2 人の household での利用
 

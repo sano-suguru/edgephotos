@@ -18,9 +18,9 @@ beta は置いていません。alpha と v1 の間に別の呼び名が要る�
 
 ## Production
 
-- 🟡 [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す。setup は 2026-09-24 に production の作成・初回 deploy・diagnose・upload まで実走した。secrets file の置き場所だけ手順から外れた（[verification.md](verification.md#production-の作成と初回-deploy2026-09-24)）。update は未実走
+- 🟡 [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す。setup は 2026-09-24 に production の作成・初回 deploy・diagnose・upload まで実走した。secrets file の置き場所だけ手順から外れた（[verification.md](verification.md#production-の作成と初回-deploy2026-09-24)）。update は 2026-09-25 に migration なしの手順で実走した（[verification.md](verification.md#deploy-と-diagnose)）。migration ありの update は未実走
 - ⬜ uninstall は、写真を置いていない使い捨ての環境で実走する。production では行わない
-- 🟡 家族の写真を入れる前: private app の CSP の deploy と確認、Workers Logs の確認手順は 2026-09-25 に済んだ（[verification.md](verification.md#private-app-の-csp2026-09-25)）。実機での CSP の確認は Post-merge verification の実機確認で行う。Access の independent MFA を足すかを決め、足すなら全員の登録まで確かめる（[D-038](decisions.md)、[verification.md](verification.md#access-の-independent-mfa)）
+- 🟡 家族の写真を入れる前: private app の CSP の deploy と desktop での確認、Workers Logs の確認、backup の取得は 2026-09-25 に済んだ（[verification.md](verification.md#家族の写真を入れる前の-production-確認2026-09-25)）。実機での CSP の確認は Post-merge verification の実機確認で行う。Access の independent MFA は、全員が同じ日に登録できるまで有効にしない（[D-038](decisions.md)）
 
 ## Post-merge verification
 
@@ -35,7 +35,6 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 
 ## Release polish
 
-- ⬜ 実 R2 で derivative の作り直しを往復する。`If-Match` 付き presigned PUT を含む。先に remote-test の R2 CORS へ `if-match` を加える（[derivative の作り直しの往復](verification.md#derivative-の作り直しの往復)）
 - ⬜ 2 人が実機で 1 つの library を使う（[2 人の household での利用](verification.md#2-人の-household-での利用)）
 - ⬜ Deploy to Cloudflare ボタン
 - 🟡 screenshots / demo（README に timeline の 1 枚がある）
