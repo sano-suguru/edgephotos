@@ -8,9 +8,9 @@
 
 ## private app の CSP と credential の流出経路（2026-09-25）
 
-private app のすべての HTML を Worker が返し、CSP を付けるようにしました。`img-src` / `connect-src` に許すのは自分の account の R2 endpoint だけで、inline script・`eval()`・別の origin への送信・frame への埋め込みを拒否します（[D-037](decisions.md)）。`wrangler.jsonc` の `run_worker_first` が `["/*", "!/share/assets/*"]` に変わり、画面の navigation ごとに Worker の request が 1 回増えます。
+private app のすべての HTML を Worker が返し、CSP を付けるようにしました。`img-src` / `connect-src` に許すのは自分の account の R2 endpoint だけで、inline script・`eval()`・別の origin への送信・frame への埋め込みを拒否します（[D-037](decisions.md)）。`wrangler.jsonc` の `run_worker_first` が `["/*", "!/share/assets/*"]` に、`not_found_handling` が `"none"` に変わりました（SPA の fallback は Worker が行います）。画面の navigation ごとに Worker の request が 1 回増えます。
 
-`pnpm diagnose` に `private app: CSP` を足しました。deploy 後に token 付きで実行して確かめます。
+`pnpm diagnose` に `private app: CSP` と `share: asset miss` を足しました。deploy 後に token 付きで実行して確かめます。
 
 credential の流出経路を [security.md](security.md#13-credential-の流出経路) にまとめました。Workers Logs の確認は再実行できる手順と合格の条件にしました（[verification.md](verification.md#確認手順再実行用)）。
 

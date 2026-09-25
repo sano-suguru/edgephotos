@@ -123,6 +123,11 @@ describe('setup diagnostics', () => {
     expect(status(checks, 'share page')).toBe('fail')
     expect(status(checks, 'private API')).toBe('skip')
 
+    // The assets' SPA fallback answering a miss under the public /share/assets with the private app.
+    const spaFallback: Fetch = async () => new Response('<html>', { headers: { 'content-type': 'text/html' } })
+    const fallback = await checkDeployment({ api: spaFallback, blob: spaFallback })
+    expect(status(fallback, 'share: asset miss')).toBe('fail')
+
     const redirect = new Response(null, { status: 302, headers: { location: 'https://team.cloudflareaccess.com/x' } })
     const shareBehindAccess: Fetch = async () => redirect.clone()
     const behind = await checkDeployment({ api: shareBehindAccess, blob: shareBehindAccess, token: 't' })
@@ -138,6 +143,7 @@ describe('setup diagnostics', () => {
       if (path.startsWith('/share/api')) {
         return new Response(JSON.stringify({ error: { code: 'SHARE_UNAVAILABLE' } }), { status: 404 })
       }
+      if (path.startsWith('/share/assets/')) return new Response(null, { status: 404 })
       if (path.startsWith('/share/')) {
         return new Response('<html>', { headers: { 'content-security-policy': "default-src 'self'" } })
       }
@@ -162,6 +168,7 @@ describe('setup diagnostics', () => {
     })
     expect(status(checks, 'private API')).toBe('pass')
     expect(status(checks, 'private app: CSP')).toBe('pass')
+    expect(status(checks, 'share: asset miss')).toBe('pass')
     expect(status(checks, 'worker: D1 schema')).toBe('fail')
     expect(status(checks, 'library: interrupted uploads')).toBeUndefined()
     expect(status(checks, 'library: unfinished deletes')).toBeUndefined()

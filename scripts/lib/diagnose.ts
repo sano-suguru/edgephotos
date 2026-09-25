@@ -274,6 +274,20 @@ export async function checkDeployment(opts: {
       : check('share page', 'fail', `got ${sharePage.status}${csp ? '' : ' without the share CSP'}`),
   )
 
+  // /share/assets/* is public and never reaches the Worker. A miss there must not be the private app
+  // (the assets' SPA fallback would serve it without its CSP): not_found_handling "none" (D-037).
+  const assetMiss = await api('/share/assets/diagnose-probe-missing')
+  const missType = assetMiss.headers.get('content-type') ?? ''
+  results.push(
+    assetMiss.status === 404 && !missType.includes('text/html')
+      ? check('share: asset miss', 'pass', 'a missing file under /share/assets is a 404')
+      : check(
+          'share: asset miss',
+          'fail',
+          `got ${assetMiss.status} ${missType || 'without a content type'}; set assets.not_found_handling to "none" and deploy`,
+        ),
+  )
+
   if (!token) {
     results.push(
       check('private API', 'skip', 'set EDGEPHOTOS_ACCESS_TOKEN to check the member path, migrations and R2 signing'),

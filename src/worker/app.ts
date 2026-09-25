@@ -804,13 +804,16 @@ export function createApp(options: AppOptions) {
   })
 
   // Private app shell. run_worker_first sends every path except /share/assets/* here, so each HTML
-  // document of the private app (/, /albums/..., and any unknown path the SPA fallback answers) carries
-  // the CSP. Unmatched API, share and dev blob paths stay JSON 404s instead of becoming the app.
+  // document of the private app (/, /albums/..., and any unknown path) carries the CSP. The SPA fallback
+  // is done here, not by the assets (not_found_handling is "none"): the assets would also answer a miss
+  // under /share/assets/*, which is outside Access and never reaches the Worker, with the app and no CSP.
+  // Unmatched API, share and dev blob paths stay JSON 404s instead of becoming the app.
   app.get('*', async (c) => {
-    if (!env.ASSETS || /^\/(api|share|__local)(\/|\.|$)/.test(c.req.path)) {
+    if (!env.ASSETS || /^\/+(api|share|__local)(\/|\.|$)/i.test(c.req.path)) {
       throw new ApiError(404, 'NOT_FOUND', 'Not found.')
     }
-    const asset = await env.ASSETS.fetch(c.req.raw)
+    let asset = await env.ASSETS.fetch(c.req.raw)
+    if (asset.status === 404) asset = await env.ASSETS.fetch(new URL('/', c.req.url))
     const res = new Response(asset.body, asset)
     res.headers.set('Referrer-Policy', 'no-referrer')
     res.headers.set('X-Content-Type-Options', 'nosniff')

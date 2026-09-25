@@ -733,6 +733,7 @@ local で確かめた（[D-037](decisions.md)）。production への deploy は�
 - `e2e/csp.spec.ts`: `/`、`/albums`、未知の path の HTML に CSP が付く。注入した inline `<script>`、`onerror=`、別の origin の `<img>` が拒否される。`page.evaluate()` からの `eval()` は DevTools の評価として CSP の対象外になるため、`eval()` は header に `'unsafe-eval'` が無いことで確かめた
 - timeline の spec は画像を `data:` URL で返していたため、CSP に拒否された。test 側で同じ origin の URL から返すように直した。app の変更ではない
 - production build（`vite build` + `vite preview`）: `/`、`/albums`、未知の path、`/share/{shareId}` に CSP が付き、`/share/assets/*` は static assets のまま（CSP なし）。`/index.html` は `/` への `307`。Chromium と WebKit で `/`、`/albums`、`/settings` を開き、CSP 違反 0 件、stylesheet が読み込まれることを確かめた（設定が無いので API は `503`）
+- fresh-context の security review で、`/share/assets/` の無いファイル（Worker を通らず、Access の外）に static assets の SPA fallback が private app を CSP なしで返すことが見つかった（`vite preview` で `200`、`/` と同じ ETag）。`not_found_handling` を `"none"` にし、fallback を Worker に移した。直した後の `vite preview` では、`/share/assets/nope`・`/share/assets/`・`/share/assets/nope.html` が `404`（body なし）、`/`・`/albums`・未知の path は CSP 付きの app だった。`pnpm diagnose` の `share: asset miss` で deploy 後も確かめる
 - `vite dev` では Vite の module も Worker を経由する。nonce を付けたことで、共有ページの `vite dev` で CSS が当たらない問題（[見た目の整理](#見た目の整理2026-09-17)）も起きなくなった
 
 ## 未検証
@@ -741,7 +742,7 @@ local で確かめた（[D-037](decisions.md)）。production への deploy は�
 
 deploy した後に行う。
 
-1. `pnpm diagnose` を token 付きで実行する。`private app: CSP` が PASS（HTML に CSP があり、`connect-src` に自分の account の R2 endpoint がある）。FAIL なら deploy が古いか、`R2_ACCOUNT_ID` が違う
+1. `pnpm diagnose` を token 付きで実行する。`share: asset miss` と `private app: CSP` が PASS（HTML に CSP があり、`connect-src` に自分の account の R2 endpoint がある）。FAIL なら deploy が古いか、`R2_ACCOUNT_ID` が違う
 2. Browser の開発者ツールの console を開いたまま、写真を 1 枚 upload し、timeline・viewer（preview）・original のダウンロード・共有ページを開く。`Content Security Policy` の違反が 0 件なら合格。1 件でもあれば、その directive と blocked URL（query を除く）を記録し、deploy を戻すか policy を直す
 3. 実機（iPhone Safari、Android Chrome）でも 2 と同じ操作をする（[実機での取り込み](#iphone--android-実機での取り込み)）
 
