@@ -20,7 +20,7 @@ beta は置いていません。alpha と v1 の間に別の呼び名が要る�
 
 - 🟡 [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す。setup は 2026-09-24 に production の作成・初回 deploy・diagnose・upload まで実走した。secrets file の置き場所だけ手順から外れた（[verification.md](verification.md#production-の作成と初回-deploy2026-09-24)）。update は未実走
 - ⬜ uninstall は、写真を置いていない使い捨ての環境で実走する。production では行わない
-- ⬜ 家族の写真を入れる前: private app の CSP を deploy して確かめる（[verification.md](verification.md#private-app-の-csp-を-production-で確かめる)）。Workers Logs の確認手順を通す（[verification.md](verification.md#確認手順再実行用)）。Access の independent MFA を足すかを決め、足すなら全員の登録まで確かめる（[D-038](decisions.md)、[verification.md](verification.md#access-の-independent-mfa)）
+- 🟡 家族の写真を入れる前: private app の CSP の deploy と確認、Workers Logs の確認手順は 2026-09-25 に済んだ（[verification.md](verification.md#private-app-の-csp2026-09-25)）。実機での CSP の確認は Post-merge verification の実機確認で行う。Access の independent MFA を足すかを決め、足すなら全員の登録まで確かめる（[D-038](decisions.md)、[verification.md](verification.md#access-の-independent-mfa)）
 
 ## Post-merge verification
 

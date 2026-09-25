@@ -12,7 +12,7 @@
 
 - 最終確認: 2026-09-25
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login）
-- 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test、private app の CSP の Browser での確認（production は deploy と diagnose まで済み）、Access の independent MFA（[未検証](#未検証)）
+- 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test、private app の CSP の実機での確認、Access の independent MFA（[未検証](#未検証)）
 
 各項目に日付がある場合は、その日付が優先します。
 
@@ -727,7 +727,7 @@ Workers Logs では、この 3 つの header の値は伏せられた状態で�
 
 ## private app の CSP（2026-09-25）
 
-local で確かめた後、remote-test と production に deploy した（[D-037](decisions.md)）。Browser での確認はまだ行っていない（下の「未検証」）。
+local で確かめた後、remote-test と production に deploy した（[D-037](decisions.md)）。desktop の Browser での確認まで済んだ。実機は未確認（下の「未検証」）。
 
 - `pnpm test:e2e`（Chromium、WebKit）の全 spec が、CSP 違反 0 件で通った。`e2e/fixtures.ts` がすべての page と guest の context で `securitypolicyviolation` を集め、1 件でもあれば失敗にする。upload の presigned PUT、thumbnail / preview の表示、original のダウンロード（presigned GET の `fetch()`）、共有ページ、Base UI の Dialog / Menu を含む
 - `e2e/csp.spec.ts`: `/`、`/albums`、未知の path の HTML に CSP が付く。注入した inline `<script>`、`onerror=`、別の origin の `<img>` が拒否される。`page.evaluate()` からの `eval()` は DevTools の評価として CSP の対象外になるため、`eval()` は header に `'unsafe-eval'` が無いことで確かめた
@@ -743,6 +743,7 @@ local で確かめた後、remote-test と production に deploy した（[D-037
   - token 付きの diagnose の後に、production の Workers Logs（2026-09-18〜25）を数えた。`eyJ` と `X-Amz-Signature` を含む invocation は 0 件だった
   - `cf-access-token` を含む invocation は 16 件で、今回の `GET /` を含む
   - diagnose の直後の検索では、今回の invocation は 1 件も出なかった。数分後に現れた
+  - production の Browser で、開発者ツールの console を開いたまま写真を 1 枚 upload し、timeline・viewer・original のダウンロード・共有ページを開いた。CSP の違反は出なかった（利用者の報告。使った browser は記録していない）
 - `vite dev` では Vite の module も Worker を経由する。nonce を付けたことで、共有ページの `vite dev` で CSS が当たらない問題（[見た目の整理](#見た目の整理2026-09-17)）も起きなくなった
 
 ## 未検証
@@ -752,7 +753,7 @@ local で確かめた後、remote-test と production に deploy した（[D-037
 deploy した後に行う。
 
 1. `pnpm diagnose` を token 付きで実行する。`share: asset miss` と `private app: CSP` が PASS。FAIL なら deploy が古いか、`R2_ACCOUNT_ID` が違う。2026-09-25 に production で済み（上の「private app の CSP」）
-2. Browser の開発者ツールの console を開いたまま、写真を 1 枚 upload し、timeline・viewer（preview）・original のダウンロード・共有ページを開く。`Content Security Policy` の違反が 0 件なら合格。1 件でもあれば、その directive と blocked URL（query を除く）を記録し、deploy を戻すか policy を直す
+2. Browser の開発者ツールの console を開いたまま、写真を 1 枚 upload し、timeline・viewer（preview）・original のダウンロード・共有ページを開く。`Content Security Policy` の違反が 0 件なら合格。1 件でもあれば、その directive と blocked URL（query を除く）を記録し、deploy を戻すか policy を直す。2026-09-25 に production の desktop で済み
 3. 実機（iPhone Safari、Android Chrome）でも 2 と同じ操作をする（[実機での取り込み](#iphone--android-実機での取り込み)）
 
 ### Access の independent MFA
