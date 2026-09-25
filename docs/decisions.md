@@ -1119,3 +1119,12 @@ member の login は email に届く One-time PIN（OTP）です（[operations.m
 
 - Access の JWT に MFA の結果が載ることが文書化された場合。Worker で検証して fail-closed にできる
 - member を Cloudflare account の member にしてよい運用に変わった場合
+
+**production では、2026-09-25 の時点で有効にしない。** 家族の写真を入れる前に全員が登録する、という手順の前提を満たせないため。
+
+- 2 人目の member が、有効化と同じ時期に authenticator を登録できる状況に無かった。有効にしてから登録するまでの間は、上の「最初の登録に MFA が要らない」窓が開いたままになる。登録できない member がいる状態で有効にすると、OTP だけより守りが増えないまま、その窓だけが残る
+- remote-test での事前確認（登録・login・復旧・share の bypass・`cloudflared access login`）も行っていない（[verification.md](verification.md#access-の-independent-mfa)）
+
+受け入れる脅威: どちらかの member の email アカウントを乗っ取った攻撃者は、OTP を受け取って login でき、library 全体（全 original の閲覧と export、trash と完全削除、共有リンクの発行）を扱える。member の email アカウント自体の保護（その provider の 2 段階認証など）は EdgePhotos の外にあり、確認していない。検知の手段は、Workers Logs と Access の login ログを管理者が見ることだけ。
+
+有効にするのは、household の全員が同じ日に登録できるとき。その前に remote-test で上の確認を行い、有効にしたら全員の登録と管理者の確認までを同じ日に終える。
