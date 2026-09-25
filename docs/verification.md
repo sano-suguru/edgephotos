@@ -10,8 +10,8 @@
 
 ## 現在の状況
 
-- 最終確認: 2026-09-24
-- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更）
+- 最終確認: 2026-09-25
+- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login）
 - 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test（[未検証](#未検証)）
 
 各項目に日付がある場合は、その日付が優先します。
@@ -662,7 +662,7 @@ production の作成前に、Worker がまだ無い状態からの初回 deploy 
 
 - private（hostname のみ、Allow）と `/share`（wildcard なし、Bypass・Everyone）の 2 つの self-hosted application を、Cloudflare API で作った。destination は public、session duration は 24 時間（remote-test と同じ）
 - 作成後に API で読み直し、2 つの hostname が `APP_ORIGIN` と同じ host であること、Allow policy の email が `HOUSEHOLD_EMAILS` と同じ 2 人であることを確かめた
-- household に含めていない account での login 拒否は、production ではまだ確かめていない（下の「login 方法を One-time PIN にする」）
+- household に含めていない email での login 拒否は、下の「login 方法を One-time PIN にする」で確かめた
 
 ### login 方法を One-time PIN にする（2026-09-24）
 
@@ -674,8 +674,7 @@ account の identity provider は Cloudflare アカウントでのログイン�
 - 最新の Worker version の preview URL（`<version>-edgephotos...workers.dev`）は `404` だった
 
 - 利用者（household の 1 人目）が、自分の email に届いたコードで login できた
-
-2 人目の member の login と、登録していない email にコードが届かないことは、まだ確かめていない。
+- 2026-09-25、2 人目の member も OTP で login し、写真を upload できた。登録していない email を入れたときはコードが届かなかった。いずれも利用者の報告
 
 ### deploy と CORS
 
@@ -690,7 +689,7 @@ account の identity provider は Cloudflare アカウントでのログイン�
 - D1 では、その asset が `ready`、`uploaded_by` が同じ email、upload の行が `finalized` だった。R2 には original と `derivatives/v1` の thumbnail・preview の 3 つがあった（`r2 object get` で byte 数だけを確認）
 - upload 後に `pnpm diagnose` を再実行し、`r2: presigned GET` を含む全項目が PASS した（no failures）
 
-2 人目の member による upload は、実環境ではまだ確かめていない（[2 人の household での利用](#2-人の-household-での利用)）。
+2 人目の member の login と upload は、上の「login 方法を One-time PIN にする」で確かめた。2 人での日常の操作は、まだ確かめていない（[2 人の household での利用](#2-人の-household-での利用)）。
 
 ## 未検証
 
