@@ -1,5 +1,16 @@
 import { devices, type Page } from '@playwright/test'
-import { expect, expectImageLoaded, openApp, test, tile, uniqueName, uploadPanel, uploadPhoto } from './fixtures'
+import {
+  expect,
+  expectImageLoaded,
+  makeJpeg,
+  openApp,
+  test,
+  tile,
+  uniqueName,
+  uploadFiles,
+  uploadPanel,
+  uploadPhoto,
+} from './fixtures'
 
 const noHorizontalScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
@@ -122,6 +133,16 @@ test('phone layout: photos are picked by tapping, and the actions stay in reach'
   await openApp(page)
   const photo = `${uniqueName('phone-pick')}.jpg`
   await uploadPhoto(page, photo, 900, 1600)
+  // Enough photos that the grid is taller than the screen, whatever the other specs left in the library:
+  // the scroll check at the end means nothing on a page that cannot scroll.
+  const filler = await Promise.all(
+    Array.from({ length: 18 }, async () => ({
+      name: `${uniqueName('phone-fill')}.jpg`,
+      mimeType: 'image/jpeg',
+      buffer: await makeJpeg(page, 200, 200),
+    })),
+  )
+  await uploadFiles(page, filler)
   await expect(uploadPanel(page)).toBeHidden({ timeout: 10_000 })
 
   const enter = page.getByRole('button', { name: '選択', exact: true })
@@ -144,6 +165,7 @@ test('phone layout: photos are picked by tapping, and the actions stay in reach'
 
   // The bar keeps the top edge once the grid has scrolled.
   await page.evaluate(() => window.scrollBy(0, 600))
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(200)
   await expect(toolbar).toBeInViewport()
   await expect.poll(async () => (await toolbar.boundingBox())?.y).toBeLessThan(80)
 
