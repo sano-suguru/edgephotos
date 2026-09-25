@@ -28,7 +28,7 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 
 - ⬜ 普段の入力経路でスマートフォン写真を数枚 upload し、timeline の orientation と preview を確認する
 - ⬜ iPhone Safari の実機で取り込みを確認する（[iPhone / Android 実機での取り込み](verification.md#iphone--android-実機での取り込み)）
-- ⬜ iPhone Safari の実機で original のダウンロードを確認する。大きな JPEG、大きな HEIC、100 MB に近いファイル、続けて数回。失敗したら D-036 の再検討条件に当たる（[D-036](decisions.md)）
+- 🟡 iPhone Safari の実機で original のダウンロードを確認する。大きな JPEG、大きな HEIC、100 MB に近いファイル、続けて数回。失敗したら D-036 の再検討条件に当たる（[D-036](decisions.md)）。2026-09-25 に合成画像で失敗なし（利用者の報告。User-Agent がデスクトップ表示の形で、通常表示では未確認。[verification.md](verification.md#利用者の端末での確認)）
 - ⬜ Android の実機で、同じ項目のうち該当するものを確認する
 - ⬜ 数千枚の timeline を年月から開き、末尾まで scroll したときの memory と滑らかさを iPhone / Android で確認する。virtualization の要否はこの結果で決める（[D-031](decisions.md)、[benchmarks.md](benchmarks.md)）
 - ⬜ Dialog / Menu の touch 操作を実機で確認する（keyboard・focus と phone 幅の tap は Browser E2E で自動化済み）
