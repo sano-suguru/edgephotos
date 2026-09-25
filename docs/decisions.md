@@ -102,7 +102,7 @@ SSR、RSC、Server Actions を中心要件にせず、vinext や Astro をアプ
 
 これにより private app の JS bundle も認証なしで取得できます。bundle は公開ソースと同じコードで、secret や写真データを含まないため許容します。
 
-一方 `index.html` と SPA 経路、`/api/*` は Access の保護下に残します。共有ページ本体（`/share/{shareId}`）は Worker が返し、share 用 header と CSP を必ず付与します。
+一方 `index.html` と SPA 経路、`/api/*` は Access の保護下に残します。共有ページ本体（`/share/{shareId}`）は Worker が返し、share 用 header と CSP を必ず付与します。private app の HTML も Worker が返し、CSP を付けます（[D-037](#d-037-private-app-の-html-も-worker-が返しcsp-を付ける)）。
 
 ## D-012: finalize の保存確認は「存在・サイズ・形式・派生画像 metadata」とする
 
@@ -1056,3 +1056,66 @@ viewer の「保存したファイルを開く」は、original の presigned GE
 - 発行済みの URL が信頼境界の外へ出る経路が、ほかに見つかった場合
 - member を外したときに、発行済みの URL も即時に止める必要が出た場合
 - iPhone の実機で、大きな original の Blob ダウンロードが失敗する場合。そのときは original のダウンロードだけ Worker で streaming する案を検討する
+
+## D-037: private app の HTML も Worker が返し、CSP を付ける
+
+**状態:** 採用（2026-09-25）
+
+private app（Access の内側の SPA）には CSP がありませんでした。private app で script を実行されると、その member ができること（library 全体の削除・export、presigned URL の取得）をすべてできます。家族の写真を production に置く前に、XSS の被害を狭める層を足します。
+
+**`run_worker_first` を `["/*", "!/share/assets/*"]` にし、HTML はすべて Worker が `env.ASSETS.fetch()` で取り出して header を付けて返す。** 共有ページ（D-011）と同じ方法です。
+
+- CSP の `img-src` / `connect-src` には、presigned URL の宛先（`https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`）を 1 つだけ書く。`R2_ACCOUNT_ID` は Worker secret なので、build 時の静的ファイルには書けない
+- 未知の path も SPA fallback で `index.html` を返す。navigation request は、Worker を先に通さない限り static assets が直接答える（[SPA の routing](https://developers.cloudflare.com/workers/static-assets/routing/single-page-application/)）。`/`、`/albums` のような既知の path だけを Worker へ回すと、`/anything` で CSP の無い app を開かせられる。したがって全 path を Worker へ回す
+- `/api`、`/share`、`/__local` の配下で route の無い path は、app ではなく JSON の `404` にする
+- `vite dev` は `html.cspNonce` の nonce を Vite が挿入する `<script>` / `<style>` に付け、Worker が同じ nonce を CSP に足す。dev と Browser E2E は `'unsafe-inline'` を足さずに production と同じ policy で動く
+
+却下した案:
+
+- `_headers` で CSP を付ける: 静的ファイルなので R2 は `https://*.r2.cloudflarestorage.com` と書くしかなく、攻撃者が自分の R2 へ presigned PUT で写真を送り出す経路を許す。`vite dev` にも適用されない（[Headers](https://developers.cloudflare.com/workers/static-assets/headers/)）
+- `<meta http-equiv>` で CSP を付ける: `frame-ancestors` を書けず、R2 の account ID の問題も同じ
+- dev だけ `'unsafe-inline'` を許す: Browser E2E が production で起きる style の拒否を見逃す
+
+影響:
+
+- 画面の navigation（HTML の取得）ごとに Worker の request が 1 回増える。JS / CSS（`/share/assets/*`）は static assets のまま
+- HTML は Access の内側にあり、Worker は assertion を検証しない。HTML は library のデータを含まず、データは `/api/v1` を通る。`/api/v1` の fail-closed は変わらない
+- `vite dev` では Vite の module も Worker を経由する
+
+再検討する条件:
+
+- CSP の下で動かない依存（inline `<style>` を挿入する Base UI の component など）を使う必要が出た場合。Base UI の `CSPProvider` の nonce を検討する
+- Workers の static assets が、secret を含む header を request ごとに付けられるようになった場合
+
+## D-038: login は One-time PIN のまま、Access の independent MFA を推奨の追加手順にする
+
+**状態:** 採用（2026-09-25）
+
+member の login は email に届く One-time PIN（OTP）です（[operations.md](operations.md#login-方法)）。member の email アカウントを乗っ取られると、library 全体（全 original の export、削除、share の作成）を取られます（[D-028](#d-028-許可した複数の-email-が-1-つの-library-を対等に共同利用する)）。
+
+比べた方式（2026-09-25 時点の Cloudflare の文書）:
+
+| 方式 | email の乗っ取りで library に入れるか | 導入と復旧の負担 |
+| --- | --- | --- |
+| OTP のみ（現状） | 入れる | member は email だけ。復旧も email |
+| Cloudflare の identity provider | 「account の member に限る」なら、member を Cloudflare account の member にする必要がある。限らない場合は任意の Cloudflare user が認証でき、その Cloudflare アカウントの保護（MFA の有無、email での復旧）に依存する | 家族全員に Cloudflare アカウントが要る |
+| OTP + Access の independent MFA | authenticator を登録した後は、email だけでは入れない | 各 member が TOTP・passkey・security key を登録する。紛失時は管理者が authenticator を削除し、member が再登録する |
+
+**OTP を残し、independent MFA を production で家族の写真を入れる前の推奨手順にする。** EdgePhotos の設定としては必須にしない。
+
+- Cloudflare の identity provider は採らない。「account の member に限る」は、家族を写真を置いている Cloudflare account の member にすることで、Access の利用者と account の管理者を分けている前提（[信頼するもの](security.md#信頼するものしないもの)）を崩す。限らない設定は、email で復旧できる Cloudflare アカウントに依存するだけで、OTP より明確に強いと言えない
+- independent MFA は Access の設定だけで足せ、Worker・CLI・share の変更が要らない。CLI の token（`cloudflared access login`）も Browser の login を通るので MFA がかかる見込みだが、未確認（[verification.md](verification.md#access-の-independent-mfa)）
+- 必須にしないのは、Worker がこれを検証できないため。Access の JWT に independent MFA を通ったことを示す claim は文書化されていない（[Application token](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)）。Access 側で MFA を外しても、Worker は拒否できない。fail-closed にできない設定を「必須」とは書かない
+- 家族全員に authenticator の登録を求めることは、self-host の導入を重くする。脅威（家族の email アカウントの乗っ取り）を重く見る利用者が選ぶ
+
+残るリスク:
+
+- 最初の authenticator の登録には MFA が要らない（[Independent MFA](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/independent-mfa/)）。member が登録する前に email を乗っ取られていれば、攻撃者が先に登録できる。有効にしたら全員がすぐ登録し、管理者が dashboard で各 member の authenticator を確かめる
+- 管理者が authenticator を削除して再登録させる間は、OTP だけで登録できる状態に戻る
+- 登録済みの端末（session）の乗っ取りは防がない
+- Access の plan ごとの提供範囲は、文書に書かれていない。有効にできなかった場合は OTP のみのまま
+
+再検討する条件:
+
+- Access の JWT に MFA の結果が載ることが文書化された場合。Worker で検証して fail-closed にできる
+- member を Cloudflare account の member にしてよい運用に変わった場合

@@ -6,6 +6,16 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## private app の CSP と credential の流出経路（2026-09-25）
+
+private app のすべての HTML を Worker が返し、CSP を付けるようにしました。`img-src` / `connect-src` に許すのは自分の account の R2 endpoint だけで、inline script・`eval()`・別の origin への送信・frame への埋め込みを拒否します（[D-037](decisions.md)）。`wrangler.jsonc` の `run_worker_first` が `["/*", "!/share/assets/*"]` に変わり、画面の navigation ごとに Worker の request が 1 回増えます。
+
+`pnpm diagnose` に `private app: CSP` を足しました。deploy 後に token 付きで実行して確かめます。
+
+credential の流出経路を [security.md](security.md#13-credential-の流出経路) にまとめました。Workers Logs の確認は再実行できる手順と合格の条件にしました（[verification.md](verification.md#確認手順再実行用)）。
+
+member の login は One-time PIN のままです。Access の independent MFA を推奨の追加手順にしました（[D-038](decisions.md)、[operations.md](operations.md#mfa-を足す推奨)）。production への deploy と MFA の有効化は未実施です（[roadmap.md](roadmap.md)）。
+
 ## presigned URL の境界の整理（2026-09-25）
 
 viewer の「保存したファイルを開く」は「保存したファイルをダウンロード」になりました。original の URL を tab で開かず、読み込んでから保存します（[D-036](decisions.md)）。R2 CORS の `AllowedMethods` に `GET` が無い bucket では、このダウンロードも失敗します（[R2 CORS](operations.md#6-r2-cors)）。

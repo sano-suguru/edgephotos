@@ -4,7 +4,7 @@ v1 までに残っている作業だけを管理します。終わった段階�
 
 設計の理由は [decisions.md](decisions.md)、不変条件は [architecture.md](architecture.md) と [security.md](security.md)、既知の制約は [limitations.md](limitations.md) にあります。各項目の確認手順と合格の条件は、リンク先の [verification.md](verification.md) にあります。
 
-状態の凡例（2026-09-24 時点）:
+状態の凡例（2026-09-25 時点）:
 
 - ⬜ 未着手
 - 🟡 一部済み
@@ -20,6 +20,7 @@ beta は置いていません。alpha と v1 の間に別の呼び名が要る�
 
 - 🟡 [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す。setup は 2026-09-24 に production の作成・初回 deploy・diagnose・upload まで実走した。secrets file の置き場所だけ手順から外れた（[verification.md](verification.md#production-の作成と初回-deploy2026-09-24)）。update は未実走
 - ⬜ uninstall は、写真を置いていない使い捨ての環境で実走する。production では行わない
+- ⬜ 家族の写真を入れる前: private app の CSP を deploy して確かめる（[verification.md](verification.md#private-app-の-csp-を-production-で確かめる)）。Workers Logs の確認手順を通す（[verification.md](verification.md#確認手順再実行用)）。Access の independent MFA を足すかを決め、足すなら全員の登録まで確かめる（[D-038](decisions.md)、[verification.md](verification.md#access-の-independent-mfa)）
 
 ## Post-merge verification
 
@@ -37,7 +38,6 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 - ⬜ 実 R2 で derivative の作り直しを往復する。`If-Match` 付き presigned PUT を含む。先に remote-test の R2 CORS へ `if-match` を加える（[derivative の作り直しの往復](verification.md#derivative-の作り直しの往復)）
 - ⬜ 2 人が実機で 1 つの library を使う（[2 人の household での利用](verification.md#2-人の-household-での利用)）
 - ⬜ Deploy to Cloudflare ボタン
-- ⬜ private app に CSP を付ける（[HTTP / Browser](security.md#8-http--browser)）
 - 🟡 screenshots / demo（README に timeline の 1 枚がある）
 - ⬜ accessibility の基本確認
 - ⬜ client-side image processing を実機で計測する（desktop の Chromium / WebKit では計測済み。[benchmarks.md](benchmarks.md)）
