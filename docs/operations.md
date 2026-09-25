@@ -519,7 +519,7 @@ R2 API token（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）は presigned URL �
 定期更新、または漏洩の疑いがある場合:
 
 1. Dashboard の R2 → Manage API tokens で、同じ権限（対象 bucket のみ、Object Read & Write）の新しい token を作る
-2. 漏洩の疑いがある場合は、**先に古い token を削除する**。削除した時点で、古い key で署名した URL（未使用の upload URL、表示中の画像 URL）はすべて無効になる。発行済み URL の期限は最大 600 秒なので、定期更新なら 3 → 4 の後に削除してよい
+2. 漏洩の疑いがある場合は、**先に古い token を削除する**。R2 は署名を token の key で検証するため、削除後は古い key で署名した URL（未使用の upload URL、表示中の画像 URL）も通らなくなる見込みです。ただし Cloudflare の文書に明記はなく、EdgePhotos でも確かめていません。発行済み URL の期限は最大 600 秒なので、定期更新なら 3 → 4 の後に削除してよい
 3. `pnpm wrangler secret put R2_ACCESS_KEY_ID [--env <env>]`、同じく `R2_SECRET_ACCESS_KEY`
 4. `pnpm diagnose` で `r2: presigned GET` が PASS になることを確認する（library が空なら写真を 1 枚 upload）
 

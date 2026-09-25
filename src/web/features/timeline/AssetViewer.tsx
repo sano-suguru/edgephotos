@@ -194,17 +194,27 @@ export function AssetViewer(props: {
     else if (Math.abs(dx) < 10 && Math.abs(dy) < 10) chromeHidden.value = !chromeHidden.value
   }
 
+  // Read into a Blob and saved from here rather than opened in a tab: a tab would put the presigned URL of the
+  // original, a bearer credential, in the address bar and the browser history (docs/security.md §6).
   const downloadOriginal = () =>
     run(async () => {
       const { url } = await api.originalUrl(asset.id)
-      window.open(url, '_blank', 'noopener,noreferrer')
+      const res = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' })
+      if (!res.ok) throw new Error(`Could not read the original (${res.status})`)
+      const href = URL.createObjectURL(await res.blob())
+      const a = document.createElement('a')
+      a.href = href
+      a.download = asset.filename ?? `${asset.id}.${asset.contentType.split('/')[1]}`
+      a.click()
+      // Revoked later, not right away: some browsers start reading the Blob after click() returns.
+      setTimeout(() => URL.revokeObjectURL(href), 60_000)
     })
 
   const when = captureParts(asset)
   const chrome = cn('transition-opacity motion-reduce:transition-none', chromeHidden.value && 'invisible opacity-0')
 
   const moreItems = [
-    { label: '保存したファイルを開く', onSelect: downloadOriginal },
+    { label: '保存したファイルをダウンロード', onSelect: downloadOriginal },
     ...(props.mode === 'album' && props.albumId
       ? [
           {

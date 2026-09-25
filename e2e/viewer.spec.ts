@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { naturalSize, openApp, tile, uniqueName, uploadPhoto } from './fixtures'
 
@@ -133,4 +134,30 @@ test('the info panel names who added the photo, and says so when that was not re
   await expect(info).not.toContainText('you@localhost.test')
   // The viewer may still be prefetching a neighbour through the route when the test ends.
   await page.unrouteAll({ behavior: 'ignoreErrors' })
+})
+
+// The URL of the original is a bearer credential. Saving it must not open a tab on that URL, which would put it
+// in the address bar and the browser history (docs/security.md §6).
+test('saving the original downloads it without navigating to its presigned URL', async ({ page, context }) => {
+  await openApp(page)
+  const name = `${uniqueName('save-original')}.jpg`
+  await uploadPhoto(page, name)
+  const opened: string[] = []
+  context.on('page', (p) => opened.push(p.url()))
+  const navigations: string[] = []
+  page.on('framenavigated', (frame) => navigations.push(frame.url()))
+
+  await tile(page, name).click()
+  const viewer = page.getByRole('dialog', { name })
+  await viewer.getByRole('button', { name: 'その他の操作' }).click()
+  const downloaded = page.waitForEvent('download')
+  await page.getByRole('menuitem', { name: '保存したファイルをダウンロード' }).click()
+  const download = await downloaded
+
+  expect(download.suggestedFilename()).toBe(name)
+  expect(download.url()).toMatch(/^blob:/)
+  const path = await download.path()
+  expect(statSync(path).size).toBeGreaterThan(0)
+  expect(opened).toEqual([])
+  expect(navigations.filter((url) => url.includes('/__local/blobs/'))).toEqual([])
 })

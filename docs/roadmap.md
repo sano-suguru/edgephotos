@@ -37,6 +37,7 @@ merge を止める条件から外し、実際に使い始めてから確認す�
 - ⬜ 2 人が実機で 1 つの library を使う（[2 人の household での利用](verification.md#2-人の-household-での利用)）
 - ⬜ Deploy to Cloudflare ボタン
 - ⬜ private app に CSP を付ける（[HTTP / Browser](security.md#8-http--browser)）
+- ⬜ Workers Logs の invocation log で、share API の `Authorization` と `Cf-Access-Jwt-Assertion` の値が伏せられているかを remote-test で確かめる。伏せられていなければ `invocation_logs` を無効にするかを決める（[ログ](security.md#9-ログ)）
 - 🟡 screenshots / demo（README に timeline の 1 枚がある）
 - ⬜ accessibility の基本確認
 - ⬜ client-side image processing を実機で計測する（desktop の Chromium / WebKit では計測済み。[benchmarks.md](benchmarks.md)）
