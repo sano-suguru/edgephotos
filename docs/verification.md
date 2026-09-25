@@ -796,7 +796,8 @@ Playwright（Chromium 153 の headless、WebKit 26.6）で production を操作�
 
 - Brave（macOS、Chromium 153）: JPEG 3 枚は upload が完了した。HEIC 2 枚は「このブラウザでは HEIC を処理できません」で、読み込む前に止まった（HEVC を decode できない browser の設計どおりの拒否。[D-030](decisions.md)）。93.8 MB の original の「保存したファイルをダウンロード」を続けて 3 回行い、すべて成功した。CSP の違反は無かった
 - iPhone の Safari（利用者の報告）: login、5 枚の upload（HEIC 2 枚を含め完了）、timeline と preview、original のダウンロード（93.8 MB を続けて 3 回）、共有と revoke、Web インスペクタでの CSP 違反 0 件。いずれも問題は無かった
-- 同じ時間帯の Workers Logs の User-Agent に `iPhone` を含むものは無く、Safari は `Macintosh; Intel Mac OS X 10_15_7 … Version/26.4 Safari/605.1.15` の 1 種類だった。iPhone の Safari がこの形を送るのは「デスクトップ用 Web サイトを表示」が有効なときで、User-Agent からは Mac の Safari と区別できない。アプリは User-Agent で分岐しないため、経路は同じ
+- 同じ時間帯の Workers Logs の User-Agent に `iPhone` を含むものは無く、Safari は `Macintosh; Intel Mac OS X 10_15_7 … Version/26.4 Safari/605.1.15` の 1 種類だった。iPhone の Safari がこの形を送るのは「デスクトップ用 Web サイトを表示」が有効なときで、User-Agent からは Mac の Safari と区別できない。アプリは User-Agent で分岐しないため、API・R2・CSP の経路は同じ。phone 幅の表示とタッチ操作は、この確認では確かめたことにならない
+- HEIC 2 枚の「完了」は upload の画面の表示による。確認後に完全に削除したため、保存された形式（HEIC のままか、iOS が JPEG に変換したか）は確かめていない
 - 確認後、利用者が確認用の写真と既存の 1 枚を完全に削除した（意図どおり）。その後の library は 0 枚、storage audit の問題は 0 件、R2 の object は 0 個
 - D-036 の再検討条件（iPhone Safari で original のダウンロードが失敗する）は発火していない
 
