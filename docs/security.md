@@ -136,7 +136,7 @@ Presigned URL は bearer capability です。URL を持つ人は誰でも、期�
 - PUT は条件と checksum を署名に含める（下表）。
 - Access Cookie / JWT を R2 へ送らない。
 
-発行済みの URL は、期限まで止められません。share の revoke、trash、`HOUSEHOLD_EMAILS` から member を外すことのどれも、発行済みの URL を無効にしません。完全削除は object を消すので、その後の GET は失敗します。発行済みの URL をまとめて止められる見込みがあるのは、R2 API token の削除だけです（未確認。[R2 credential の更新と漏洩対応](operations.md#13-r2-credential-の更新と漏洩対応)）。
+presigned URL を 1 つずつ失効させる仕組みはありません。share の revoke、trash、`HOUSEHOLD_EMAILS` から member を外すことのどれも、発行済みの URL を無効にしません。完全削除は object を消すので、その後の GET は失敗します。発行済みの URL をまとめて止められる見込みがあるのは、R2 API token の削除だけです（未確認。[R2 credential の更新と漏洩対応](operations.md#13-r2-credential-の更新と漏洩対応)）。
 
 R2 CORS は `APP_ORIGIN` だけを許可しますが、access control ではありません。止めるのは、別の origin の page の script が response を読むことと、preflight の要る PUT を送ることだけです。URL を持っていれば、curl や別のサイトの `<img>` からは CORS と関係なく GET できます（設定は [R2 CORS](operations.md#6-r2-cors)）。
 
@@ -146,7 +146,7 @@ URL を client の外へ出さないために:
 - Worker のログと backup の manifest に URL を書かない（[ログ](#9-ログ)）。
 - original を保存するときは、URL を tab で開かず、Blob として読んでから保存する（[D-036](decisions.md)）。
 
-client の中には残ります。画像の context menu（画像のアドレスをコピー、新しい tab で開く）は `<img>` の URL をそのまま渡します。browser の開発者ツールは、読み込みに失敗した画像の URL を表示します。browser の HTTP cache には、取得した画像の bytes が残ります。
+client の中には残ります。画像の context menu（画像のアドレスをコピー、新しい tab で開く）は `<img>` の URL をそのまま渡します。browser の開発者ツールは、読み込みに失敗した画像の URL を表示します。browser の HTTP cache には、表示した thumbnail / preview の bytes が残ります（original のダウンロードは cache に残さない）。
 
 | 操作 | TTL | 署名に含めるもの | 保証 |
 | --- | --- | --- | --- |

@@ -199,7 +199,8 @@ export function AssetViewer(props: {
   const downloadOriginal = () =>
     run(async () => {
       const { url } = await api.originalUrl(asset.id)
-      const res = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' })
+      // no-store: the file is being saved, so a second copy in the HTTP cache serves no purpose.
+      const res = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' })
       if (!res.ok) throw new Error(`Could not read the original (${res.status})`)
       const href = URL.createObjectURL(await res.blob())
       const a = document.createElement('a')

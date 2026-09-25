@@ -1047,7 +1047,7 @@ viewer の「保存したファイルを開く」は、original の presigned GE
 
 影響:
 
-- 保存する前に original を Blob として memory に読む（最大 100 MB）。derivative の作り直しと同じ
+- 保存する前に original を Blob として memory に読む（最大 100 MB）。derivative の作り直しと同じ。fetch は `cache: 'no-store'` で、HTTP cache に original を残さない
 - JPEG などを tab に表示する動作は無くなり、常に download になる
 - 保存するファイル名は記録された元のファイル名。無い場合は `{assetId}.{subtype}`（`image/heic` なら `.heic`）
 
@@ -1055,3 +1055,4 @@ viewer の「保存したファイルを開く」は、original の presigned GE
 
 - 発行済みの URL が信頼境界の外へ出る経路が、ほかに見つかった場合
 - member を外したときに、発行済みの URL も即時に止める必要が出た場合
+- iPhone の実機で、大きな original の Blob ダウンロードが失敗する場合。そのときは original のダウンロードだけ Worker で streaming する案を検討する
