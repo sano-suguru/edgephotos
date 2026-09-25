@@ -20,7 +20,6 @@ beta は置いていません。alpha と v1 の間に別の呼び名が要る�
 
 - 🟡 [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す。setup は 2026-09-24 に production の作成・初回 deploy・diagnose・upload まで実走した。secrets file の置き場所だけ手順から外れた（[verification.md](verification.md#production-の作成と初回-deploy2026-09-24)）。update は未実走
 - ⬜ uninstall は、写真を置いていない使い捨ての環境で実走する。production では行わない
-- ⬜ 家族の写真を production に入れる前に、Workers Logs の invocation log で share API の `Authorization` と `Cf-Access-Jwt-Assertion` の値が伏せられているかを確かめる。伏せられていなければ `invocation_logs` を無効にするかを決める（[ログ](security.md#9-ログ)）
 
 ## Post-merge verification
 

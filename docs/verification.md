@@ -691,6 +691,16 @@ account の identity provider は Cloudflare アカウントでのログイン�
 
 2 人目の member の login と upload は、上の「login 方法を One-time PIN にする」で確かめた。2 人での日常の操作は、まだ確かめていない（[2 人の household での利用](#2-人の-household-での利用)）。
 
+## Workers Logs が credential の header を伏せるか（2026-09-25）
+
+production の Workers Logs（invocation log）を、Cloudflare の observability API（MCP）で読んだ。値そのものは読まず、header の値ごとの件数だけを集計した。
+
+- 2026-09-19〜25 の invocation log で、`cf-access-jwt-assertion` は 35 件すべて `REDACTED`、`cookie`（Access の `CF_Authorization` を含む）は 25 件すべて `REDACTED` だった
+- share API には、それまで request が無かった。存在しない share ID と偽の secret（`Bearer` と 43 文字）で `GET /share/api/v1/shares/{shareId}` を 1 回送り、`404` を確かめた。その log の `authorization` は `********` だった
+- 同じ log の request URL は伏せられず、share ID を含んだまま残る。share ID は secret ではない（secret は fragment にあり、request に載らない）
+
+Workers Logs では、この 3 つの header の値は伏せられた状態で記録され、observability API からも伏せられた値しか取得できなかった。Cloudflare の内部で値を保存していないことまでは確かめていない。`invocation_logs` は有効のままにする（[ログ](security.md#9-ログ)）。
+
 ## 未検証
 
 ### iPhone / Android 実機での取り込み
