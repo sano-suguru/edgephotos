@@ -247,7 +247,7 @@ private app（Access の内側の SPA）には、現在 CSP を付けていま�
 
 例外オブジェクトの自動 dump や debug log も対象です。
 
-上の規則は EdgePhotos が書くログの規則です。Cloudflare の Workers Logs（`wrangler.jsonc` の `observability`）は、これとは別に、Worker への各 request の URL・header を invocation log として Cloudflare account に保存します（[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)）。share API の `Authorization`（share secret）と `Cf-Access-Jwt-Assertion` もこの header に含まれます。
+上の規則は EdgePhotos が書くログの規則です。Cloudflare の Workers Logs（`wrangler.jsonc` の `observability`）は、これとは別に、Worker への各 request の URL・header を invocation log として Cloudflare account に保存します（[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[request metadata と header を記録する旨の changelog](https://developers.cloudflare.com/changelog/post/2025-04-07-increase-trace-events-limit/)）。share API の `Authorization`（share secret）と `Cf-Access-Jwt-Assertion` もこの header に含まれます。
 
 Tail Worker に渡る request では、名前に `auth` / `jwt` などを含む header の値が既定で伏せられます（[Tail Handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/tail/)）。Workers Logs に同じ処理が適用されるかは、Cloudflare の文書に書かれておらず未確認です（[roadmap.md](roadmap.md)）。Workers Logs は Cloudflare account の中にあり、account の管理者は [信頼するもの](#信頼するものしないもの) に含まれます。presigned URL は Worker の response body にだけ入り、Worker への request には現れません。
 
