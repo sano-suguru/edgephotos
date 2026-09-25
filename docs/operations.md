@@ -209,9 +209,9 @@ Browser は presigned URL に対して次を送ります。
 
 - `PUT`（upload）: `Content-Type` と `If-None-Match` header 付き（[D-013](decisions.md)）。original はさらに `x-amz-checksum-sha256` 付き（[D-018](decisions.md)）
 - `PUT`（使えない derivative の置き換え）: `If-None-Match` の代わりに `If-Match` header 付き（[D-026](decisions.md)）
-- `GET`: `<img>` による表示、original の取得、derivative の作り直しが `fetch()` で読む original
+- `GET`: `<img>` による表示。original のダウンロードと derivative の作り直しは、original を `fetch()` で読む
 
-`AllowedMethods` に `GET` が無くても、写真の表示（`<img>`）と upload は動きます。失敗するのは derivative の作り直しだけです。`fetch()` が応答を読むには `Access-Control-Allow-Origin` が要るためです（[D-026](decisions.md)）。`pnpm diagnose` の `r2: CORS` が `GET` と `PUT` の両方を検査します。
+`AllowedMethods` に `GET` が無くても、写真の表示（`<img>`）と upload は動きます。失敗するのは derivative の作り直しと original のダウンロードです。どちらも `fetch()` で読み、応答を読むには `Access-Control-Allow-Origin` が要るためです（[D-026](decisions.md)、[D-036](decisions.md)）。`pnpm diagnose` の `r2: CORS` が `GET` と `PUT` の両方を検査します。
 
 wrangler の `--file` は Dashboard 表示とは別形式です。`rules` 配列でくるみ、フィールドは camelCase にします。PascalCase の配列を渡すと `must contain a 'rules' array` で失敗します。
 
@@ -519,7 +519,7 @@ R2 API token（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）は presigned URL �
 定期更新、または漏洩の疑いがある場合:
 
 1. Dashboard の R2 → Manage API tokens で、同じ権限（対象 bucket のみ、Object Read & Write）の新しい token を作る
-2. 漏洩の疑いがある場合は、**先に古い token を削除する**。削除した時点で、古い key で署名した URL（未使用の upload URL、表示中の画像 URL）はすべて無効になる。発行済み URL の期限は最大 600 秒なので、定期更新なら 3 → 4 の後に削除してよい
+2. 漏洩の疑いがある場合は、**先に古い token を削除する**。R2 は署名を token の key で検証するため、削除後は古い key で署名した URL（未使用の upload URL、表示中の画像 URL）も通らなくなる見込みです。ただし Cloudflare の文書に明記はなく、EdgePhotos でも確かめていません。発行済み URL の期限は最大 600 秒なので、定期更新なら 3 → 4 の後に削除してよい
 3. `pnpm wrangler secret put R2_ACCESS_KEY_ID [--env <env>]`、同じく `R2_SECRET_ACCESS_KEY`
 4. `pnpm diagnose` で `r2: presigned GET` が PASS になることを確認する（library が空なら写真を 1 枚 upload）
 

@@ -1031,3 +1031,28 @@ D-025 自身が「未公開の旧形式への fallback を残す」を「公開�
 再検討する条件:
 
 - v1 を release するとき。その時点の version を後方互換の起点として記録する
+
+## D-036: original は tab で開かず、Blob として読んでから保存する
+
+**状態:** 採用（2026-09-25）
+
+viewer の「保存したファイルを開く」は、original の presigned GET URL を `window.open` で新しい tab に開いていました。presigned URL は bearer capability です（[presigned URL](security.md#6-presigned-url)）。tab で開くと、URL が address bar と browser の履歴（同期していれば同期先にも）に残り、そのままコピーして渡せます。original は位置情報を含みえます。original の URL を利用者の操作なしに address bar と履歴へ出す経路は、client の中でここだけでした（thumbnail / preview の `<img>` も、利用者が画像の context menu から開けば同じように出ます）。
+
+**client が URL を `fetch()` で読み、Blob URL を `<a download>` で保存する。** menu の表記は「保存したファイルをダウンロード」です。`credentials: 'omit'` で、Cookie も Access の assertion も R2 へ送りません。R2 CORS の `GET` は derivative の作り直しと同じ規則で、元から必要です（[R2 CORS](operations.md#6-r2-cors)）。
+
+却下した案:
+
+- original を Worker 経由（Access の内側）で配信する: URL が bearer でなくなり、member を外す・trash するとすぐ効く。代わりに original の bytes が Worker を通り（`pnpm backup export` は全 original）、CLI の取得経路と D-006 を変えることになる。見つかった漏れ経路は URL の発行ではなく、client が URL を tab で開くことだった。それを閉じた後に Worker 経由が追加で防ぐのは、member の端末や client から 600 秒以内に URL が漏れる場合だけで、member とその端末は信頼境界の内側にある（[信頼するもの・しないもの](security.md#信頼するものしないもの)）。D-006 を維持する
+- `response-content-disposition` を署名して tab で開く: download にはなるが、URL は tab を開いた時点で履歴に残る
+
+影響:
+
+- 保存する前に original を Blob として memory に読む（最大 100 MB）。derivative の作り直しと同じ。fetch は `cache: 'no-store'` で、HTTP cache に original を残さない
+- JPEG などを tab に表示する動作は無くなり、常に download になる
+- 保存するファイル名は記録された元のファイル名。無い場合は `{assetId}.{subtype}`（`image/heic` なら `.heic`）
+
+再検討する条件:
+
+- 発行済みの URL が信頼境界の外へ出る経路が、ほかに見つかった場合
+- member を外したときに、発行済みの URL も即時に止める必要が出た場合
+- iPhone の実機で、大きな original の Blob ダウンロードが失敗する場合。そのときは original のダウンロードだけ Worker で streaming する案を検討する

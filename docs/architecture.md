@@ -119,6 +119,8 @@ EdgePhotos が想定する利用者は 1 つの household です。Access を通
 
 member は互いに対等で、1 つの library を共同利用します。`AppPrincipal` は role を持ちません。asset は upload した member の email を `uploadedBy` として持ちますが、表示のためだけの値で、認可にも絞り込みにも使いません（[D-034](decisions.md)）。album・share には「誰が作ったか」を記録しません。したがって認可の判断は「member かどうか」だけです。
 
+R2 への presigned request は Access も Worker も通りません。認可は Worker が URL を発行する時点で行い、発行後の URL は期限まで bearer capability として働きます（[presigned URL](security.md#6-presigned-url)）。
+
 将来 Native client を追加する場合は Cloudflare Access Managed OAuth を第一選択とします。Native 固有の token を Worker の中で直接解釈しない形は変えません。
 
 ## 4. API 境界
