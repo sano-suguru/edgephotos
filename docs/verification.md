@@ -11,7 +11,7 @@
 ## 現在の状況
 
 - 最終確認: 2026-09-25
-- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login。[家族の写真を入れる前の確認](#家族の写真を入れる前の-production-確認2026-09-25): update の実走、edge の経路、desktop の Browser での CSP、Workers Logs、backup。derivative の作り直しは remote-test で往復）
+- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login。[家族の写真を入れる前の確認](#家族の写真を入れる前の-production-確認2026-09-25): update の実走、edge の経路、desktop の Browser での CSP、Workers Logs、backup と restore drill。derivative の作り直しは remote-test で往復）
 - 未確認: iPhone / Android 実機での取り込み、private app の CSP の実機での確認、2 人の household での日常の操作（[未検証](#未検証)）。Access の independent MFA は production で有効にしていない（[D-038](decisions.md)）
 
 各項目に日付がある場合は、その日付が優先します。
@@ -847,6 +847,19 @@ production を `pnpm backup export` し、`pnpm backup check` した。
 - 4 枚（member の写真 1 枚と、上の確認で upload した合成画像 3 枚）、album 0 件。download 4、失敗 0、4 秒。`check` は `ok: true`、problems 0 件
 - `manifest.json` は `formatVersion: 3`。`X-Amz`・`Signature`・`eyJ`・`Bearer`・`CF_Authorization`・`cf-access`・R2 の host・`http://`・`https://`・`#` は 0 件
 - asset の key は `id, sha256, originalSize, contentType, filename, width, height, takenAt, isFavorite, trashedAt, createdAt, uploadedBy, objects`。`uploadedBy`（email）と `filename` は設計どおり入る（[backup ディレクトリ](security.md#backup-ディレクトリ)）
+
+### restore drill（`edgephotos-restore-test`）
+
+運用の [復旧 drill](operations.md#14-復旧-drill) の手順で、上の backup を空の環境へ restore した。manifest v3 を実環境へ restore したのは、これが初めて。
+
+- 空の D1（`0001`〜`0004` を適用）・R2 bucket（r2.dev 無効、CORS は restore-test の origin のみ）・Worker（version `a14f7b97`、production と同じ build の名前と binding だけを変えた設定）を作った。Access application は 2026-09-18 のものを再利用した
+- R2 API token（Account API Token、Object Read & Write、TTL 付き）は、最初は対象の bucket が `edgephotos-remote-test` になっていた。restore の最初の PUT が `403` で止まり、restore-test の bucket への S3 の一覧・PUT が `AccessDenied` になることで分かった。利用者が対象を restore-test だけに直した後、restore-test への PUT は `200`、remote-test と production の一覧は `AccessDenied` だった
+- この `403` で止まった restore を `--resume` で再開し、4 枚・0 album が完了した（7 秒）。続けて走る verify は `ok: true`、problems 0 件。`--quick` も `ok: true`（4 件とも R2 の記録した checksum で照合）
+- 止まった回に予約だけ済んだ upload 2 件が、verify の notes と `pnpm storage audit --deep` に `expired_upload` として出た。破損は 0 件
+- restore 後の 4 枚は、backup と `uploadedBy`・`createdAt`・`takenAt` が一致した（SHA-256 で対応づけ）
+- restore 先を Browser（Chromium）で開き、timeline の thumbnail、viewer、original のダウンロード、album の共有と revoke まで通った。CSP 違反は 0 件
+- token 付きの `pnpm diagnose` は、private API・`APP_ORIGIN`・D1 schema・CSP・share が PASS した。`r2: CORS` だけが FAIL だった。diagnose は bucket を `wrangler.jsonc` から読むため、そこに無い drill 環境では production の bucket に restore-test の origin で preflight を送る。restore-test の bucket の CORS は `cors list` で確かめた
+- 終了後に R2 の object 15 個を消して bucket を削除し、Worker と D1 も削除した（Worker の URL は `404`）。R2 API token の削除は利用者が行う。backup のコピーは作業用のディレクトリに置いた
 
 ## 未検証
 

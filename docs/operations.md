@@ -149,7 +149,7 @@ Worker がまだ無い初回は、`wrangler deploy --secrets-file <file>` で 7 
 
 また、標準入力が端末でない環境（CI、エディタ内のシェル）では、`wrangler secret put` が値の入力を求めないまま空の secret を「Success」として保存します。値が入ったかどうかは `pnpm diagnose` で確認してください。
 
-R2 credential は、対象 bucket だけの Object Read & Write 権限を持つ R2 API token から作成します。Cloudflare account 全体を管理できる token を EdgePhotos へ設定しません。
+R2 credential は、対象 bucket だけの Object Read & Write 権限を持つ R2 API token から作成します。Cloudflare account 全体を管理できる token を EdgePhotos へ設定しません。個人に結び付かない Account API Token で作ります。
 
 ## 4. Cloudflare Access
 
@@ -565,6 +565,8 @@ drill で見るもの:
 - restore 先で `pnpm storage audit --deep` の破損が 0 件
 - restore 先の timeline と album が開き、共有リンクを新しく作れる
 - 所要時間（[benchmarks.md](benchmarks.md) の見積もりと比べる）
+
+`pnpm diagnose` は bucket を `wrangler.jsonc` から読みます。drill 用の環境を `wrangler.jsonc` に足していなければ、`r2: CORS` は production の bucket を見て FAIL になります。drill の bucket の CORS は `pnpm wrangler r2 bucket cors list <bucket>` で確かめます。
 
 終わったら drill 用の Worker、D1、R2 bucket、R2 API token を削除します。R2 API token は鍵なので必ず消します。作成画面の既定は「すべてのバケット」なので、対象を drill 用の bucket に絞れていたかも確認します。
 
