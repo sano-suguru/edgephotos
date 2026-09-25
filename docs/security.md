@@ -144,9 +144,9 @@ URL を client の外へ出さないために:
 
 - URL を返す API の response は `Cache-Control: private, no-store` にする。
 - Worker のログと backup の manifest に URL を書かない（[ログ](#9-ログ)）。
-- original を保存するときは、URL を tab で開かず、Blob として読んでから保存する。tab で開くと、URL が address bar と browser の履歴（同期していれば同期先にも）に残るためです（[D-036](decisions.md)）。
+- original を保存するときは、URL を tab で開かず、Blob として読んでから保存する（[D-036](decisions.md)）。
 
-client の中には残ります。browser の開発者ツールは、読み込みに失敗した画像の URL を表示します。browser の HTTP cache には、取得した画像の bytes が残ります。
+client の中には残ります。画像の context menu（画像のアドレスをコピー、新しい tab で開く）は `<img>` の URL をそのまま渡します。browser の開発者ツールは、読み込みに失敗した画像の URL を表示します。browser の HTTP cache には、取得した画像の bytes が残ります。
 
 | 操作 | TTL | 署名に含めるもの | 保証 |
 | --- | --- | --- | --- |

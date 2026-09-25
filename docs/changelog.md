@@ -8,7 +8,7 @@
 
 ## presigned URL の境界の整理（2026-09-25）
 
-viewer の「保存したファイルを開く」は「保存したファイルをダウンロード」になりました。original の URL を tab で開かず、読み込んでから保存します。URL が address bar と browser の履歴に残らなくなります（[D-036](decisions.md)）。
+viewer の「保存したファイルを開く」は「保存したファイルをダウンロード」になりました。original の URL を tab で開かず、読み込んでから保存します（[D-036](decisions.md)）。R2 CORS の `AllowedMethods` に `GET` が無い bucket では、このダウンロードも失敗します（[R2 CORS](operations.md#6-r2-cors)）。
 
 security / architecture / operations の文書で、presigned URL が bearer capability であること、発行済み URL は revoke 後も期限まで有効なこと、R2 CORS は access control ではないこと、Workers Logs が request header を保存することを明記しました。
 

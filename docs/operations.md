@@ -209,9 +209,9 @@ Browser は presigned URL に対して次を送ります。
 
 - `PUT`（upload）: `Content-Type` と `If-None-Match` header 付き（[D-013](decisions.md)）。original はさらに `x-amz-checksum-sha256` 付き（[D-018](decisions.md)）
 - `PUT`（使えない derivative の置き換え）: `If-None-Match` の代わりに `If-Match` header 付き（[D-026](decisions.md)）
-- `GET`: `<img>` による表示、original の取得、derivative の作り直しが `fetch()` で読む original
+- `GET`: `<img>` による表示。original のダウンロードと derivative の作り直しは、original を `fetch()` で読む
 
-`AllowedMethods` に `GET` が無くても、写真の表示（`<img>`）と upload は動きます。失敗するのは derivative の作り直しだけです。`fetch()` が応答を読むには `Access-Control-Allow-Origin` が要るためです（[D-026](decisions.md)）。`pnpm diagnose` の `r2: CORS` が `GET` と `PUT` の両方を検査します。
+`AllowedMethods` に `GET` が無くても、写真の表示（`<img>`）と upload は動きます。失敗するのは derivative の作り直しと original のダウンロードです。どちらも `fetch()` で読み、応答を読むには `Access-Control-Allow-Origin` が要るためです（[D-026](decisions.md)、[D-036](decisions.md)）。`pnpm diagnose` の `r2: CORS` が `GET` と `PUT` の両方を検査します。
 
 wrangler の `--file` は Dashboard 表示とは別形式です。`rules` 配列でくるみ、フィールドは camelCase にします。PascalCase の配列を渡すと `must contain a 'rules' array` で失敗します。
 

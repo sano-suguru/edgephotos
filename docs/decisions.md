@@ -1036,7 +1036,7 @@ D-025 自身が「未公開の旧形式への fallback を残す」を「公開�
 
 **状態:** 採用（2026-09-25）
 
-viewer の「保存したファイルを開く」は、original の presigned GET URL を `window.open` で新しい tab に開いていました。presigned URL は bearer capability です（[presigned URL](security.md#6-presigned-url)）。tab で開くと、URL が address bar と browser の履歴（同期していれば同期先にも）に残り、そのままコピーして渡せます。original は位置情報を含みえます。presigned URL が画面や履歴に出る経路は、client の中でここだけでした。
+viewer の「保存したファイルを開く」は、original の presigned GET URL を `window.open` で新しい tab に開いていました。presigned URL は bearer capability です（[presigned URL](security.md#6-presigned-url)）。tab で開くと、URL が address bar と browser の履歴（同期していれば同期先にも）に残り、そのままコピーして渡せます。original は位置情報を含みえます。original の URL を利用者の操作なしに address bar と履歴へ出す経路は、client の中でここだけでした（thumbnail / preview の `<img>` も、利用者が画像の context menu から開けば同じように出ます）。
 
 **client が URL を `fetch()` で読み、Blob URL を `<a download>` で保存する。** menu の表記は「保存したファイルをダウンロード」です。`credentials: 'omit'` で、Cookie も Access の assertion も R2 へ送りません。R2 CORS の `GET` は derivative の作り直しと同じ規則で、元から必要です（[R2 CORS](operations.md#6-r2-cors)）。
 
