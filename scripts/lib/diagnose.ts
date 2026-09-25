@@ -200,9 +200,15 @@ async function checkAppOrigin(api: Fetch, auth: Record<string, string>, origin: 
   return check(name, 'warn', `origin probe got ${res.status} ${code}`)
 }
 
-// The private app's HTML must come from the Worker with its CSP (wrangler.jsonc run_worker_first), and the
-// policy must let the browser reach this account's R2 endpoint, or uploads and photos break under it.
-export async function checkPrivateAppCsp(api: Fetch, auth: Record<string, string>): Promise<Check> {
+// The private app's HTML must come from the Worker with its CSP (wrangler.jsonc run_worker_first), and both
+// img-src (thumbnails, previews) and connect-src (upload PUT, original download) must name exactly the R2
+// endpoint presigned URLs point at, or photos and uploads break under the policy. `r2Origin` is that endpoint
+// for the account diagnose runs against; without it the account cannot be confirmed and the check only warns.
+export async function checkPrivateAppCsp(
+  api: Fetch,
+  auth: Record<string, string>,
+  r2Origin: string | undefined,
+): Promise<Check> {
   const res = await api('/', { headers: auth })
   const csp = res.headers.get('content-security-policy') ?? ''
   if (res.status !== 200 || !csp.includes("frame-ancestors 'none'")) {
@@ -212,10 +218,35 @@ export async function checkPrivateAppCsp(api: Fetch, auth: Record<string, string
       `got ${res.status}${csp ? '' : ' without a CSP'}; deploy the current build`,
     )
   }
-  const connect = csp.split(';').find((d) => d.trim().startsWith('connect-src')) ?? ''
-  return /https:\/\/[0-9a-f]{32}\.r2\.cloudflarestorage\.com/.test(connect)
-    ? check('private app: CSP', 'pass', "served by the Worker with the CSP, which allows this account's R2 endpoint")
-    : check('private app: CSP', 'fail', 'the CSP does not name the R2 endpoint (R2_ACCOUNT_ID)')
+  const sources = (name: string) => {
+    const directive = csp
+      .split(';')
+      .map((d) => d.trim().split(/\s+/))
+      .find((tokens) => tokens[0] === name)
+    return directive?.slice(1) ?? []
+  }
+  const img = sources('img-src')
+  const connect = sources('connect-src')
+  if (!r2Origin) {
+    const named = (list: string[]) => list.some((s) => /^https:\/\/[0-9a-f]{32}\.r2\.cloudflarestorage\.com$/.test(s))
+    return named(img) && named(connect)
+      ? check(
+          'private app: CSP',
+          'warn',
+          'CSP names an R2 endpoint, but the account is unknown: set CLOUDFLARE_ACCOUNT_ID',
+        )
+      : check('private app: CSP', 'fail', 'img-src or connect-src does not name the R2 endpoint (R2_ACCOUNT_ID)')
+  }
+  const missing = [img.includes(r2Origin) ? null : 'img-src', connect.includes(r2Origin) ? null : 'connect-src'].filter(
+    (d) => d !== null,
+  )
+  return missing.length === 0
+    ? check('private app: CSP', 'pass', "img-src and connect-src allow this account's R2 endpoint")
+    : check(
+        'private app: CSP',
+        'fail',
+        `${missing.join(' and ')} does not allow this account's R2 endpoint (R2_ACCOUNT_ID names another account?)`,
+      )
 }
 
 const PROBE_SHARE_ID = 'diagnoseProbe'.padEnd(22, '0')
@@ -230,8 +261,10 @@ export async function checkDeployment(opts: {
   latestLocalMigration?: string
   // The origin the owner opens in the browser (EDGEPHOTOS_URL). Compared with APP_ORIGIN by the Worker.
   origin?: string
+  // https://<account>.r2.cloudflarestorage.com for the account diagnose runs against.
+  r2Origin?: string
 }): Promise<Check[]> {
-  const { api, blob, token, latestLocalMigration, origin } = opts
+  const { api, blob, token, latestLocalMigration, origin, r2Origin } = opts
   const results: Check[] = []
 
   const anonymous = await api('/api/v1/me')
@@ -325,7 +358,7 @@ export async function checkDeployment(opts: {
     return results
   }
   results.push(check('private API', 'pass', 'member token accepted (ACCESS_AUD, ACCESS_TEAM_DOMAIN, HOUSEHOLD_EMAILS)'))
-  results.push(await checkPrivateAppCsp(api, auth))
+  results.push(await checkPrivateAppCsp(api, auth, r2Origin))
 
   if (origin) results.push(await checkAppOrigin(api, auth, origin))
 

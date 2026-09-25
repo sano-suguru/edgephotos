@@ -125,6 +125,15 @@ const boolQuery = z
   .transform((v) => v === 'true')
   .optional()
 
+// A page load, not a subresource: only these get the app for a path that is not a file. A missing image,
+// script or JSON stays a 404 instead of turning into a 200 text/html app. Browsers say so with
+// Sec-Fetch-Mode; a client without it (curl, an old browser) is asked by Accept instead.
+function isDocumentRequest(headers: Headers): boolean {
+  const mode = headers.get('sec-fetch-mode')
+  if (mode !== null) return mode === 'navigate'
+  return (headers.get('accept') ?? '').includes('text/html')
+}
+
 export function createApp(options: AppOptions) {
   const { env } = options
   const now = options.now ?? (() => new Date())
@@ -813,7 +822,9 @@ export function createApp(options: AppOptions) {
       throw new ApiError(404, 'NOT_FOUND', 'Not found.')
     }
     let asset = await env.ASSETS.fetch(c.req.raw)
-    if (asset.status === 404) asset = await env.ASSETS.fetch(new URL('/', c.req.url))
+    if (asset.status === 404 && isDocumentRequest(c.req.raw.headers)) {
+      asset = await env.ASSETS.fetch(new URL('/', c.req.url))
+    }
     const res = new Response(asset.body, asset)
     res.headers.set('Referrer-Policy', 'no-referrer')
     res.headers.set('X-Content-Type-Options', 'nosniff')

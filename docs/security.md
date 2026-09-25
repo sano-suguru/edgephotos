@@ -275,7 +275,7 @@ font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; for
 
 上の規則は EdgePhotos が書くログの規則です。Cloudflare の Workers Logs（`wrangler.jsonc` の `observability`）は、これとは別に、Worker への各 request の URL・header を invocation log として Cloudflare account に保存します（[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[request metadata と header を記録する旨の changelog](https://developers.cloudflare.com/changelog/post/2025-04-07-increase-trace-events-limit/)）。share API の `Authorization`（share secret）、`Cf-Access-Jwt-Assertion`、CLI が送る `cf-access-token`（Access token）もこの header に含まれます。
 
-Tail Worker に渡る request では、名前に `auth` / `jwt` などを含む header の値が既定で伏せられます（[Tail Handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/tail/)）。Workers Logs に同じ処理が適用されるかは Cloudflare の文書に書かれていないため、production で確かめました。2026-09-25 の production では、observability API から読める `Authorization`・`Cf-Access-Jwt-Assertion`・`Cookie`・`cf-access-token` の値は伏せられ、response body は記録されていませんでした（[verification.md](verification.md#workers-logs-が-credential-の-header-を伏せるか2026-09-25)）。Cloudflare の挙動が変わっても気付けるよう、家族の写真を入れる前と、その後も定期的に同じ手順で確かめます。伏せ方は Cloudflare の推定ルールによるもので、EdgePhotos が制御するものではありません。Workers Logs は Cloudflare account の中にあり、account の管理者は [信頼するもの](#信頼するものしないもの) に含まれます。presigned URL は Worker の response body にだけ入り、Worker への request には現れません。
+Tail Worker に渡る request では、名前に `auth` / `jwt` などを含む header の値が既定で伏せられます（[Tail Handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/tail/)）。Workers Logs に同じ処理が適用されるかは Cloudflare の文書に書かれていないため、production で確かめました。2026-09-25 の production では、observability API から読める `Authorization`・`Cf-Access-Jwt-Assertion`・`Cookie`・`cf-access-token` の値は伏せられ、response body は記録されていませんでした（[verification.md](verification.md#workers-logs-が-credential-の-header-を伏せるか2026-09-25)）。家族の写真を入れる前、Cloudflare が Workers Logs の仕様を変えたとき、`observability` の設定を変えたときに、同じ手順で確かめ直します。伏せ方は Cloudflare の推定ルールによるもので、EdgePhotos が制御するものではありません。Workers Logs は Cloudflare account の中にあり、account の管理者は [信頼するもの](#信頼するものしないもの) に含まれます。presigned URL は Worker の response body にだけ入り、Worker への request には現れません。
 
 ## 10. 削除
 
@@ -303,7 +303,7 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - share secret 不正 / expired / revoked を拒否する。
 - 別 album の asset を share から取得できない。
 - 共有ページで album 名が markup として解釈されない（`e2e/share.spec.ts`）。
-- private app の HTML（未知の path を含む）は CSP 付きで返り、`/api`・`/share`・`/__local` 配下の route の無い path は app にならない（`tests/integration/app-shell.test.ts`、`e2e/csp.spec.ts`）。Browser E2E は CSP 違反 1 件で失敗する。
+- private app の HTML（未知の path を含む）は CSP 付きで返り、`/api`・`/share`・`/__local` 配下の route の無い path と、page の読み込みでない request の無いファイルは app にならない（`tests/integration/app-shell.test.ts`、`e2e/csp.spec.ts`）。Browser E2E は CSP 違反 1 件で失敗する。
 - `/share/assets/*` に無いファイルが private app にならない。`wrangler.jsonc` の `run_worker_first` と `not_found_handling` を `pnpm diagnose --offline`（`pnpm check` に含む）が検査する。
 - share から original を取得できない。
 - preview / thumbnail から GPS が除去される。

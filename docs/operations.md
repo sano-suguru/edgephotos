@@ -283,7 +283,7 @@ production は `--env` を付けません。確認する内容と、失敗時に
 | `access: share bypass + worker config` | `/share` の Bypass application。`503` なら secret の欠落か形式違い（`ACCESS_TEAM_DOMAIN` は host のみ、`R2_ACCOUNT_ID` は 32 桁 hex） |
 | `private API` | `401`: token 期限切れ、または `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` の不一致。`403`: `HOUSEHOLD_EMAILS` |
 | `share: asset miss` | `/share/assets/` の無いファイルに private app の HTML が返る。`assets.not_found_handling` が `"none"` でない（[D-037](decisions.md)） |
-| `private app: CSP` | HTML に CSP が無い（CSP を付ける前の build が deploy されている）、または `connect-src` に自分の account の R2 endpoint が無い（`R2_ACCOUNT_ID`）（[D-037](decisions.md)） |
+| `private app: CSP` | HTML に CSP が無い（CSP を付ける前の build が deploy されている）、または `img-src` / `connect-src` に、wrangler で login している account の R2 endpoint が無い（`R2_ACCOUNT_ID` が別の account を指す）。WARN は account を決められなかった（`CLOUDFLARE_ACCOUNT_ID` を設定する）（[D-037](decisions.md)） |
 | `worker: APP_ORIGIN` | `APP_ORIGIN` が `EDGEPHOTOS_URL` の origin と一致しない（scheme、host、custom domain 追加後の更新漏れ） |
 | `worker: D1 schema` | Worker が見ている D1 の最新 migration と checkout の不一致（別 DB を bind している、migration 未適用） |
 | `r2: presigned GET` | Worker が署名した URL を R2 が拒否（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`）。library が空なら SKIP |

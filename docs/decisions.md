@@ -1065,9 +1065,9 @@ private app（Access の内側の SPA）には CSP がありませんでした�
 
 **`run_worker_first` を `["/*", "!/share/assets/*"]` にし、HTML はすべて Worker が `env.ASSETS.fetch()` で取り出して header を付けて返す。** 共有ページ（D-011）と同じ方法です。
 
-- CSP の `img-src` / `connect-src` には、presigned URL の宛先（`https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`）を 1 つだけ書く。`R2_ACCOUNT_ID` は Worker secret なので、build 時の静的ファイルには書けない
+- CSP の `img-src` / `connect-src` には、presigned URL の宛先（`https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`）を 1 つだけ書く。`R2_ACCOUNT_ID` は deploy ごとに Worker が実行時に読む設定なので、build 時の静的ファイルには書けない（account ID 自体は秘密の値ではない）
 - 未知の path も SPA fallback で `index.html` を返す。navigation request は、Worker を先に通さない限り static assets が直接答える（[SPA の routing](https://developers.cloudflare.com/workers/static-assets/routing/single-page-application/)）。`/`、`/albums` のような既知の path だけを Worker へ回すと、`/anything` で CSP の無い app を開かせられる。したがって全 path を Worker へ回す
-- SPA fallback は Worker が行い、`not_found_handling` は `"none"` にする。`/share/assets/*` は Worker を通らず Access の外にあるため、static assets の SPA fallback のままだと、そこに無いファイルの request に private app を CSP なしで返す（別のサイトの frame に埋め込める）
+- SPA fallback は Worker が行い、`not_found_handling` は `"none"` にする。fallback するのは page の読み込み（`Sec-Fetch-Mode: navigate`、この header が無い client では `Accept: text/html`）だけで、無い画像・script・JSON は `404` のまま返す。`/share/assets/*` は Worker を通らず Access の外にあるため、static assets の SPA fallback のままだと、そこに無いファイルの request に private app を CSP なしで返す（別のサイトの frame に埋め込める）
 - `/api`、`/share`、`/__local` の配下で route の無い path は、app ではなく JSON の `404` にする
 - `vite dev` は `html.cspNonce` の nonce を Vite が挿入する `<script>` / `<style>` に付け、Worker が同じ nonce を CSP に足す。dev と Browser E2E は `'unsafe-inline'` を足さずに production と同じ policy で動く。nonce は dev server の起動ごとに 1 つで、request ごとには変えない（dev は local だけで動く）
 

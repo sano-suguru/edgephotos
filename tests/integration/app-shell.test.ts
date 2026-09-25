@@ -32,6 +32,9 @@ function assets() {
   return { fetcher, requested }
 }
 
+// What a browser sends when the address bar or a link loads a page.
+const NAVIGATE = { 'sec-fetch-mode': 'navigate', accept: 'text/html,application/xhtml+xml' }
+
 function directives(csp: string | null): Map<string, string> {
   return new Map(
     (csp ?? '')
@@ -48,7 +51,7 @@ describe('private app shell', () => {
     async (path) => {
       const a = assets()
       const app = await makeApp({ env: { ...R2_ENV, ASSETS: a.fetcher } })
-      const res = await call(app, 'GET', path)
+      const res = await call(app, 'GET', path, { headers: NAVIGATE })
       expect(res.status).toBe(200)
       // The SPA fallback is the Worker's: a path that is not a file is answered with /.
       expect(a.requested).toEqual(path === '/' ? ['/'] : [path, '/'])
@@ -69,6 +72,28 @@ describe('private app shell', () => {
       expect(res.headers.get('x-content-type-options')).toBe('nosniff')
     },
   )
+
+  it.each([
+    ['an image', { 'sec-fetch-mode': 'no-cors', accept: 'image/avif,image/webp,*/*' }, '/favicon.ico'],
+    ['a script', { 'sec-fetch-mode': 'cors', accept: '*/*' }, '/missing.js'],
+    ['a fetch() of JSON', { 'sec-fetch-mode': 'cors', accept: 'application/json' }, '/missing.json'],
+    ['a client without Sec-Fetch-Mode that does not ask for HTML', { accept: '*/*' }, '/robots.txt'],
+  ])('a missing file requested as %s stays a 404, not the app', async (_what, headers, path) => {
+    const a = assets()
+    const app = await makeApp({ env: { ...R2_ENV, ASSETS: a.fetcher } })
+    const res = await call(app, 'GET', path, { headers })
+    expect(res.status).toBe(404)
+    expect(await res.text()).toBe('')
+    expect(a.requested).toEqual([path])
+  })
+
+  it('answers a page load from a client without Sec-Fetch-Mode by its Accept header', async () => {
+    const a = assets()
+    const app = await makeApp({ env: { ...R2_ENV, ASSETS: a.fetcher } })
+    const res = await call(app, 'GET', '/albums', { headers: { accept: 'text/html' } })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('<title>app</title>')
+  })
 
   it('passes the assets redirect for /index.html through with the CSP', async () => {
     const a = assets()

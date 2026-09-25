@@ -17,7 +17,8 @@ import { readR2SignerConfig } from '../../src/worker/storage/signer'
 import { APP_ORIGIN, assertion, makeApp } from '../helpers'
 
 // The policy the Worker actually sends for an account, so the check follows changes to it.
-const PRIVATE_CSP = privateContentSecurityPolicy(['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com'])
+const R2_ORIGIN = 'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com'
+const PRIVATE_CSP = privateContentSecurityPolicy([R2_ORIGIN])
 
 const status = (checks: Check[], name: string) => checks.find((c) => c.name === name)?.status
 
@@ -175,6 +176,7 @@ describe('setup diagnostics', () => {
       blob: denied,
       token: 'token',
       latestLocalMigration: '0002_next.sql',
+      r2Origin: R2_ORIGIN,
     })
     expect(status(checks, 'private API')).toBe('pass')
     expect(status(checks, 'private app: CSP')).toBe('pass')
@@ -240,14 +242,29 @@ describe('private app CSP check', () => {
   const html = (csp?: string) =>
     new Response('<html>', { headers: csp ? { 'content-security-policy': csp } : undefined })
 
-  it("passes only when the shell carries the CSP with this account's R2 endpoint", async () => {
-    expect((await checkPrivateAppCsp(answer(html(PRIVATE_CSP)), {})).status).toBe('pass')
+  it("passes only when img-src and connect-src both allow this account's R2 endpoint", async () => {
+    const run = (res: Response, ...r2: [string?]) => checkPrivateAppCsp(answer(res), {}, r2.length ? r2[0] : R2_ORIGIN)
+    expect((await run(html(PRIVATE_CSP))).status).toBe('pass')
     // A deploy from before the Worker served the shell: the static asset has no CSP.
-    expect((await checkPrivateAppCsp(answer(html()), {})).status).toBe('fail')
-    // R2 missing from connect-src: presigned PUT and original download would be blocked.
-    expect((await checkPrivateAppCsp(answer(html(privateContentSecurityPolicy([]))), {})).status).toBe('fail')
+    expect((await run(html())).status).toBe('fail')
+    // No R2 at all: presigned PUT, the original download and every photo would be blocked.
+    expect((await run(html(privateContentSecurityPolicy([])))).status).toBe('fail')
+    // Another account's endpoint: the shape is right, the account is not.
+    const other = privateContentSecurityPolicy([`https://${'a'.repeat(32)}.r2.cloudflarestorage.com`])
+    expect((await run(html(other))).status).toBe('fail')
+    // Only one of the two directives names it.
+    const imgOnly = PRIVATE_CSP.replace(`connect-src 'self' ${R2_ORIGIN}`, "connect-src 'self'")
+    const connectOnly = PRIVATE_CSP.replace(`img-src 'self' ${R2_ORIGIN}`, "img-src 'self'")
+    expect((await run(html(imgOnly))).detail).toContain('connect-src')
+    expect((await run(html(imgOnly))).status).toBe('fail')
+    expect((await run(html(connectOnly))).detail).toContain('img-src')
+    // A longer host that merely starts with the endpoint is not the endpoint.
+    expect((await run(html(privateContentSecurityPolicy([`${R2_ORIGIN}.evil.test`])))).status).toBe('fail')
+    // The account could not be determined: an R2 endpoint is there, but whose is unknown.
+    expect((await run(html(PRIVATE_CSP), undefined)).status).toBe('warn')
+    expect((await run(html(privateContentSecurityPolicy([])), undefined)).status).toBe('fail')
     const redirect = new Response(null, { status: 302, headers: { location: 'https://t.cloudflareaccess.com/' } })
-    expect((await checkPrivateAppCsp(answer(redirect), {})).status).toBe('fail')
+    expect((await run(redirect)).status).toBe('fail')
   })
 })
 
