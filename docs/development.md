@@ -23,6 +23,7 @@ src/
   web/
     app.tsx                shell + routing
     main.tsx
+    logo.svg               logo: favicon of both entries, app header, README
     components/ui/         shadcn/ui-style wrappers (Button, Dialog, DropdownMenu on Base UI), PageHeader, EmptyState
     features/
       uploads/  timeline/  albums/  shares/  settings/

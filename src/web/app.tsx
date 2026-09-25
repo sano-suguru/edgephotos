@@ -14,6 +14,8 @@ import { startFor } from './features/timeline/month-list'
 import { months, monthsError } from './features/timeline/months'
 import { UploadButton, UploadList } from './features/uploads/UploadPanel'
 import { ApiRequestError, api } from './lib/api/client'
+// no-inline: a data: URL would be blocked by the CSP's img-src 'self'. The same file is the favicon.
+import logoUrl from './logo.svg?no-inline'
 import { navigate, path, route, timelineMonth } from './state/router'
 
 // Below Tailwind's md breakpoint the nav is the bottom tab bar, where the trash has no tab of its own.
@@ -165,12 +167,13 @@ export function App() {
         <div class="mx-auto flex h-12 max-w-screen-2xl items-center gap-2 px-4 md:h-14">
           <a
             href="/"
-            class="mr-4 text-[0.9375rem] font-bold tracking-tight"
+            class="mr-4 flex items-center gap-2 text-[0.9375rem] font-bold tracking-tight"
             onClick={(e) => {
               e.preventDefault()
               navigate('/')
             }}
           >
+            <img src={logoUrl} alt="" width={20} height={20} class="size-5" />
             EdgePhotos
           </a>
           <nav

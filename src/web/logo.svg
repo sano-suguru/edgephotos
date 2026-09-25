@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>EdgePhotos</title>
+  <defs>
+    <linearGradient id="edgephotos-gradient" x1="0" y1="8" x2="0" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0.36" stop-color="#FF8A00" />
+      <stop offset="0.56" stop-color="#3B82F6" />
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#edgephotos-gradient)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M40 12H16a8 8 0 0 0-8 8v24a8 8 0 0 0 8 8h24a8 8 0 0 0 8-8" stroke-linecap="butt" />
+    <path d="M36 24h20M48 36h8" />
+  </g>
+  <g fill="url(#edgephotos-gradient)">
+    <circle cx="21" cy="25" r="5.5" />
+    <path d="M11 49 23 38l6 5 8-8 12 12v2z" />
+  </g>
+</svg>
