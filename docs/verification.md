@@ -12,7 +12,7 @@
 
 - 最終確認: 2026-09-25
 - 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login）
-- 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test、private app の CSP の production、Access の independent MFA（[未検証](#未検証)）
+- 未確認: iPhone / Android 実機での取り込み、derivative の作り直しの remote-test、private app の CSP の Browser での確認（production は deploy と diagnose まで済み）、Access の independent MFA（[未検証](#未検証)）
 
 各項目に日付がある場合は、その日付が優先します。
 
@@ -712,7 +712,7 @@ Workers Logs では、この 3 つの header の値は伏せられた状態で�
 家族の写真を production に入れる前、Cloudflare の Workers Logs の仕様変更を知ったとき、`observability` の設定を変えたときに行う。値は読まず、件数だけを見る。
 
 1. 確かめたい経路に request を起こす。private app を開いて写真を 1 枚表示する（`Cf-Access-Jwt-Assertion`、Cookie、presigned URL を返す response）。`pnpm diagnose` を token 付きで実行する（`cf-access-token`）。存在しない share ID に偽の secret で `GET /share/api/v1/shares/{shareId}` を送る（`Authorization`）
-2. Cloudflare の observability API（dashboard の Workers Logs の検索、または MCP の `query_worker_observability`）で、service を `edgephotos` に絞り、直近の期間について needle の件数（`count`）を数える。events を表示しない
+2. 数分待つ。直後は、手順 1 の invocation がまだ検索に出ない。その後 Cloudflare の observability API（dashboard の Workers Logs の検索、または MCP の `query_worker_observability`）で、service を `edgephotos` に絞り、直近の期間について needle の件数（`count`）を数える。events を表示しない
 3. 次の needle を数える
 
 | needle | 合格 | 不合格 |
@@ -727,15 +727,22 @@ Workers Logs では、この 3 つの header の値は伏せられた状態で�
 
 ## private app の CSP（2026-09-25）
 
-local で確かめた（[D-037](decisions.md)）。production への deploy は未実施（下の「未検証」）。
+local で確かめた後、remote-test と production に deploy した（[D-037](decisions.md)）。Browser での確認はまだ行っていない（下の「未検証」）。
 
 - `pnpm test:e2e`（Chromium、WebKit）の全 spec が、CSP 違反 0 件で通った。`e2e/fixtures.ts` がすべての page と guest の context で `securitypolicyviolation` を集め、1 件でもあれば失敗にする。upload の presigned PUT、thumbnail / preview の表示、original のダウンロード（presigned GET の `fetch()`）、共有ページ、Base UI の Dialog / Menu を含む
 - `e2e/csp.spec.ts`: `/`、`/albums`、未知の path の HTML に CSP が付く。注入した inline `<script>`、`onerror=`、別の origin の `<img>` が拒否される。`page.evaluate()` からの `eval()` は DevTools の評価として CSP の対象外になるため、`eval()` は header に `'unsafe-eval'` が無いことで確かめた
 - timeline の spec は画像を `data:` URL で返していたため、CSP に拒否された。test 側で同じ origin の URL から返すように直した。app の変更ではない
 - production build（`vite build` + `vite preview`）: `/`、`/albums`、未知の path、`/share/{shareId}` に CSP が付き、`/share/assets/*` は static assets のまま（CSP なし）。`/index.html` は `/` への `307`。Chromium と WebKit で `/`、`/albums`、`/settings` を開き、CSP 違反 0 件、stylesheet が読み込まれることを確かめた（設定が無いので API は `503`）
-- fresh-context の security review で、`/share/assets/` の無いファイル（Worker を通らず、Access の外）に static assets の SPA fallback が private app を CSP なしで返すことが見つかった（`vite preview` で `200`、`/` と同じ ETag）。`not_found_handling` を `"none"` にし、fallback を Worker に移した。直した後の `vite preview` では、`/share/assets/nope`・`/share/assets/`・`/share/assets/nope.html` が `404`（body なし）、`/`・`/albums`・未知の path は CSP 付きの app だった。`pnpm diagnose` の `share: asset miss` で deploy 後も確かめる。実際の edge で、Worker を通らない path に無いファイルが `404` になるか、Worker へ回るか（その場合も Worker が `/share` 配下を JSON の `404` にする）は未確認
+- fresh-context の security review で、`/share/assets/` の無いファイル（Worker を通らず、Access の外）に static assets の SPA fallback が private app を CSP なしで返すことが見つかった（`vite preview` で `200`、`/` と同じ ETag）。`not_found_handling` を `"none"` にし、fallback を Worker に移した。直した後の `vite preview` では、`/share/assets/nope`・`/share/assets/`・`/share/assets/nope.html` が `404`（body なし）、`/`・`/albums`・未知の path は CSP 付きの app だった。`pnpm diagnose` の `share: asset miss` で deploy 後も確かめる。実際の edge での結果は下の deploy の項
 - SPA の fallback を page の読み込みに絞った後の `vite preview`: `Sec-Fetch-Mode: navigate` の `/albums` と未知の path は CSP 付きの app、`/favicon.ico`（`no-cors`）と `/missing.js` は `404`、`/share/assets/nope` は `404` だった。`Sec-Fetch-Mode` を付けず `Accept: text/html` だけを送った request は、preview では `404` になった。preview の中継に使う Node の `fetch()` が `sec-fetch-mode: cors` を足すためで（Node の `fetch()` の送る header で確認）、Worker の判定は integration test で確かめた。production の edge で header の無い client がどうなるかは未確認
-- `//api/v1/me` は `vite preview` では CSP 付きの app になった。preview の server が `//api` を host として読むためで、Hono に直接渡した `//api/...` と `/API/...` は `404` になる（`tests/integration/app-shell.test.ts`）。production の edge がこの path を Worker へどう渡すかは未確認。どちらでも CSP は付き、API の handler は動かない
+- `//api/v1/me` は `vite preview` では CSP 付きの app になった。preview の server が `//api` を host として読むためで、Hono に直接渡した `//api/...` と `/API/...` は `404` になる（`tests/integration/app-shell.test.ts`）。production の edge では Access が止めた（下の deploy の項）
+- deploy（2026-09-25、PR #51 の merge 後）: remote-test は version `78807a9f`、production は version `14289e10`。migration は無い
+  - `pnpm diagnose` は、両方とも token 付きで全項目 PASS だった。`share: asset miss`、`private app: CSP`、`private API`、`r2: presigned GET` まで PASS。`private app: CSP` は、`img-src` と `connect-src` の両方に自分の account の R2 endpoint があることを見る
+  - 実際の edge で、`/share/assets/nope`・`/share/assets/nope.html`・`/share/assets/` は `404`（body なし）だった。Worker へは回らない
+  - `//api/v1/me` は Access の login へ redirect された。この request は Worker まで届かない
+  - token 付きの diagnose の後に、production の Workers Logs（2026-09-18〜25）を数えた。`eyJ` と `X-Amz-Signature` を含む invocation は 0 件だった
+  - `cf-access-token` を含む invocation は 16 件で、今回の `GET /` を含む
+  - diagnose の直後の検索では、今回の invocation は 1 件も出なかった。数分後に現れた
 - `vite dev` では Vite の module も Worker を経由する。nonce を付けたことで、共有ページの `vite dev` で CSS が当たらない問題（[見た目の整理](#見た目の整理2026-09-17)）も起きなくなった
 
 ## 未検証
@@ -744,7 +751,7 @@ local で確かめた（[D-037](decisions.md)）。production への deploy は�
 
 deploy した後に行う。
 
-1. `pnpm diagnose` を token 付きで実行する。`share: asset miss` と `private app: CSP` が PASS（HTML に CSP があり、`img-src` と `connect-src` の両方に自分の account の R2 endpoint がある）。FAIL なら deploy が古いか、`R2_ACCOUNT_ID` が違う
+1. `pnpm diagnose` を token 付きで実行する。`share: asset miss` と `private app: CSP` が PASS。FAIL なら deploy が古いか、`R2_ACCOUNT_ID` が違う。2026-09-25 に production で済み（上の「private app の CSP」）
 2. Browser の開発者ツールの console を開いたまま、写真を 1 枚 upload し、timeline・viewer（preview）・original のダウンロード・共有ページを開く。`Content Security Policy` の違反が 0 件なら合格。1 件でもあれば、その directive と blocked URL（query を除く）を記録し、deploy を戻すか policy を直す
 3. 実機（iPhone Safari、Android Chrome）でも 2 と同じ操作をする（[実機での取り込み](#iphone--android-実機での取り込み)）
 
