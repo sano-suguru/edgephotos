@@ -86,21 +86,16 @@ export function ManagePage() {
         <div class="mt-10">
           <h2 class="mb-2 text-heading">状態</h2>
           <dl class="divide-y divide-border text-sm">
-            {/* Uploads in flight and deletes in progress show only while there are some: a row that reads 0 on
-                every visit is noise, and its appearing is the signal. */}
+            {/* Only what needs attention is added: an upload in progress is normal, and one that passed its
+                expiry without finishing is not. A stopped permanent delete has its own section below with
+                the count. */}
             {(
               [
                 ['写真', diag.value.counts.assets],
                 ['アルバム', diag.value.counts.albums],
-                ...(diag.value.counts.pendingUploads > 0
-                  ? [
-                      [
-                        '未完了のアップロード',
-                        `${diag.value.counts.pendingUploads}${diag.value.counts.expiredUploads > 0 ? `（うち期限切れ ${diag.value.counts.expiredUploads}）` : ''}`,
-                      ] as const,
-                    ]
+                ...(diag.value.counts.expiredUploads > 0
+                  ? [['中断したアップロード', diag.value.counts.expiredUploads] as const]
                   : []),
-                ...(diag.value.counts.purging > 0 ? [['削除処理中', diag.value.counts.purging] as const] : []),
               ] as const
             ).map(([label, value]) => (
               <div key={label} class="flex justify-between gap-4 py-2.5">
@@ -112,7 +107,7 @@ export function ManagePage() {
           {diag.value.counts.expiredUploads > 0 && (
             <div class="mt-3 space-y-2 text-sm">
               <p class="text-muted-foreground">
-                期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。メンテナンスで保存状態を点検すると整理できます。写真がタイムラインに無ければ、もう一度選んでアップロードしてもかまいません。
+                中断したアップロードは、写真としては登録されていません。自動では削除されません。メンテナンスで保存状態を点検すると整理できます。写真がタイムラインに無ければ、もう一度選んでアップロードしてもかまいません。
               </p>
               {/* The next step is known, so take the member there instead of asking them to find it. */}
               <a
