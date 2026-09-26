@@ -25,7 +25,7 @@ Web UI の見た目と操作感の規則です。画面を足すときや直す�
 
 写真を見る暗い面（viewer、共有ページの拡大表示、info toast）は stage token を使います: `stage`（地）、`stage-raised`（info panel・toast）、`stage-control`（写真の上に置くボタンの地）、`stage-hover`、`stage-hairline`、`on-stage` / `on-stage-muted`（文字）。
 
-OS が dark のとき（`prefers-color-scheme: dark`）は、`styles.css` が上の表の token だけを dark の値に置き換えます。stage token と `favorite` は両方で同じです。影が見えない dark では、dialog と info toast の縁に hairline を出します（`dark:ring-1`）。テーマを切り替える UI は持ちません。
+OS が dark のとき（`prefers-color-scheme: dark`）は、`styles.css` が上の表の token だけを dark の値に置き換えます。stage token と `favorite` は両方で同じです。dark では影で面を分けられないため、dialog と info toast の縁に hairline を出します。テーマを切り替える UI は持ちません。
 
 `text-white`・`bg-black/40`・`neutral-900` のような token 外の色は書きません。必要な色が無ければ `@theme` に役割名で足します。
 

@@ -870,9 +870,16 @@ OS の `prefers-color-scheme` に追従する dark を足した。chrome の tok
 
 確認方法: local の dev を Playwright（Chromium、1280px）で `colorScheme` を dark / light にして開き、timeline、選択中の tile と選択 bar、upload 状況、新規アルバムの dialog と input の focus、viewer の上の menu、Undo 付きの toast を撮って見た。dark では影が見えず、dialog と info toast が地に溶けたので、両方の縁に dark だけ hairline を出した。
 
-`e2e/theme.spec.ts` が、両方の scheme で private app と共有ページの地と文字の明るさ、header の hairline を確かめる。
+`e2e/theme.spec.ts` は、両方の scheme で次を確かめる。
 
-撮っていないもの: phone の下のタブ、塗りの赤いボタンと error toast。token とコントラストの計算だけで確かめた。error toast の閉じるボタンの hover（`stage-hover`）は、dark の明るい赤の上ではほとんど見えない。
+- private app と共有ページの地と文字の明るさ、header の hairline
+- error toast の閉じるボタンが、hover で toast の文字の側へ濃くなること。最初は info toast と同じ白の重ねを使っていて、dark の明るい赤の上では地から離れる向きに変わっていた。この検査は、直す前の実装では dark だけで落ちた
+
+`e2e/mobile.spec.ts` は、dark の phone（iPhone 13 の WebKit）で下のタブの地、上の hairline、現在のタブの文字を確かめる。
+
+撮っていないもの: phone の下のタブ、塗りの赤いボタン、error toast。上の検査と、token のコントラストの計算で確かめた。
+
+`pnpm test:e2e` の全体は、PR の CI で通った。
 
 ## 未検証
 

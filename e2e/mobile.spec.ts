@@ -1,5 +1,6 @@
 import { devices, type Page } from '@playwright/test'
 import {
+  brightness,
   expect,
   expectImageLoaded,
   makeJpeg,
@@ -171,4 +172,22 @@ test('phone layout: photos are picked by tapping, and the actions stay in reach'
 
   await toolbar.getByRole('button', { name: '選択を終了' }).tap()
   await expect(toolbar).toBeHidden()
+})
+
+test.describe('dark color scheme', () => {
+  test.use({ colorScheme: 'dark' })
+
+  test('phone layout: the bottom tabs sit on the dark ground with a hairline and a readable current tab', async ({
+    page,
+  }) => {
+    await openApp(page)
+    const nav = page.getByRole('navigation', { name: 'メイン' })
+    const ground = await brightness(nav, 'backgroundColor')
+    expect(ground).toBeLessThan(0.1)
+    const hairline = await brightness(nav, 'borderTopColor')
+    expect(hairline - ground).toBeGreaterThan(0.02)
+    expect(hairline - ground).toBeLessThan(0.3)
+    const current = nav.locator('[aria-current="page"]')
+    expect((await brightness(current, 'color')) - ground).toBeGreaterThan(0.4)
+  })
 })

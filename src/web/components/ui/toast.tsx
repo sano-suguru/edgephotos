@@ -37,6 +37,13 @@ function ToastItem({ toast }: { toast: Toast }) {
     return () => clearTimeout(timer)
   }, [toast.id])
 
+  // The buttons darken or lighten the toast's own ground: white over the stage, the foreground over the red
+  // (light text in light, dark text in dark).
+  const hover =
+    toast.tone === 'error'
+      ? 'hover:bg-destructive-foreground/15 active:bg-destructive-foreground/15'
+      : 'hover:bg-stage-hover active:bg-stage-hover'
+
   return (
     <div
       class={cn(
@@ -52,7 +59,7 @@ function ToastItem({ toast }: { toast: Toast }) {
       {toast.action && (
         <button
           type="button"
-          class="-my-3 min-h-11 shrink-0 rounded-control px-3 font-semibold underline underline-offset-4 hover:bg-stage-hover active:bg-stage-hover"
+          class={cn('-my-3 min-h-11 shrink-0 rounded-control px-3 font-semibold underline underline-offset-4', hover)}
           onClick={() => {
             const action = toast.action
             dismiss(toast.id)
@@ -65,7 +72,10 @@ function ToastItem({ toast }: { toast: Toast }) {
       <button
         type="button"
         aria-label="通知を閉じる"
-        class="-my-3 -mr-2 ml-2 inline-flex size-11 shrink-0 items-center justify-center rounded-control opacity-70 hover:bg-stage-hover hover:opacity-100"
+        class={cn(
+          '-my-3 -mr-2 ml-2 inline-flex size-11 shrink-0 items-center justify-center rounded-control opacity-70 hover:opacity-100',
+          hover,
+        )}
         onClick={() => dismiss(toast.id)}
       >
         <Close class="size-4" />
