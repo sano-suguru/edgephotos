@@ -6,6 +6,12 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## 「管理」と「メンテナンス」の分離（2026-09-26）
+
+下部ナビの「ライブラリ」タブを「管理」にし、保守の機能を「管理」から開く「メンテナンス」画面（`/settings/maintenance`）へ移しました（[D-039](decisions.md)）。「管理」には件数・ゴミ箱・「削除を再開」が残り、未完了のアップロードと削除処理中は 1 件以上あるときだけ出ます。「メンテナンス」には、バックアップ処理の完了日時と保存状態の点検（旧「ストレージの点検」、作り直しと整理を含む）があります。どちらも member 全員が使えます。
+
+Web の「写真とアルバムの情報をダウンロード」は廃止しました。同じ manifest は `pnpm backup export` が写真と一緒に保存します。Export API・backup・manifest の形式は変わりません。
+
 ## ライブラリ画面の文言（2026-09-26）
 
 ライブラリ画面から CLI・Cloudflare の用語を除きました。「最終 backup export」は「バックアップ処理の完了日時」、「Export」と「manifest をダウンロード」は「写真とアルバムの情報を書き出す」と「写真とアルバムの情報をダウンロード」になりました。「Migration」の行は画面から外しました（`pnpm diagnose` の `worker: D1 schema` で確認します）。API・backup・manifest の形式は変わりません。

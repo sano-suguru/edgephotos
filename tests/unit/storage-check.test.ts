@@ -69,7 +69,7 @@ describe('storage check helpers', () => {
   })
 
   it('explains every finding without commands or storage internals', () => {
-    // The Library page is read by household members who have never seen the CLI or the Cloudflare
+    // The Maintenance page is read by household members who have never seen the CLI or the Cloudflare
     // dashboard. How to act on a finding is in docs/operations.md §12.
     const counts = Object.fromEntries(STORAGE_AUDIT_ISSUE_KINDS.map((kind) => [kind, 1]))
     const list = findings({ photos: 1, counts, completeUploads: 0, repairable: [] })
