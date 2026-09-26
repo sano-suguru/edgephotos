@@ -5,8 +5,9 @@ import { expect, openApp, test, tile, uniqueName, uploadPhoto } from './fixtures
 // (src/web/features/timeline/AssetGrid.tsx). The server side is covered by the workerd tests; what only a
 // browser shows is which request each button and each undo sends, and what the grids show afterwards.
 
-// Setup and checks go straight to the API and fail on any non-2xx, so a broken request is reported as that
-// request rather than as a later assertion about the grid.
+// Setup and checks go straight to the API. Callers assert the status, and a body that is not JSON (an error
+// page) fails naming the request, so a broken request is reported as that request rather than as a later
+// assertion about the grid.
 async function api<T>(page: Page, method: string, path: string, body?: unknown): Promise<{ status: number; json: T }> {
   const res = await page.evaluate(
     async ([m, p, b]) => {
@@ -19,7 +20,11 @@ async function api<T>(page: Page, method: string, path: string, body?: unknown):
     },
     [method, path, body] as const,
   )
-  return { status: res.status, json: (res.text ? JSON.parse(res.text) : null) as T }
+  try {
+    return { status: res.status, json: (res.text ? JSON.parse(res.text) : null) as T }
+  } catch {
+    throw new Error(`${method} ${path}: ${res.status} with a body that is not JSON`)
+  }
 }
 
 async function createAlbum(page: Page, title: string): Promise<string> {
