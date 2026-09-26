@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { StorageAuditPage, StorageCleanupResult } from '../../src/contracts/schemas'
+import {
+  STORAGE_AUDIT_ISSUE_KINDS,
+  type StorageAuditPage,
+  type StorageCleanupResult,
+} from '../../src/contracts/schemas'
 import { cleanupMessage, findings, runAudit, runCleanup } from '../../src/web/features/settings/storage-check'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -62,5 +66,15 @@ describe('storage check helpers', () => {
     expect(total).toEqual({ completed: 1, abandoned: 1, cleared: 1, failed: 2 })
     expect(cleanupMessage(total)).toMatch(/1 枚をライブラリに追加.*2 件は処理できませんでした.*写真には触れていません/)
     expect(cleanupMessage({ completed: 0, abandoned: 0, cleared: 0, failed: 0 })).toMatch(/1 日以内/)
+  })
+
+  it('explains every finding without commands or storage internals', () => {
+    // The Library page is read by household members who have never seen the CLI or the Cloudflare
+    // dashboard. How to act on a finding is in docs/operations.md §12.
+    const counts = Object.fromEntries(STORAGE_AUDIT_ISSUE_KINDS.map((kind) => [kind, 1]))
+    const list = findings({ photos: 1, counts, completeUploads: 0, repairable: [] })
+    expect(list).toHaveLength(STORAGE_AUDIT_ISSUE_KINDS.length)
+    for (const f of list)
+      expect(f.text).not.toMatch(/pnpm|manifest|SHA-256|\bD1\b|\bR2\b|migration|backup|docs\/|CLI|Cloudflare/i)
   })
 })

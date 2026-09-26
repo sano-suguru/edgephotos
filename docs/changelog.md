@@ -6,6 +6,10 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## ライブラリ画面の文言（2026-09-26）
+
+ライブラリ画面から CLI・Cloudflare の用語を除きました。「最終 backup export」は「バックアップ処理の完了日時」、「Export」と「manifest をダウンロード」は「写真とアルバムの情報を書き出す」と「写真とアルバムの情報をダウンロード」になりました。「Migration」の行は画面から外しました（`pnpm diagnose` の `worker: D1 schema` で確認します）。API・backup・manifest の形式は変わりません。
+
 ## private app の CSP と credential の流出経路（2026-09-25）
 
 private app のすべての画面に CSP を付けました（[D-037](decisions.md)）。`wrangler.jsonc` の assets の routing が変わりました。HTML の取得や `/favicon.ico` など、`/share/assets/*` 以外への request はすべて Worker を通ります。deploy 後に `pnpm diagnose` を token 付きで実行し、`share: asset miss` と `private app: CSP` を確かめます。
