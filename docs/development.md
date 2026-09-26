@@ -246,9 +246,12 @@ workerd の test では見えない、Browser 固有の部分だけを対象に�
 | `share.spec.ts` | album 作成 → viewer の menu から追加 → 共有リンク → 別 context の guest が閲覧（secret は Authorization header だけ、Cookie なし。thumbnail URL の期限切れから回復）→ 拡大表示の focus（閉じるボタンへ移り、Tab でも dialog 内に留まり、閉じると元の写真へ戻る）→ 再発行・無効化の確認 dialog（キャンセル・Escape では何も変わらない）→ 旧リンクと無効化したリンクは無効表示 | chromium |
 | `keyboard.spec.ts` | Base UI の Dialog / Menu の keyboard 操作と focus。viewer の ←/→ での移動（Menu 内では写真が変わらない）と、閉じたあとに最後の写真へ focus が戻ること。複数選択を keyboard だけで開始・選択・解除・終了できること | chromium |
 | `timeline.spec.ts` | 年月 navigation。数千枚・数年分の library は test 側が答えるので、確認するのは Browser 側だけ: 月を選ぶと URL に残りその月から表示されること、back / forward と reload で戻れること、上へ読んでも重複・欠けが出ないこと、月の見出しが scroll 中も上端に残ること、写真のある月だけが件数付きで並ぶこと。複数選択（選択中の tap が viewer を開かないこと、件数、全解除、page を足しても選択が残ること、album へまとめて追加、1 枚だけ失敗したときに失敗した写真だけが選択に残り再試行がその 1 枚だけを送ること、再試行が通れば選択が終わること、実行中は選択を変えられないこと（Escape を含む）、選択を始めるたびに album 一覧を読み直すこと、album が消えていれば再試行を出さず選択を残すこと、実行中に別 member が消した写真が選択へ戻らないこと、ゴミ箱の確認（Escape / キャンセルでは選択が消えないこと）とまとめての移動後に timeline から消えること、月を移ると選択が終わること） | chromium, mobile-webkit |
-| `viewer.spec.ts` | preview の取得失敗・読み込み失敗で「高画質で表示できませんでした」と再試行が出ること。album が多い menu が画面内に収まり、keyboard で末尾までスクロールできること | chromium |
+| `viewer.spec.ts` | preview の取得失敗・読み込み失敗で「高画質で表示できませんでした」と再試行が出ること。album が多い menu が画面内に収まり、keyboard で末尾までスクロールできること。情報の panel に最初に追加した member が出ること（記録が無い写真ではそう書くこと）。original の保存が presigned URL へ移動せずにダウンロードになること | chromium |
+| `trash.spec.ts` | viewer からゴミ箱へ移した写真が toast の「元に戻す」で戻ること。ゴミ箱から復元した写真の「元に戻す」がゴミ箱へ戻し、復元後も favorite と album が残ること。完全に削除は確認 dialog を通り、キャンセルでは残り、確定すると「元に戻す」を出さずに消えること。album から外した写真が「元に戻す」で album へ戻り、reload 後も残ること | chromium |
+| `manage.spec.ts` | 「管理」は対応の要るものが無いと写真・アルバムの件数とゴミ箱へのリンクだけを出し、期限切れのアップロードや止まった完全削除があるときだけ行を足すこと。点検・作り直しは「メンテナンス」にあり、`/settings/maintenance` を直接開けること | chromium |
+| `theme.spec.ts` | OS の dark / light に合わせて private app と共有ページの地・文字・header の hairline が変わること。error toast の閉じるボタンが hover で toast の文字の側へ濃くなること | chromium |
 | `csp.spec.ts` | private app の HTML（未知の path を含む）に CSP が付き、注入した inline script・inline event handler・別の origin の画像が拒否されること | chromium |
-| `mobile.spec.ts` | iPhone 相当の viewport で横スクロールがないこと、下部タブが scroll 後も画面内にあり、ゴミ箱へはライブラリから行け、ゴミ箱ではライブラリのタブが現在地になり戻れること、Undo toast のボタンが 44px 以上で離れていること、共有 dialog の入力欄が 16px 以上であること、tap で viewer（写真が画面幅か高さいっぱい）・共有 dialog が開き、画面内に収まること、選択の入口と操作が 44px 以上で bar が scroll 後も上端に残り、tap が写真を選ぶこと | mobile-webkit |
+| `mobile.spec.ts` | iPhone 相当の viewport で横スクロールがないこと、下部タブが scroll 後も画面内にあり、ゴミ箱へは「管理」から行け、ゴミ箱では「管理」のタブが現在地になり戻れること、「管理」から「メンテナンス」へ移って戻れること、dark で下部タブの地・hairline・現在のタブが読めること、Undo toast のボタンが 44px 以上で離れていること、共有 dialog の入力欄が 16px 以上であること、tap で viewer（写真が画面幅か高さいっぱい）・共有 dialog が開き、画面内に収まること、選択の入口と操作が 44px 以上で bar が scroll 後も上端に残り、tap が写真を選ぶこと | mobile-webkit |
 
 ```bash
 pnpm exec playwright install --only-shell chromium webkit   # 初回のみ

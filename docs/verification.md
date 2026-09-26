@@ -913,6 +913,20 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 
 `e2e/library.spec.ts` は、diagnostics と storage audit を差し替えて条件付きの文言をすべて出し、主要なラベルと説明文があること、画面に `pnpm`・`manifest`・`SHA-256`・`D1`・`R2`・`migration`・`backup`・`docs/` が無いことを確かめる。`tests/unit/storage-check.test.ts` は、点検のすべての分類の説明文に同じ語が無いことを確かめる。
 
+## ゴミ箱・復元・album から外す操作（2026-09-27）
+
+local の dev を Playwright の Chromium で開き、canvas で描いた合成 JPEG 4 枚と album 2 つ（同じ名前）で次を操作した。どれも期待どおりで、直すものは無かった。
+
+- 同じ名前の album が 2 つあるとき、viewer の「アルバムに追加」の 2 つ目を選ぶと 2 つ目の album に入る
+- favorite を付けた写真をゴミ箱へ移して復元すると、favorite と album の membership が残る
+- album から外して「元に戻す」と album へ戻り、reload 後も残る
+- ゴミ箱の「完全に削除」は確認 dialog を通り、確定後は「元に戻す」を出さず、ゴミ箱と timeline から消える
+- 空白だけの名前への変更は `400` になり、dialog に「入力内容を確認してください。」が出て名前は変わらない。前後に空白のある名前は、空白を除いて保存される
+
+このうちゴミ箱・復元・完全に削除・album から外す操作を `e2e/trash.spec.ts` にした（[テスト方針](development.md#8-テスト方針)）。同じ名前の album の menu と名前の変更は spec にしていない。各 undo の呼び出しを何もしない関数に替えると、対応する test だけが落ちることを確かめた。
+
+最初の版は、viewer を `getByRole('dialog')` で探していた。ゴミ箱に別の写真があると、完全に削除した後も viewer が次の写真で開いたまま、閉じかけの確認 dialog と 2 つに一致して落ちた。suite 全体ではゴミ箱に他の spec の写真が残るため、情報ボタンを持つ dialog に絞った。
+
 ## 未検証
 
 ### private app の CSP を production で確かめる

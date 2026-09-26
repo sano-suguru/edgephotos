@@ -1,8 +1,7 @@
 import type { ExportAlbumList, ExportAssetPage, ExportManifest, ExportMembershipPage } from './schemas.ts'
 
 // The backup manifest format: its identity, how the paged export API is assembled into one, and the rules
-// a manifest must satisfy beyond its shape. Kept free of zod so the Web bundle can import it
-// (src/web/lib/original-limit.ts explains why); the shape itself is ExportManifestSchema in ./schemas.ts.
+// a manifest must satisfy beyond its shape. The shape itself is ExportManifestSchema in ./schemas.ts.
 
 export const EXPORT_FORMAT = 'edgephotos-export'
 // What a new export writes, and during alpha the only version a reader accepts: backups from earlier alpha
