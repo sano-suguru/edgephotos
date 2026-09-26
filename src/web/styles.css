@@ -15,6 +15,7 @@
   --color-primary: oklch(0.21 0 0);
   --color-primary-foreground: oklch(0.99 0 0);
   --color-accent: oklch(0.55 0.15 255);
+  --color-accent-foreground: oklch(0.99 0 0);
   --color-destructive: oklch(0.55 0.2 27);
   --color-destructive-foreground: oklch(0.99 0 0);
   --color-favorite: oklch(0.85 0.15 85);
@@ -57,6 +58,26 @@
 }
 
 @layer base {
+  /* Dark follows the OS setting. Only the chrome tokens change; the stage and favorite are the same in both. */
+  :root {
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-background: oklch(0.16 0 0);
+      --color-foreground: oklch(0.93 0 0);
+      --color-muted: oklch(0.23 0 0);
+      --color-muted-foreground: oklch(0.7 0 0);
+      --color-border: oklch(0.29 0 0);
+      --color-primary: oklch(0.93 0 0);
+      --color-primary-foreground: oklch(0.16 0 0);
+      /* Lighter accent and red, with dark text on them, so both read as text on the dark ground too. */
+      --color-accent: oklch(0.72 0.13 255);
+      --color-accent-foreground: oklch(0.16 0 0);
+      --color-destructive: oklch(0.7 0.17 25);
+      --color-destructive-foreground: oklch(0.16 0 0);
+    }
+  }
   html,
   body {
     background: var(--color-background);

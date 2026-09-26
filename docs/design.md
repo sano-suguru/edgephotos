@@ -19,11 +19,13 @@ Web UI の見た目と操作感の規則です。画面を足すときや直す�
 | `muted` / `muted-foreground` | tonal ボタン・input の地、補足の文字 |
 | `border` | hairline（区切り線・menu の枠・header の下線）。`black/5` などを直接書かない |
 | `primary` / `primary-foreground` | 塗りのボタン（ink） |
-| `accent` | 現在地・focus ring・進捗・選択 |
+| `accent` / `accent-foreground` | 現在地・focus ring・進捗・選択（選択の check は `accent-foreground`） |
 | `destructive` / `destructive-foreground` | 取り消せない操作とエラー |
 | `favorite` | viewer のお気に入りの星 |
 
 写真を見る暗い面（viewer、共有ページの拡大表示、info toast）は stage token を使います: `stage`（地）、`stage-raised`（info panel・toast）、`stage-control`（写真の上に置くボタンの地）、`stage-hover`、`stage-hairline`、`on-stage` / `on-stage-muted`（文字）。
+
+OS が dark のとき（`prefers-color-scheme: dark`）は、`styles.css` が上の表の token だけを dark の値に置き換えます。stage token と `favorite` は両方で同じです。影が見えない dark では、dialog と info toast の縁に hairline を出します（`dark:ring-1`）。テーマを切り替える UI は持ちません。
 
 `text-white`・`bg-black/40`・`neutral-900` のような token 外の色は書きません。必要な色が無ければ `@theme` に役割名で足します。
 

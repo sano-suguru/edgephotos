@@ -41,7 +41,9 @@ function ToastItem({ toast }: { toast: Toast }) {
     <div
       class={cn(
         'pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-surface px-4 py-3 text-sm shadow-md motion-safe:animate-[toast-in_180ms_var(--ease-out)]',
-        toast.tone === 'error' ? 'bg-destructive text-destructive-foreground' : 'bg-stage-raised text-on-stage',
+        toast.tone === 'error'
+          ? 'bg-destructive text-destructive-foreground'
+          : 'bg-stage-raised text-on-stage dark:ring-1 dark:ring-stage-hairline',
       )}
     >
       <span class="flex-1">{toast.message}</span>
