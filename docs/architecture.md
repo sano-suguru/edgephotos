@@ -436,7 +436,7 @@ paged export は、ライブラリが変化しうる間に 1 ページずつ読�
 
 落として直せないのは、1 つの original が 2 つの asset として現れる場合です。ページとページの間に完全削除と再 upload が起きたときに生じます。写真の同一性は SHA-256 だけで決まるため、この manifest を restore すると 2 件が黙って 1 件に潰れます。
 
-`collectExportManifest` はこれを返さずに拒否します。ライブラリは無傷で、何も書かれていないので、export をやり直せば正しい manifest が得られます（[D-027](decisions.md)）。したがって Web のダウンロードも CLI も、`check` / `restore` / `verify` が拒否する manifest を手にすることはありません。
+`collectExportManifest` はこれを返さずに拒否します。ライブラリは無傷で、何も書かれていないので、export をやり直せば正しい manifest が得られます（[D-027](decisions.md)）。したがって `pnpm backup export` は、`check` / `restore` / `verify` が拒否する manifest を書き出しません。
 
 `pnpm backup` の `check` / `restore` / `verify` はすべて `readManifest` を通ります。JSON として壊れている、contract に合わない、整合しない manifest は、対象ライブラリへ最初の request を送る前に、どの field がなぜ不正かを並べて拒否します。
 
