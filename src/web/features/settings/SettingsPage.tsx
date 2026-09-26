@@ -237,8 +237,7 @@ export function SettingsPage() {
             ))}
           </dl>
           <p class="mt-3 text-sm text-muted-foreground">
-            「バックアップの完了日時」は、写真ファイルを含むバックアップが 1
-            枚も取りこぼさずに終わった日時です。途中で失敗した回では更新されません。この日時より後に追加した写真は、まだバックアップされていません。
+            「バックアップの完了日時」は、写真ファイルを含むバックアップ処理が最後まで完了した日時です。途中で失敗した回では更新されません。
           </p>
           {diag.value.counts.expiredUploads > 0 && (
             <p class="mt-3 text-sm text-muted-foreground">
@@ -260,14 +259,14 @@ export function SettingsPage() {
       )}
       <StorageCheck onChanged={() => void load()} />
       <div class="mt-10 space-y-3 text-sm">
-        <h2 class="text-heading">写真の情報を保存</h2>
+        <h2 class="text-heading">写真とアルバムの情報を書き出す</h2>
         <p class="text-muted-foreground">
           写真ごとのファイル名・撮影日時・お気に入り・アップロードした人と、アルバムの構成を、1
           つのファイルに保存します。
         </p>
         <p class="font-medium">写真そのものは含まれません。これだけではバックアップになりません。</p>
         <Button variant="secondary" onClick={downloadManifest}>
-          写真の情報をダウンロード
+          情報をダウンロード
         </Button>
       </div>
     </section>

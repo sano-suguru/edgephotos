@@ -371,7 +371,7 @@ time travel の期限を過ぎた、または D1 / R2 自体を失った場合�
 
 EdgePhotos が唯一のバックアップであるとは説明しません。
 
-- ライブラリ画面の「写真の情報をダウンロード」: manifest（asset metadata、album / album_assets、object manifest、期待 SHA-256）。写真のファイルは含まない（`GET /api/v1/export/*` をページごとに取得して組み立てる）
+- ライブラリ画面の「写真とアルバムの情報を書き出す」: manifest（asset metadata、album / album_assets、object manifest、期待 SHA-256）。写真のファイルは含まない（`GET /api/v1/export/*` をページごとに取得して組み立てる）
 - `pnpm backup export <dir>`: manifest に加え、original と derivative を presigned URL 経由で取得し、各 original の SHA-256 を検証して保存する
 - `pnpm backup check <dir>`: backup ディレクトリだけを読み、manifest のすべての original の SHA-256 と derivative の有無を確かめる（network 不要）
 
@@ -495,7 +495,7 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 
 `pnpm backup export` が失敗なく `manifest.json` を書き終えた時刻です。CLI が最後に `POST /api/v1/backup/complete` を送って記録します（[D-033](decisions.md)）。
 
-取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の「写真の情報をダウンロード」と、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
+取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の「情報をダウンロード」と、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
 
 server は backup ディレクトリを見られないので、この日時は CLI が「終わった」と送った記録です。backup の中身が揃っていることは示しません。backup export は差分で、既にあるファイルは size だけを見て再利用します。揃っているかは `pnpm backup check` で確認してください。
 

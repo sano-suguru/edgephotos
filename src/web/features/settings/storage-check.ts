@@ -80,7 +80,7 @@ const TEXT: Record<IssueKind, { tone: Finding['tone']; text: string }> = {
   },
   unreferenced_objects: {
     tone: 'info',
-    text: 'どの写真にも結び付かないファイルです。写真の記録を過去の状態に戻した場合などに残ります。自動では削除しません。',
+    text: 'どの写真にも結び付かないファイルです。自動では削除しません。',
   },
   unexpected_key: { tone: 'info', text: 'EdgePhotos 以外が書き込んだファイルです。触れません。' },
   audit_incomplete: {
@@ -89,7 +89,7 @@ const TEXT: Record<IssueKind, { tone: Finding['tone']; text: string }> = {
   },
   original_checksum_unrecorded: {
     tone: 'info',
-    text: '古い写真のため、元ファイルが壊れていないかを確かめるための記録がありません。',
+    text: '古い写真のため、ファイルが壊れていないか自動では確認できません。',
   },
 }
 

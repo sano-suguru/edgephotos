@@ -8,7 +8,7 @@
 
 ## ライブラリ画面の文言（2026-09-26）
 
-ライブラリ画面から CLI・Cloudflare の用語を除きました。「最終 backup export」は「バックアップの完了日時」、「Export」と「manifest をダウンロード」は「写真の情報を保存」と「写真の情報をダウンロード」になりました。「Migration」の行は画面から外しました（`pnpm diagnose` の `worker: D1 schema` で確認します）。API・backup・manifest の形式は変わりません。
+ライブラリ画面から CLI・Cloudflare の用語を除きました。「最終 backup export」は「バックアップの完了日時」、「Export」と「manifest をダウンロード」は「写真とアルバムの情報を書き出す」と「情報をダウンロード」になりました。「Migration」の行は画面から外しました（`pnpm diagnose` の `worker: D1 schema` で確認します）。API・backup・manifest の形式は変わりません。
 
 ## private app の CSP と credential の流出経路（2026-09-25）
 

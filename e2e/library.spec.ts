@@ -40,15 +40,18 @@ test('the Library page explains itself without operator jargon', async ({ page }
   const backupRow = main.locator('dl > div', { hasText: 'バックアップの完了日時' })
   await expect(backupRow.locator('dd')).toHaveText(await page.evaluate((at) => new Date(at).toLocaleString(), backupAt))
   await expect(main).toContainText(
-    '「バックアップの完了日時」は、写真ファイルを含むバックアップが 1 枚も取りこぼさずに終わった日時です。',
+    '「バックアップの完了日時」は、写真ファイルを含むバックアップ処理が最後まで完了した日時です。',
   )
   await expect(main).toContainText('途中で失敗した回では更新されません。')
-  await expect(main).toContainText('この日時より後に追加した写真は、まだバックアップされていません。')
+  // The server only knows the CLI reported a finished run, not what the backup directory holds now
+  // (docs/operations.md §12), so the page must not promise that every photo is in it, or that later ones are not.
+  await expect(main).not.toContainText('取りこぼさ')
+  await expect(main).not.toContainText('バックアップされていません')
 
   // The download says what it saves, and that the photos are not in it, before it is pressed.
-  await expect(main.getByRole('heading', { name: '写真の情報を保存' })).toBeVisible()
+  await expect(main.getByRole('heading', { name: '写真とアルバムの情報を書き出す' })).toBeVisible()
   await expect(main.getByText('写真そのものは含まれません。', { exact: false })).toBeVisible()
-  await expect(main.getByRole('button', { name: '写真の情報をダウンロード' })).toBeVisible()
+  await expect(main.getByRole('button', { name: '情報をダウンロード' })).toBeVisible()
 
   await main.getByRole('button', { name: '点検する' }).click()
   await expect(main).toContainText('赤字の項目は、EdgePhotos を管理している人に伝えてください。')
