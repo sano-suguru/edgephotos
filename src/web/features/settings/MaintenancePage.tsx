@@ -98,7 +98,7 @@ function StorageCheck() {
             ))}
           </ul>
           {list.some((f) => f.tone === 'damage') && (
-            <p class="text-destructive">「要対応」の項目は、EdgePhotos を用意した人に伝えてください。</p>
+            <p class="text-destructive">「要対応」の項目は、EdgePhotos の設定をした人に伝えてください。</p>
           )}
           {repairable > 0 && (
             <div class="space-y-2">
@@ -149,27 +149,11 @@ export function MaintenancePage() {
       })
   })
 
-  async function downloadManifest() {
-    error.value = null
-    const manifest = await api.exportManifest().catch((err) => {
-      error.value = userMessage(err)
-      return null
-    })
-    if (!manifest) return
-    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `edgephotos-export-${manifest.exportedAt.slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   return (
     <section class="max-w-2xl">
       <PageHeader
         back={{ to: '/settings', label: '管理', always: true }}
-        hint="普段は開く必要のない、点検と書き出しの機能です。"
+        hint="普段は開く必要のない、バックアップの記録と保存状態の点検です。"
       >
         メンテナンス
       </PageHeader>
@@ -198,17 +182,6 @@ export function MaintenancePage() {
         </div>
       )}
       <StorageCheck />
-      <div class="mt-10 space-y-3 text-sm">
-        <h2 class="text-heading">写真とアルバムの情報を書き出す</h2>
-        <p class="text-muted-foreground">
-          写真ごとのファイル名・撮影日時・お気に入り・アップロードした人と、アルバムの構成を、1
-          つのファイルに保存します。
-        </p>
-        <p class="font-medium">写真そのものは含まれません。これだけではバックアップになりません。</p>
-        <Button variant="secondary" onClick={downloadManifest}>
-          写真とアルバムの情報をダウンロード
-        </Button>
-      </div>
     </section>
   )
 }

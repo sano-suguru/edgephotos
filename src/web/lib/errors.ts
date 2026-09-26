@@ -1,4 +1,3 @@
-import { ExportSnapshotError } from '../../contracts/export-manifest'
 // From ./api/error, not ./api/client: this module is used by code that must stay free of `fetch`.
 import { ApiRequestError } from './api/error'
 
@@ -26,10 +25,6 @@ const MESSAGES: Record<string, string> = {
 
 export function userMessage(err: unknown): string {
   console.warn(err)
-  // The library changed under the paged export; nothing is wrong with it and nothing was written.
-  if (err instanceof ExportSnapshotError) {
-    return 'エクスポート中にライブラリが変化したため、内容が揃いませんでした。もう一度実行してください。'
-  }
   if (err instanceof ApiRequestError) {
     return MESSAGES[err.code] ?? (err.status >= 500 ? 'サーバーで問題が発生しました。' : '操作を完了できませんでした。')
   }

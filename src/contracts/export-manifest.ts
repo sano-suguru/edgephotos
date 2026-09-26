@@ -27,7 +27,7 @@ export class ExportSnapshotError extends Error {
   }
 }
 
-// Assembles the paged export API into one manifest in the current format. Used by the Web app and the backup CLI.
+// Assembles the paged export API into one manifest in the current format. Used by the backup CLI.
 // Pages are read one after another while the library may change: memberships of photos that are not in the
 // asset pages (added or deleted meanwhile) are dropped, so the manifest never refers to an unknown asset.
 // What dropping cannot fix — one original appearing as two photos because it was deleted and uploaded again

@@ -2,7 +2,7 @@ import { signal, useSignal, useSignalEffect } from '@preact/signals'
 import type { ComponentChildren } from 'preact'
 import { cn } from './components/ui/button'
 import { EmptyState } from './components/ui/empty'
-import { Albums, Images, Library, Star, Trash } from './components/ui/icons'
+import { Albums, Images, Sliders, Star, Trash } from './components/ui/icons'
 import { PageHeader } from './components/ui/page'
 import { Toaster } from './components/ui/toast'
 import { AlbumPage } from './features/albums/AlbumPage'
@@ -187,7 +187,7 @@ export function App() {
             <NavLink to="/favorites" label="お気に入り" icon={<Star />} />
             <NavLink to="/albums" label="アルバム" icon={<Albums />} />
             <NavLink to="/trash" label="ゴミ箱" icon={null} desktopOnly />
-            <NavLink to="/settings" label="管理" icon={<Library />} tabBarAlso={['/trash']} />
+            <NavLink to="/settings" label="管理" icon={<Sliders />} tabBarAlso={['/trash']} />
           </nav>
           <div class="ml-auto">
             <UploadButton />

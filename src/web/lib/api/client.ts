@@ -1,4 +1,3 @@
-import { collectExportManifest } from '../../../contracts/export-manifest'
 import { ApiRequestError } from './error'
 
 export { ApiRequestError }
@@ -10,7 +9,6 @@ import type {
   AssetMonth,
   AssetPage,
   DerivativeRepair,
-  ExportManifest,
   Share,
   ShareCreated,
   SignedUrl,
@@ -105,7 +103,6 @@ export const api = {
       `/api/v1/storage/audit?limit=500${after ? `&after=${encodeURIComponent(after)}` : ''}`,
     ),
   storageCleanup: () => request<StorageCleanupResult>('POST', '/api/v1/storage/cleanup', { limit: 25 }),
-  exportManifest: (): Promise<ExportManifest> => collectExportManifest((path) => request('GET', path)),
   diagnostics: () =>
     request<{
       counts: Record<string, number>

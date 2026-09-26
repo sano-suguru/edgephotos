@@ -34,7 +34,7 @@ function RowLink(props: { to: string; icon: ComponentChildren; label: string; hi
 type Diagnostics = Awaited<ReturnType<typeof api.diagnostics>>
 
 // What a household member looks at from day to day. The upkeep that is rarely needed (the backup record,
-// the storage check, the metadata download) is one level down, on the Maintenance page (docs/decisions.md
+// the storage check) is one level down, on the Maintenance page (docs/decisions.md
 // D-039). Both pages are open to every member alike.
 export function ManagePage() {
   const diag = useSignal<Diagnostics | null>(null)
@@ -86,15 +86,21 @@ export function ManagePage() {
         <div class="mt-10">
           <h2 class="mb-2 text-heading">状態</h2>
           <dl class="divide-y divide-border text-sm">
+            {/* Uploads in flight and deletes in progress show only while there are some: a row that reads 0 on
+                every visit is noise, and its appearing is the signal. */}
             {(
               [
                 ['写真', diag.value.counts.assets],
                 ['アルバム', diag.value.counts.albums],
-                [
-                  '未完了のアップロード',
-                  `${diag.value.counts.pendingUploads}${diag.value.counts.expiredUploads > 0 ? `（うち期限切れ ${diag.value.counts.expiredUploads}）` : ''}`,
-                ],
-                ['削除処理中', diag.value.counts.purging],
+                ...(diag.value.counts.pendingUploads > 0
+                  ? [
+                      [
+                        '未完了のアップロード',
+                        `${diag.value.counts.pendingUploads}${diag.value.counts.expiredUploads > 0 ? `（うち期限切れ ${diag.value.counts.expiredUploads}）` : ''}`,
+                      ] as const,
+                    ]
+                  : []),
+                ...(diag.value.counts.purging > 0 ? [['削除処理中', diag.value.counts.purging] as const] : []),
               ] as const
             ).map(([label, value]) => (
               <div key={label} class="flex justify-between gap-4 py-2.5">
@@ -142,7 +148,7 @@ export function ManagePage() {
           to="/settings/maintenance"
           icon={<Wrench class="size-5 shrink-0 text-muted-foreground" />}
           label="メンテナンス"
-          hint="バックアップの記録、保存状態の点検、写真とアルバムの情報の書き出し。普段は開く必要はありません。"
+          hint="バックアップの記録と保存状態の点検。普段は開く必要はありません。"
         />
       </div>
     </section>

@@ -383,7 +383,7 @@ original 本体を含む backup（差分）、backup ディレクトリの検査
 
 ### backup manifest v3
 
-`manifest.json`（backup ディレクトリ）と、メンテナンス画面からダウンロードする JSON は同じ contract です。shape は `ExportManifestSchema`（`src/contracts/schemas.ts`）、整合性の規則は `manifestIntegrityIssues`（`src/contracts/export-manifest.ts`）が定義します（[D-025](decisions.md)）。
+`manifest.json`（backup ディレクトリ）の contract です。shape は `ExportManifestSchema`（`src/contracts/schemas.ts`）、整合性の規則は `manifestIntegrityIssues`（`src/contracts/export-manifest.ts`）が定義します（[D-025](decisions.md)）。
 
 ```jsonc
 {
