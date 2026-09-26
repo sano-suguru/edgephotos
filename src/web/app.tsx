@@ -7,7 +7,8 @@ import { PageHeader } from './components/ui/page'
 import { Toaster } from './components/ui/toast'
 import { AlbumPage } from './features/albums/AlbumPage'
 import { AlbumsPage } from './features/albums/AlbumsPage'
-import { SettingsPage } from './features/settings/SettingsPage'
+import { MaintenancePage } from './features/settings/MaintenancePage'
+import { ManagePage } from './features/settings/ManagePage'
 import { AssetGrid } from './features/timeline/AssetGrid'
 import { MonthNav } from './features/timeline/MonthNav'
 import { startFor } from './features/timeline/month-list'
@@ -111,7 +112,7 @@ function Page() {
       return (
         <>
           <PageHeader
-            back={{ to: '/settings', label: 'ライブラリ' }}
+            back={{ to: '/settings', label: '管理' }}
             hint="ゴミ箱の写真は、完全に削除するまで残ります。写真を開くと復元できます。"
           >
             ゴミ箱
@@ -124,8 +125,10 @@ function Page() {
           />
         </>
       )
-    case 'settings':
-      return <SettingsPage />
+    case 'manage':
+      return <ManagePage />
+    case 'maintenance':
+      return <MaintenancePage />
     default:
       return <p class="text-sm text-muted-foreground">ページが見つかりません</p>
   }
@@ -184,7 +187,7 @@ export function App() {
             <NavLink to="/favorites" label="お気に入り" icon={<Star />} />
             <NavLink to="/albums" label="アルバム" icon={<Albums />} />
             <NavLink to="/trash" label="ゴミ箱" icon={null} desktopOnly />
-            <NavLink to="/settings" label="ライブラリ" icon={<Library />} tabBarAlso={['/trash']} />
+            <NavLink to="/settings" label="管理" icon={<Library />} tabBarAlso={['/trash']} />
           </nav>
           <div class="ml-auto">
             <UploadButton />

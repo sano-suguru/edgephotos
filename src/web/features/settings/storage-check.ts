@@ -1,6 +1,6 @@
 import type { StorageAuditIssue, StorageAuditPage, StorageCleanupResult } from '../../../contracts/schemas'
 
-// Pure helpers (no DOM, no API client) for the storage check on the Library page (docs/decisions.md D-023).
+// Pure helpers (no DOM, no API client) for the storage check on the Maintenance page (docs/decisions.md D-023).
 
 export type IssueKind = StorageAuditIssue['kind']
 export type AuditSummary = {

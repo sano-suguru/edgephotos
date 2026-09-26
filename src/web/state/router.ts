@@ -34,7 +34,8 @@ export type Route =
   | { name: 'albums' }
   | { name: 'album'; id: string }
   | { name: 'trash' }
-  | { name: 'settings' }
+  | { name: 'manage' }
+  | { name: 'maintenance' }
   | { name: 'not-found' }
 
 export const route = computed<Route>(() => {
@@ -43,7 +44,8 @@ export const route = computed<Route>(() => {
   if (p === '/favorites') return { name: 'favorites' }
   if (p === '/albums') return { name: 'albums' }
   if (p === '/trash') return { name: 'trash' }
-  if (p === '/settings') return { name: 'settings' }
+  if (p === '/settings') return { name: 'manage' }
+  if (p === '/settings/maintenance') return { name: 'maintenance' }
   const album = /^\/albums\/([0-9a-f-]{36})$/.exec(p)
   if (album) return { name: 'album', id: album[1] }
   return { name: 'not-found' }

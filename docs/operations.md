@@ -287,8 +287,8 @@ production は `--env` を付けません。確認する内容と、失敗時に
 | `worker: APP_ORIGIN` | `APP_ORIGIN` が `EDGEPHOTOS_URL` の origin と一致しない（scheme、host、custom domain 追加後の更新漏れ） |
 | `worker: D1 schema` | Worker が見ている D1 の最新 migration と checkout の不一致（別 DB を bind している、migration 未適用） |
 | `r2: presigned GET` | Worker が署名した URL を R2 が拒否（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`）。library が空なら SKIP |
-| `library: interrupted uploads`（WARN） | finalize されないまま期限（600 秒）を過ぎた upload がある。設定の誤りではない。1 日たったら `pnpm storage cleanup --apply`（またはライブラリ画面の「ストレージの点検」）で片付ける（[監視と点検](#12-監視と点検)） |
-| `library: unfinished deletes`（WARN） | 完全削除が途中で止まった写真がある。ライブラリ画面の「削除を再開」で完了させる |
+| `library: interrupted uploads`（WARN） | finalize されないまま期限（600 秒）を過ぎた upload がある。設定の誤りではない。1 日たったら `pnpm storage cleanup --apply`（またはメンテナンス画面の「保存状態の点検」）で片付ける（[監視と点検](#12-監視と点検)） |
+| `library: unfinished deletes`（WARN） | 完全削除が途中で止まった写真がある。管理画面の「削除を再開」で完了させる |
 
 `worker: APP_ORIGIN` が不一致だと、Browser からの書き込みが `403 ORIGIN_NOT_ALLOWED` になり、共有リンクも別の origin を指します。`EDGEPHOTOS_URL` の origin に合わせてください。
 
@@ -371,7 +371,7 @@ time travel の期限を過ぎた、または D1 / R2 自体を失った場合�
 
 EdgePhotos が唯一のバックアップであるとは説明しません。
 
-- ライブラリ画面の「写真とアルバムの情報を書き出す」: manifest（asset metadata、album / album_assets、object manifest、期待 SHA-256）。写真のファイルは含まない（`GET /api/v1/export/*` をページごとに取得して組み立てる）
+- メンテナンス画面の「写真とアルバムの情報を書き出す」: manifest（asset metadata、album / album_assets、object manifest、期待 SHA-256）。写真のファイルは含まない（`GET /api/v1/export/*` をページごとに取得して組み立てる）
 - `pnpm backup export <dir>`: manifest に加え、original と derivative を presigned URL 経由で取得し、各 original の SHA-256 を検証して保存する
 - `pnpm backup check <dir>`: backup ディレクトリだけを読み、manifest のすべての original の SHA-256 と derivative の有無を確かめる（network 不要）
 
@@ -482,12 +482,12 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 
 中央 telemetry server は置きません。
 
-利用者自身の Cloudflare Dashboard（Workers Logs）と、アプリ内の非機密 diagnostics（`GET /api/v1/diagnostics`、ライブラリ画面）を使います。
+利用者自身の Cloudflare Dashboard（Workers Logs）と、アプリ内の非機密 diagnostics（`GET /api/v1/diagnostics`、管理画面とメンテナンス画面）を使います。
 
 - asset / trash / album 件数
 - 未完了 upload（`pending`）件数と、そのうち期限切れ（`expires_at` を過ぎた = 中断した）件数
-- 削除処理中（`purging`）件数と、その asset ID（ライブラリ画面の「削除を再開」で完了できる）
-- 最終 backup export 日時（画面では「バックアップ処理の完了日時」）
+- 削除処理中（`purging`）件数と、その asset ID（管理画面の「削除を再開」で完了できる）
+- 最終 backup export 日時（メンテナンス画面の「バックアップ処理の完了日時」）
 
 適用済み migration は画面に出しません。`pnpm diagnose` の `worker: D1 schema` で確認します。
 
@@ -495,7 +495,7 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 
 `pnpm backup export` が失敗なく `manifest.json` を書き終えた時刻です。CLI が最後に `POST /api/v1/backup/complete` を送って記録します（[D-033](decisions.md)）。
 
-取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の「写真とアルバムの情報をダウンロード」と、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
+取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。メンテナンス画面の「写真とアルバムの情報をダウンロード」と、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
 
 server は backup ディレクトリを見られないので、この日時は CLI が「終わった」と送った記録です。backup の中身が揃っていることは示しません。backup export は差分で、既にあるファイルは size だけを見て再利用します。揃っているかは `pnpm backup check` で確認してください。
 
@@ -505,7 +505,7 @@ Worker のエラーログは request ID・route・例外名だけを出し、hea
 
 ### D1 と R2 の突合（storage audit / cleanup）
 
-D1 の記録と R2 の object が食い違っていないかは、読み取り専用の storage audit で確認します（[D-023](decisions.md)）。ライブラリ画面の「ストレージの点検」、または CLI から実行します。
+D1 の記録と R2 の object が食い違っていないかは、読み取り専用の storage audit で確認します（[D-023](decisions.md)）。メンテナンス画面の「保存状態の点検」、または CLI から実行します。
 
 ```bash
 EDGEPHOTOS_URL=... EDGEPHOTOS_ACCESS_TOKEN=... pnpm storage audit          # 読み取りのみ
@@ -519,9 +519,9 @@ EDGEPHOTOS_URL=... EDGEPHOTOS_ACCESS_TOKEN=... pnpm storage cleanup --apply
 | 分類 | 意味 | 対応 |
 | --- | --- | --- |
 | `missing_original` / `original_size_mismatch` / `original_checksum_mismatch` | 写真の original が無い、または upload されたものと違う（データの破損） | backup の original で戻す。現在の手順は、その写真を完全削除し、backup の original を upload し直す（album と favorite は付け直す）。`audit` は exit 1 |
-| `missing_derivative` | original は無事で、thumbnail / preview が無い | ライブラリ画面の「サムネイルを作り直す」。original から作り直すだけで、original・album・favorite・trash・日時は変わらない（[D-026](decisions.md)）。`audit` は exit 1 |
+| `missing_derivative` | original は無事で、thumbnail / preview が無い | メンテナンス画面の「サムネイルを作り直す」。original から作り直すだけで、original・album・favorite・trash・日時は変わらない（[D-026](decisions.md)）。`audit` は exit 1 |
 | `original_checksum_unrecorded`（`--deep`） | D-018 より前の original で、R2 に SHA-256 の記録が無い | `pnpm backup verify` が download して照合する |
-| `unfinished_delete` | 完全削除が途中で止まった | ライブラリ画面の「削除を再開」 |
+| `unfinished_delete` | 完全削除が途中で止まった | 管理画面の「削除を再開」 |
 | `expired_upload` | finalize されずに期限を過ぎた upload（写真ではない） | 1 日たったら `cleanup --apply`。3 object が揃っていれば写真として登録され、それ以外は object と行を削除する |
 | `duplicate_leftover` | 重複と判定された upload の残り object | `cleanup --apply` が削除する |
 | `unreferenced_objects` | どの D1 行も指さない object | 自動では削除しない。D1 を time travel で戻したあとなら、その期間に upload した写真の object の可能性がある。`originals/{id}` を R2 の Dashboard から取り出して upload し直すか、不要と判断できたら Dashboard で削除する |

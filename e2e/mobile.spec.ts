@@ -39,23 +39,33 @@ test('phone layout: navigation, viewer and share page fit and respond to taps', 
   // Frequent destinations are bottom tabs that stay in reach while scrolling; the header scrolls away.
   const nav = page.getByRole('navigation', { name: 'メイン' })
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-  for (const name of ['タイムライン', 'お気に入り', 'アルバム', 'ライブラリ']) {
+  for (const name of ['タイムライン', 'お気に入り', 'アルバム', '管理']) {
     await expect(nav.getByRole('link', { name })).toBeInViewport()
   }
   const navBox = await nav.boundingBox()
   expect(navBox?.height).toBeLessThan(90)
-  // The trash is a low-frequency destination, reached from ライブラリ.
+  // The trash is a low-frequency destination, reached from 管理.
   await expect(nav.getByRole('link', { name: 'ゴミ箱' })).toBeHidden()
-  await nav.getByRole('link', { name: 'ライブラリ' }).tap()
+  await nav.getByRole('link', { name: '管理' }).tap()
   await page.getByRole('link', { name: /ゴミ箱/ }).tap()
   await expect(page.getByRole('heading', { name: 'ゴミ箱' })).toBeVisible()
-  // The trash belongs to the ライブラリ tab, and leads back to it.
-  await expect(nav.getByRole('link', { name: 'ライブラリ' })).toHaveAttribute('aria-current', 'page')
-  await page.getByRole('main').getByRole('link', { name: '← ライブラリ' }).tap()
-  await expect(page.getByRole('heading', { name: 'ライブラリ' })).toBeVisible()
-  await expect(nav.getByRole('link', { name: 'ライブラリ' })).toHaveAttribute('aria-current', 'page')
+  // The trash belongs to the 管理 tab, and leads back to it.
+  await expect(nav.getByRole('link', { name: '管理' })).toHaveAttribute('aria-current', 'page')
+  await page.getByRole('main').getByRole('link', { name: '← 管理' }).tap()
+  await expect(page.getByRole('heading', { level: 1, name: '管理' })).toBeVisible()
+  await expect(nav.getByRole('link', { name: '管理' })).toHaveAttribute('aria-current', 'page')
+  // メンテナンス is one level below 管理 and has no tab; its long labels and dates still fit the width.
+  await page
+    .getByRole('main')
+    .getByRole('link', { name: /メンテナンス/ })
+    .tap()
+  await expect(page.getByRole('heading', { level: 1, name: 'メンテナンス' })).toBeVisible()
+  await expect(nav.getByRole('link', { name: '管理' })).toHaveAttribute('aria-current', 'page')
+  expect(await noHorizontalScroll(page)).toBe(true)
+  await page.getByRole('main').getByRole('link', { name: '← 管理' }).tap()
+  await expect(page.getByRole('heading', { level: 1, name: '管理' })).toBeVisible()
   await nav.getByRole('link', { name: 'タイムライン' }).tap()
-  await expect(nav.getByRole('link', { name: 'ライブラリ' })).not.toHaveAttribute('aria-current', 'page')
+  await expect(nav.getByRole('link', { name: '管理' })).not.toHaveAttribute('aria-current', 'page')
 
   await tile(page, photo).tap()
   const viewer = page.getByRole('dialog', { name: photo })

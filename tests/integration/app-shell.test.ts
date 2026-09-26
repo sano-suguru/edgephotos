@@ -46,32 +46,36 @@ function directives(csp: string | null): Map<string, string> {
 }
 
 describe('private app shell', () => {
-  it.each(['/', '/albums', '/albums/0f0e0d0c-0b0a-4908-8706-050403020100', '/settings', '/no-such-page'])(
-    '%s is the app with the private CSP',
-    async (path) => {
-      const a = assets()
-      const app = await makeApp({ env: { ...R2_ENV, ASSETS: a.fetcher } })
-      const res = await call(app, 'GET', path, { headers: NAVIGATE })
-      expect(res.status).toBe(200)
-      // The SPA fallback is the Worker's: a path that is not a file is answered with /.
-      expect(a.requested).toEqual(path === '/' ? ['/'] : [path, '/'])
-      expect(await res.text()).toBe('<title>app</title>')
-      const d = directives(res.headers.get('content-security-policy'))
-      expect(d.get('default-src')).toBe("'self'")
-      expect(d.get('script-src')).toBe("'self'")
-      expect(d.get('style-src')).toBe("'self'")
-      // Presigned GET (<img>) and PUT/GET (fetch) go to this account's R2 endpoint, and nowhere else.
-      expect(d.get('img-src')).toBe(`'self' ${R2}`)
-      expect(d.get('connect-src')).toBe(`'self' ${R2}`)
-      expect(d.get('object-src')).toBe("'none'")
-      expect(d.get('base-uri')).toBe("'none'")
-      expect(d.get('frame-ancestors')).toBe("'none'")
-      expect(d.get('form-action')).toBe("'none'")
-      expect(res.headers.get('content-security-policy')).not.toMatch(/unsafe-|\*|data:|blob:/)
-      expect(res.headers.get('referrer-policy')).toBe('no-referrer')
-      expect(res.headers.get('x-content-type-options')).toBe('nosniff')
-    },
-  )
+  it.each([
+    '/',
+    '/albums',
+    '/albums/0f0e0d0c-0b0a-4908-8706-050403020100',
+    '/settings',
+    '/settings/maintenance',
+    '/no-such-page',
+  ])('%s is the app with the private CSP', async (path) => {
+    const a = assets()
+    const app = await makeApp({ env: { ...R2_ENV, ASSETS: a.fetcher } })
+    const res = await call(app, 'GET', path, { headers: NAVIGATE })
+    expect(res.status).toBe(200)
+    // The SPA fallback is the Worker's: a path that is not a file is answered with /.
+    expect(a.requested).toEqual(path === '/' ? ['/'] : [path, '/'])
+    expect(await res.text()).toBe('<title>app</title>')
+    const d = directives(res.headers.get('content-security-policy'))
+    expect(d.get('default-src')).toBe("'self'")
+    expect(d.get('script-src')).toBe("'self'")
+    expect(d.get('style-src')).toBe("'self'")
+    // Presigned GET (<img>) and PUT/GET (fetch) go to this account's R2 endpoint, and nowhere else.
+    expect(d.get('img-src')).toBe(`'self' ${R2}`)
+    expect(d.get('connect-src')).toBe(`'self' ${R2}`)
+    expect(d.get('object-src')).toBe("'none'")
+    expect(d.get('base-uri')).toBe("'none'")
+    expect(d.get('frame-ancestors')).toBe("'none'")
+    expect(d.get('form-action')).toBe("'none'")
+    expect(res.headers.get('content-security-policy')).not.toMatch(/unsafe-|\*|data:|blob:/)
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+  })
 
   it.each([
     ['an image', { 'sec-fetch-mode': 'no-cors', accept: 'image/avif,image/webp,*/*' }, '/favicon.ico'],
