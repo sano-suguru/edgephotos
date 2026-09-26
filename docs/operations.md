@@ -495,7 +495,7 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 
 `pnpm backup export` が失敗なく `manifest.json` を書き終えた時刻です。CLI が最後に `POST /api/v1/backup/complete` を送って記録します（[D-033](decisions.md)）。
 
-取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の「情報をダウンロード」と、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
+取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の「写真とアルバムの情報をダウンロード」と、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
 
 server は backup ディレクトリを見られないので、この日時は CLI が「終わった」と送った記録です。backup の中身が揃っていることは示しません。backup export は差分で、既にあるファイルは size だけを見て再利用します。揃っているかは `pnpm backup check` で確認してください。
 

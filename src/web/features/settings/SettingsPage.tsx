@@ -93,6 +93,8 @@ function StorageCheck(props: { onChanged: () => void }) {
           <ul class="space-y-2">
             {list.map((f) => (
               <li key={f.kind} class={TONE_CLASS[f.tone]}>
+                {/* Colour alone does not reach a screen reader or every eye, so damage is also named in text. */}
+                {f.tone === 'damage' && <span class="font-medium">要対応 </span>}
                 <span class="font-medium tabular-nums">{f.count} 件</span> — {f.text}
                 {f.kind === 'expired_upload' && summary.value && summary.value.completeUploads > 0
                   ? `うち ${summary.value.completeUploads} 件は転送が完了しており、整理するとライブラリに追加されます。`
@@ -101,7 +103,7 @@ function StorageCheck(props: { onChanged: () => void }) {
             ))}
           </ul>
           {list.some((f) => f.tone === 'damage') && (
-            <p class="text-destructive">赤字の項目は、EdgePhotos を管理している人に伝えてください。</p>
+            <p class="text-destructive">「要対応」の項目は、EdgePhotos を管理している人に伝えてください。</p>
           )}
           {repairable > 0 && (
             <div class="space-y-2">
@@ -266,7 +268,7 @@ export function SettingsPage() {
         </p>
         <p class="font-medium">写真そのものは含まれません。これだけではバックアップになりません。</p>
         <Button variant="secondary" onClick={downloadManifest}>
-          情報をダウンロード
+          写真とアルバムの情報をダウンロード
         </Button>
       </div>
     </section>

@@ -74,6 +74,7 @@ describe('storage check helpers', () => {
     const counts = Object.fromEntries(STORAGE_AUDIT_ISSUE_KINDS.map((kind) => [kind, 1]))
     const list = findings({ photos: 1, counts, completeUploads: 0, repairable: [] })
     expect(list).toHaveLength(STORAGE_AUDIT_ISSUE_KINDS.length)
-    for (const f of list) expect(f.text).not.toMatch(/pnpm|manifest|SHA-256|\bD1\b|\bR2\b|migration|backup|docs\//i)
+    for (const f of list)
+      expect(f.text).not.toMatch(/pnpm|manifest|SHA-256|\bD1\b|\bR2\b|migration|backup|docs\/|CLI|Cloudflare/i)
   })
 })

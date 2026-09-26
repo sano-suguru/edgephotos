@@ -2,11 +2,11 @@ import { expect, openApp, test } from './fixtures'
 
 // Words a household member cannot be expected to know. The operator's steps behind them are in
 // docs/operations.md; the Library page only says what each value and button means.
-const JARGON = /pnpm|manifest|SHA-256|\bD1\b|\bR2\b|migration|backup|docs\//i
+const JARGON = /pnpm|manifest|SHA-256|\bD1\b|\bR2\b|migration|backup|docs\/|CLI|Cloudflare/i
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
-test('the Library page explains itself without operator jargon', async ({ page }) => {
+test('the Library page shows none of the operator terms it used to', async ({ page }) => {
   // Every conditional block shows: a recorded backup, an expired upload, and findings of each tone.
   const backupAt = '2026-09-20T03:04:05.000Z'
   await page.route('**/api/v1/diagnostics', async (route) => {
@@ -51,10 +51,16 @@ test('the Library page explains itself without operator jargon', async ({ page }
   // The download says what it saves, and that the photos are not in it, before it is pressed.
   await expect(main.getByRole('heading', { name: '写真とアルバムの情報を書き出す' })).toBeVisible()
   await expect(main.getByText('写真そのものは含まれません。', { exact: false })).toBeVisible()
-  await expect(main.getByRole('button', { name: '情報をダウンロード' })).toBeVisible()
+  await expect(main.getByRole('button', { name: '写真とアルバムの情報をダウンロード' })).toBeVisible()
 
   await main.getByRole('button', { name: '点検する' }).click()
-  await expect(main).toContainText('赤字の項目は、EdgePhotos を管理している人に伝えてください。')
+  await expect(main).toContainText('「要対応」の項目は、EdgePhotos を管理している人に伝えてください。')
+  // Damage is named in text, not only in red.
+  await expect(main.getByRole('listitem').filter({ hasText: '写真の元ファイルが保存先にありません' })).toContainText(
+    '要対応 1 件',
+  )
+  await expect(main.getByRole('listitem').filter({ hasText: 'サムネイル' })).not.toContainText('要対応')
+  await expect(main).not.toContainText('赤字')
   await expect(main.getByRole('button', { name: '1 枚のサムネイルを作り直す' })).toBeVisible()
 
   const text = await main.innerText()
