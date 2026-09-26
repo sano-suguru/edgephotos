@@ -30,9 +30,19 @@ jobs:
       - run: pnpm build
 
   # Real-browser checks (docs/development.md §7). Local `vite dev` with emulated Access and a throwaway
-  # local D1/R2; no Cloudflare credentials are available or needed.
-  e2e:
+  # local D1/R2; no Cloudflare credentials are available or needed. Each project runs on its own runner
+  # with its own dev server and library, so the two share no state and run side by side.
+  e2e-browser:
+    name: e2e (${{ matrix.project }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browser: --only-shell chromium
+          - project: mobile-webkit
+            browser: webkit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,13 +53,23 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps --only-shell chromium webkit
-      - run: pnpm test:e2e
+      - run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - run: pnpm test:e2e --project=${{ matrix.project }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           path: |
             playwright-report/
             test-results/
           retention-days: 7
+
+  # The required check. It passes only when every project above passed; a skipped or cancelled project fails it.
+  e2e:
+    needs: e2e-browser
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$RESULT" = success
+        env:
+          RESULT: ${{ needs.e2e-browser.result }}
