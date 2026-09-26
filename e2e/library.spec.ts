@@ -37,10 +37,10 @@ test('the Library page shows none of the operator terms it used to', async ({ pa
   const main = page.getByRole('main')
 
   // The backup time is a local date, not an ISO string, and says it is only set by a finished backup.
-  const backupRow = main.locator('dl > div', { hasText: 'バックアップの完了日時' })
+  const backupRow = main.locator('dl > div', { hasText: 'バックアップ処理の完了日時' })
   await expect(backupRow.locator('dd')).toHaveText(await page.evaluate((at) => new Date(at).toLocaleString(), backupAt))
   await expect(main).toContainText(
-    '「バックアップの完了日時」は、写真ファイルを含むバックアップ処理が最後まで完了した日時です。',
+    '「バックアップ処理の完了日時」は、写真ファイルを含むバックアップ処理が最後まで完了した日時です。',
   )
   await expect(main).toContainText('途中で失敗した回では更新されません。')
   // The server only knows the CLI reported a finished run, not what the backup directory holds now

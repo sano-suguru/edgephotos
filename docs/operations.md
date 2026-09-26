@@ -487,11 +487,11 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 - asset / trash / album 件数
 - 未完了 upload（`pending`）件数と、そのうち期限切れ（`expires_at` を過ぎた = 中断した）件数
 - 削除処理中（`purging`）件数と、その asset ID（ライブラリ画面の「削除を再開」で完了できる）
-- 最終 backup export 日時（画面では「バックアップの完了日時」）
+- 最終 backup export 日時（画面では「バックアップ処理の完了日時」）
 
 適用済み migration は画面に出しません。`pnpm diagnose` の `worker: D1 schema` で確認します。
 
-### 「バックアップの完了日時」（最終 backup export）の意味
+### 「バックアップ処理の完了日時」（最終 backup export）の意味
 
 `pnpm backup export` が失敗なく `manifest.json` を書き終えた時刻です。CLI が最後に `POST /api/v1/backup/complete` を送って記録します（[D-033](decisions.md)）。
 

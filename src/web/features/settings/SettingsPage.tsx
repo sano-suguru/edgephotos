@@ -227,7 +227,7 @@ export function SettingsPage() {
                 // D-033). It does not show that the backup is still complete; `pnpm backup check` does. The
                 // applied migration is for the operator and is reported by `pnpm diagnose`.
                 [
-                  'バックアップの完了日時',
+                  'バックアップ処理の完了日時',
                   diag.value.lastBackupAt ? new Date(diag.value.lastBackupAt).toLocaleString() : '記録なし',
                 ],
               ] as const
@@ -239,7 +239,7 @@ export function SettingsPage() {
             ))}
           </dl>
           <p class="mt-3 text-sm text-muted-foreground">
-            「バックアップの完了日時」は、写真ファイルを含むバックアップ処理が最後まで完了した日時です。途中で失敗した回では更新されません。
+            「バックアップ処理の完了日時」は、写真ファイルを含むバックアップ処理が最後まで完了した日時です。途中で失敗した回では更新されません。
           </p>
           {diag.value.counts.expiredUploads > 0 && (
             <p class="mt-3 text-sm text-muted-foreground">
