@@ -155,3 +155,26 @@ export async function expectImageLoaded(img: Locator) {
 export async function naturalSize(img: Locator) {
   return img.evaluate((el: HTMLImageElement) => ({ width: el.naturalWidth, height: el.naturalHeight }))
 }
+
+type ColorProperty = 'backgroundColor' | 'color' | 'borderBottomColor' | 'borderTopColor'
+
+// How light a computed color looks, 0 (black) to 1 (white): a weighted mean of the sRGB channels, read back
+// through a canvas so the check does not depend on how the browser serializes oklch(). It tells a light theme
+// from a dark one; it is not WCAG relative luminance (the palette's contrast ratios are in docs/verification.md).
+// A translucent color is painted over `over` first, the way it shows on screen.
+export async function brightness(target: Locator, property: ColorProperty, over?: string) {
+  return target.evaluate(
+    (el, [prop, ground]) => {
+      const ctx = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D
+      if (ground) {
+        ctx.fillStyle = ground
+        ctx.fillRect(0, 0, 1, 1)
+      }
+      ctx.fillStyle = getComputedStyle(el)[prop as ColorProperty]
+      ctx.fillRect(0, 0, 1, 1)
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+      return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+    },
+    [property, over] as const,
+  )
+}

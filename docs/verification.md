@@ -862,6 +862,25 @@ production を `pnpm backup export` し、`pnpm backup check` した。
 - token 付きの `pnpm diagnose` は、private API・`APP_ORIGIN`・D1 schema・CSP・share が PASS した。`r2: CORS` だけが FAIL だった。diagnose は bucket を `wrangler.jsonc` から読むため、そこに無い drill 環境では production の bucket に restore-test の origin で preflight を送る。restore-test の bucket の CORS は `cors list` で確かめた
 - 終了後に R2 の object 15 個を消して bucket を削除し、Worker と D1 も削除した（Worker の URL は `404`）。R2 API token の削除は利用者が行う。backup のコピーは作業用のディレクトリに置いた
 
+## ダークモード（2026-09-26）
+
+OS の `prefers-color-scheme` に追従する dark を足した。chrome の token だけを置き換え、stage token と `favorite` は変えていない。
+
+コントラスト（oklch から sRGB に変換して計算）: dark で文字/地 15.8、補足の文字/地 7.3、補足の文字/`muted` 6.3、accent/地 7.8、`destructive`/地 6.7、塗りのボタンと選択の check と赤いボタンの文字 6.7〜15.8。hairline/地は 1.38（light は 1.25）。light の値は変えていない。
+
+確認方法: local の dev を Playwright（Chromium、1280px）で `colorScheme` を dark / light にして開き、timeline、選択中の tile と選択 bar、upload 状況、新規アルバムの dialog と input の focus、viewer の上の menu、Undo 付きの toast を撮って見た。dark では既存の影だけでは dialog と info toast の境界が弱く、地に溶けて見えたので、両方の縁に dark だけ hairline を出した。
+
+`e2e/theme.spec.ts` は、両方の scheme で次を確かめる。
+
+- private app と共有ページの地と文字の明るさ、header の hairline
+- error toast の閉じるボタンが、hover で toast の文字の側へ濃くなること。最初は info toast と同じ白の重ねを使っていて、dark の明るい赤の上では地から離れる向きに変わっていた。この検査は、直す前の実装では dark だけで落ちた
+
+`e2e/mobile.spec.ts` は、dark の phone（iPhone 13 の WebKit）で下のタブの地、上の hairline、現在のタブの文字を確かめる。
+
+撮っていないもの: phone の下のタブ、塗りの赤いボタン、error toast。上の検査と、token のコントラストの計算で確かめた。
+
+`pnpm test:e2e` の全体は、PR の CI で通った。
+
 ## 未検証
 
 ### private app の CSP を production で確かめる

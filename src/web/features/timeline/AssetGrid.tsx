@@ -534,7 +534,7 @@ export function AssetGrid(props: AssetGridProps) {
                       class={cn(
                         'pointer-events-none absolute right-1 top-1 flex size-5 items-center justify-center rounded-full border-2',
                         isPicked
-                          ? 'border-accent bg-accent text-primary-foreground'
+                          ? 'border-accent bg-accent text-accent-foreground'
                           : 'border-on-stage bg-stage-control',
                       )}
                     >

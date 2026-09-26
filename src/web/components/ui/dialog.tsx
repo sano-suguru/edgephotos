@@ -28,7 +28,7 @@ export function Dialog(props: {
         <BaseDialog.Popup
           finalFocus={props.finalFocus ? () => props.finalFocus?.() ?? true : undefined}
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-surface bg-background p-6 shadow-lg outline-none',
+            'fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-surface bg-background p-6 shadow-lg outline-none dark:ring-1 dark:ring-border',
             // Opens and closes with a short fade and a slight scale; with reduced motion, the fade only.
             'transition-[opacity,scale,filter] duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0',
             'motion-safe:data-[ending-style]:scale-[0.98] motion-safe:data-[starting-style]:scale-[0.98]',
