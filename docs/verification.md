@@ -881,6 +881,12 @@ OS の `prefers-color-scheme` に追従する dark を足した。chrome の tok
 
 `pnpm test:e2e` の全体は、PR の CI で通った。
 
+## ライブラリ画面の文言（2026-09-26）
+
+local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「バックアップの完了日時」に日時を入れた状態で、点検を実行して撮って見た。日時は ISO 文字列ではなく端末の locale で表示される。
+
+`e2e/library.spec.ts` は、diagnostics と storage audit を差し替えて条件付きの文言をすべて出し、主要なラベルと説明文があること、画面に `pnpm`・`manifest`・`SHA-256`・`D1`・`R2`・`migration`・`backup`・`docs/` が無いことを確かめる。`tests/unit/storage-check.test.ts` は、点検のすべての分類の説明文に同じ語が無いことを確かめる。
+
 ## 未検証
 
 ### private app の CSP を production で確かめる

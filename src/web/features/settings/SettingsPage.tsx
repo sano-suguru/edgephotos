@@ -73,7 +73,7 @@ function StorageCheck(props: { onChanged: () => void }) {
     <div class="mt-10 space-y-3 text-sm">
       <h2 class="text-heading">ストレージの点検</h2>
       <p class="text-muted-foreground">
-        写真の記録（D1）と保存されたファイル（R2）を突き合わせます。点検は読み取りだけで、何も変更しません。
+        写真の記録と、保存されている写真ファイルが食い違っていないか確かめます。点検は読み取りだけで、何も変更しません。
       </p>
       <Button variant="secondary" disabled={running.value !== null} onClick={() => void audit()}>
         {running.value === 'audit' ? `点検中…（${progress.value} 枚）` : '点検する'}
@@ -101,9 +101,7 @@ function StorageCheck(props: { onChanged: () => void }) {
             ))}
           </ul>
           {list.some((f) => f.tone === 'damage') && (
-            <p class="text-destructive">
-              詳しい一覧は <code>pnpm storage audit --deep</code> で確認できます（docs/operations.md §12）。
-            </p>
+            <p class="text-destructive">赤字の項目は、EdgePhotos を管理している人に伝えてください。</p>
           )}
           {repairable > 0 && (
             <div class="space-y-2">
@@ -223,10 +221,13 @@ export function SettingsPage() {
                   `${diag.value.counts.pendingUploads}${diag.value.counts.expiredUploads > 0 ? `（うち期限切れ ${diag.value.counts.expiredUploads}）` : ''}`,
                 ],
                 ['削除処理中', diag.value.counts.purging],
-                // `pnpm backup export` が失敗なく manifest.json を書き終えたときだけ記録される（docs/decisions.md
-                // D-033）。backup の中身が揃っていることまでは示さない。それは `pnpm backup check` が見る。
-                ['最終 backup export', diag.value.lastBackupAt ?? '未実施'],
-                ['Migration', diag.value.latestMigration ?? '—'],
+                // Recorded only when `pnpm backup export` writes manifest.json without a failure (docs/decisions.md
+                // D-033). It does not show that the backup is still complete; `pnpm backup check` does. The
+                // applied migration is for the operator and is reported by `pnpm diagnose`.
+                [
+                  'バックアップの完了日時',
+                  diag.value.lastBackupAt ? new Date(diag.value.lastBackupAt).toLocaleString() : '記録なし',
+                ],
               ] as const
             ).map(([label, value]) => (
               <div key={label} class="flex justify-between gap-4 py-2.5">
@@ -236,11 +237,8 @@ export function SettingsPage() {
             ))}
           </dl>
           <p class="mt-3 text-sm text-muted-foreground">
-            「最終 backup export」は、<code>pnpm backup export</code> が失敗なく <code>manifest.json</code>{' '}
-            を書き終えた時刻です。取得できなかった写真がある回は記録しません。下の「manifest
-            をダウンロード」でも変わりません。
-            {/* JSX drops the line break here, so no space is added between the sentences. */}
-            backup の中身が揃っているかは <code>pnpm backup check</code> で確認してください。
+            「バックアップの完了日時」は、写真ファイルを含むバックアップが 1
+            枚も取りこぼさずに終わった日時です。途中で失敗した回では更新されません。この日時より後に追加した写真は、まだバックアップされていません。
           </p>
           {diag.value.counts.expiredUploads > 0 && (
             <p class="mt-3 text-sm text-muted-foreground">
@@ -262,15 +260,14 @@ export function SettingsPage() {
       )}
       <StorageCheck onChanged={() => void load()} />
       <div class="mt-10 space-y-3 text-sm">
-        <h2 class="text-heading">Export</h2>
+        <h2 class="text-heading">写真の情報を保存</h2>
         <p class="text-muted-foreground">
-          metadata・アルバム構成・元ファイルの SHA-256 を含む manifest
-          を保存します。写真のファイルは含みません。元ファイルを含む backup は <code>pnpm backup export</code> で取り、
-          <code>pnpm backup check</code> で確認してください。2 回目からは新しい写真だけを取得します（docs/operations.md
-          §9）。
+          写真ごとのファイル名・撮影日時・お気に入り・アップロードした人と、アルバムの構成を、1
+          つのファイルに保存します。
         </p>
+        <p class="font-medium">写真そのものは含まれません。これだけではバックアップになりません。</p>
         <Button variant="secondary" onClick={downloadManifest}>
-          manifest をダウンロード
+          写真の情報をダウンロード
         </Button>
       </div>
     </section>

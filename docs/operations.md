@@ -371,7 +371,7 @@ time travel の期限を過ぎた、または D1 / R2 自体を失った場合�
 
 EdgePhotos が唯一のバックアップであるとは説明しません。
 
-- ライブラリ画面の「manifest をダウンロード」: asset metadata、album / album_assets、object manifest、期待 SHA-256。写真のファイルは含まない（`GET /api/v1/export/*` をページごとに取得して組み立てる）
+- ライブラリ画面の「写真の情報をダウンロード」: manifest（asset metadata、album / album_assets、object manifest、期待 SHA-256）。写真のファイルは含まない（`GET /api/v1/export/*` をページごとに取得して組み立てる）
 - `pnpm backup export <dir>`: manifest に加え、original と derivative を presigned URL 経由で取得し、各 original の SHA-256 を検証して保存する
 - `pnpm backup check <dir>`: backup ディレクトリだけを読み、manifest のすべての original の SHA-256 と derivative の有無を確かめる（network 不要）
 
@@ -487,18 +487,19 @@ Worker を削除しただけで R2 bucket を自動削除しません。
 - asset / trash / album 件数
 - 未完了 upload（`pending`）件数と、そのうち期限切れ（`expires_at` を過ぎた = 中断した）件数
 - 削除処理中（`purging`）件数と、その asset ID（ライブラリ画面の「削除を再開」で完了できる）
-- 最終 backup export 日時
-- 適用済み migration
+- 最終 backup export 日時（画面では「バックアップの完了日時」）
 
-### 「最終 backup export」の意味
+適用済み migration は画面に出しません。`pnpm diagnose` の `worker: D1 schema` で確認します。
+
+### 「バックアップの完了日時」（最終 backup export）の意味
 
 `pnpm backup export` が失敗なく `manifest.json` を書き終えた時刻です。CLI が最後に `POST /api/v1/backup/complete` を送って記録します（[D-033](decisions.md)）。
 
-取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の manifest ダウンロードと、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
+取得できなかった写真がある run（CLI が exit 1 で終わる run）は記録しません。ライブラリ画面の「写真の情報をダウンロード」と、`pnpm backup` の verify / restore も記録しません。どれも backup ではないためです。
 
 server は backup ディレクトリを見られないので、この日時は CLI が「終わった」と送った記録です。backup の中身が揃っていることは示しません。backup export は差分で、既にあるファイルは size だけを見て再利用します。揃っているかは `pnpm backup check` で確認してください。
 
-D-033 より前の版から更新した直後は「未実施」と表示されます。以前の記録（`last_export_at`）は verify などでも書かれていたため、読み継ぎません。
+D-033 より前の版から更新した直後は「記録なし」と表示されます。以前の記録（`last_export_at`）は verify などでも書かれていたため、読み継ぎません。
 
 Worker のエラーログは request ID・route・例外名だけを出し、header・token・URL・body を出しません。
 

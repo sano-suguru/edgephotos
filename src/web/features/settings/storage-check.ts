@@ -55,15 +55,15 @@ export type Finding = { kind: IssueKind; count: number; tone: 'damage' | 'action
 const TEXT: Record<IssueKind, { tone: Finding['tone']; text: string }> = {
   missing_original: {
     tone: 'damage',
-    text: '写真の元ファイルが保存先にありません。backup から復元してください（pnpm backup）。',
+    text: '写真の元ファイルが保存先にありません。バックアップからの復元が必要です。',
   },
   original_size_mismatch: {
     tone: 'damage',
-    text: '保存先の元ファイルが、アップロードされたものと違います。backup から復元してください。',
+    text: '保存先の元ファイルが、アップロードされたものと違います。バックアップからの復元が必要です。',
   },
   original_checksum_mismatch: {
     tone: 'damage',
-    text: '保存先の元ファイルが、アップロードされたものと違います。backup から復元してください。',
+    text: '保存先の元ファイルが、アップロードされたものと違います。バックアップからの復元が必要です。',
   },
   missing_derivative: {
     tone: 'action',
@@ -80,16 +80,16 @@ const TEXT: Record<IssueKind, { tone: Finding['tone']; text: string }> = {
   },
   unreferenced_objects: {
     tone: 'info',
-    text: 'どの写真にも結び付かないファイルです。データベースを過去に戻した場合などに残ります。自動では削除しません（docs/operations.md §12）。',
+    text: 'どの写真にも結び付かないファイルです。写真の記録を過去の状態に戻した場合などに残ります。自動では削除しません。',
   },
   unexpected_key: { tone: 'info', text: 'EdgePhotos 以外が書き込んだファイルです。触れません。' },
   audit_incomplete: {
     tone: 'damage',
-    text: '関係の無いファイルが大量にあり、最後まで確認できなかった写真です。問題なしとは判断していません（pnpm storage audit で詳細を確認できます）。',
+    text: '関係の無いファイルが大量にあり、最後まで確認できなかった写真です。問題なしとは判断していません。',
   },
   original_checksum_unrecorded: {
     tone: 'info',
-    text: '古い写真で、保存時の SHA-256 記録がありません。pnpm backup verify で照合できます。',
+    text: '古い写真のため、元ファイルが壊れていないかを確かめるための記録がありません。',
   },
 }
 
