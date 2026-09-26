@@ -11,11 +11,12 @@ const ROLE = /管理者|権限|admin/i
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const backupAt = '2026-09-20T03:04:05.000Z'
 
-async function stubDiagnostics(page: Page, counts: Record<string, number>, lastBackupAt: string | null = backupAt) {
+async function stubDiagnostics(page: Page, counts: Record<string, number>, purgingAssetIds: string[] = []) {
   await page.route('**/api/v1/diagnostics', async (route) => {
     const res = await route.fetch()
     const body = await res.json()
-    body.lastBackupAt = lastBackupAt
+    body.lastBackupAt = backupAt
+    body.purgingAssetIds = purgingAssetIds
     Object.assign(body.counts, counts)
     await route.fulfill({ response: res, json: body })
   })
@@ -47,7 +48,8 @@ const row = (page: Page, label: string) =>
     .filter({ has: page.locator('dt', { hasText: new RegExp(`^${label}$`) }) })
 
 test('管理 is quiet when nothing needs attention', async ({ page }) => {
-  await stubDiagnostics(page, { pendingUploads: 0, expiredUploads: 0, purging: 0 })
+  // An upload in progress (pending, not yet expired) is normal and says nothing.
+  await stubDiagnostics(page, { pendingUploads: 2, expiredUploads: 0, purging: 0 })
   await openApp(page)
   const nav = page.getByRole('navigation', { name: 'メイン' })
   // The tab is 管理. ライブラリ is no longer the name of a tab (it still means the photo library in text).
@@ -58,23 +60,29 @@ test('管理 is quiet when nothing needs attention', async ({ page }) => {
 
   await expect(row(page, '写真')).toHaveCount(1)
   await expect(row(page, 'アルバム')).toHaveCount(1)
-  // The trash count is on its link, not repeated as a row; the upload and delete rows are absent at 0.
+  // The trash count is on its link, not repeated as a row; nothing about uploads or deletes shows.
   await expect(main.getByRole('link', { name: /ゴミ箱/ })).toContainText(/\d+ 枚/)
-  for (const label of ['ゴミ箱', '未完了のアップロード', '削除処理中']) await expect(row(page, label)).toHaveCount(0)
+  for (const label of ['ゴミ箱', '未完了のアップロード', '中断したアップロード', '削除処理中']) {
+    await expect(row(page, label)).toHaveCount(0)
+  }
+  await expect(main.getByRole('heading', { name: '中断した完全削除' })).toHaveCount(0)
   await expect(main.getByRole('link', { name: 'メンテナンスを開く' })).toHaveCount(0)
 })
 
 test('管理 shows the everyday state, and the upkeep is one level down on メンテナンス', async ({ page }) => {
-  await stubDiagnostics(page, { pendingUploads: 2, expiredUploads: 1, purging: 1 })
+  await stubDiagnostics(page, { pendingUploads: 3, expiredUploads: 1, purging: 1 }, [id(9)])
   await stubAudit(page)
   await openApp(page, '/settings')
   const nav = page.getByRole('navigation', { name: 'メイン' })
   const main = page.getByRole('main')
   await expect(main.getByRole('heading', { level: 1, name: '管理' })).toBeVisible()
 
-  // Uploads and deletes that did not finish show once there are some.
-  await expect(row(page, '未完了のアップロード').locator('dd')).toContainText('1')
-  await expect(row(page, '削除処理中')).toHaveCount(1)
+  // Only what needs attention shows: the uploads that stopped (not the ones in progress), and a stopped delete
+  // once, in its own section rather than also as a row.
+  await expect(row(page, '中断したアップロード').locator('dd')).toHaveText('1')
+  await expect(row(page, '未完了のアップロード')).toHaveCount(0)
+  await expect(row(page, '削除処理中')).toHaveCount(0)
+  await expect(main.getByRole('heading', { name: '中断した完全削除' })).toBeVisible()
 
   // None of the upkeep is here.
   await expect(main).not.toContainText('バックアップ処理の完了日時')
@@ -102,7 +110,7 @@ test('管理 shows the everyday state, and the upkeep is one level down on メ�
     await expect(main).not.toContainText(promise)
   }
   // The counts stay on 管理, and the metadata download is gone (D-039).
-  await expect(main).not.toContainText('未完了のアップロード')
+  await expect(row(page, '中断したアップロード')).toHaveCount(0)
   await expect(main.getByRole('button', { name: /ダウンロード/ })).toHaveCount(0)
 
   await main.getByRole('button', { name: '点検する' }).click()
@@ -124,6 +132,8 @@ test('管理 shows the everyday state, and the upkeep is one level down on メ�
   // The plain link to メンテナンス is always there.
   await main.getByRole('link', { name: /普段は開く必要はありません/ }).click()
   await expect(page).toHaveURL(/\/settings\/maintenance$/)
+  // The page's diagnostics request finishes before the test does, so its route handler is not cut off.
+  await expect(row(page, 'バックアップ処理の完了日時')).toBeVisible()
 })
 
 test('メンテナンス opens from its address, with nothing asked beyond being a member', async ({ page }) => {
