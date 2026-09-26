@@ -48,15 +48,18 @@ test('管理 shows the everyday state, and the upkeep is one level down on メ�
   const main = page.getByRole('main')
   await expect(main.getByRole('heading', { level: 1, name: '管理' })).toBeVisible()
 
-  // The everyday state: the counts, the trash, and uploads that did not finish.
+  // The everyday state: the counts, the trash, and uploads that did not finish. The trash count is on its link
+  // only, not repeated as a row.
   const rows = main.locator('dl > div')
-  for (const label of ['写真', 'アルバム', 'ゴミ箱', '未完了のアップロード', '削除処理中']) {
+  for (const label of ['写真', 'アルバム', '未完了のアップロード', '削除処理中']) {
     await expect(rows.filter({ has: page.locator('dt', { hasText: new RegExp(`^${label}$`) }) })).toHaveCount(1)
   }
+  await expect(rows.filter({ has: page.locator('dt', { hasText: /^ゴミ箱$/ }) })).toHaveCount(0)
   await expect(rows.filter({ hasText: '未完了のアップロード' }).locator('dd')).toContainText('（うち期限切れ 1）')
-  await expect(main.getByRole('link', { name: /ゴミ箱/ })).toBeVisible()
-  // The expired-upload note points at where the tidy-up now is.
-  await expect(main).toContainText('「メンテナンス」の「保存状態の点検」から整理できます。')
+  await expect(main.getByRole('link', { name: /ゴミ箱/ })).toContainText(/\d+ 枚/)
+  // The expired-upload note takes the member to where the tidy-up is, instead of naming it.
+  await expect(main).toContainText('メンテナンスで保存状態を点検すると整理できます。')
+  await expect(main.getByRole('link', { name: 'メンテナンスを開く' })).toBeVisible()
 
   // None of the upkeep is here.
   await expect(main).not.toContainText('バックアップ処理の完了日時')
@@ -69,7 +72,7 @@ test('管理 shows the everyday state, and the upkeep is one level down on メ�
   expect(text).not.toMatch(JARGON)
   expect(text).not.toMatch(ROLE)
 
-  await main.getByRole('link', { name: /メンテナンス/ }).click()
+  await main.getByRole('link', { name: /普段は開く必要はありません/ }).click()
   await expect(page).toHaveURL(/\/settings\/maintenance$/)
   await expect(main.getByRole('heading', { level: 1, name: 'メンテナンス' })).toBeVisible()
   // One level below 管理, not a tab of its own.
@@ -102,7 +105,7 @@ test('管理 shows the everyday state, and the upkeep is one level down on メ�
 
   await expect(main.getByRole('heading', { name: '保存状態の点検' })).toBeVisible()
   await main.getByRole('button', { name: '点検する' }).click()
-  await expect(main).toContainText('「要対応」の項目は、EdgePhotos を設置した人に伝えてください。')
+  await expect(main).toContainText('「要対応」の項目は、EdgePhotos を用意した人に伝えてください。')
   // Damage is named in text, not only in red.
   await expect(main.getByRole('listitem').filter({ hasText: '写真の元ファイルが保存先にありません' })).toContainText(
     '要対応 1 件',
@@ -120,6 +123,12 @@ test('管理 shows the everyday state, and the upkeep is one level down on メ�
   // The way back is on desktop too, where メンテナンス has no entry in the header.
   await main.getByRole('link', { name: '← 管理' }).click()
   await expect(main.getByRole('heading', { level: 1, name: '管理' })).toBeVisible()
+
+  // The expired-upload note's link lands on メンテナンス, where the check that tidies them up is.
+  await main.getByRole('link', { name: 'メンテナンスを開く' }).click()
+  await expect(page).toHaveURL(/\/settings\/maintenance$/)
+  await expect(main.getByRole('heading', { name: '保存状態の点検' })).toBeVisible()
+  await expect(main).toContainText('中断したアップロードは、点検のあとに整理できます。')
 })
 
 test('メンテナンス opens from its address, with nothing asked beyond being a member', async ({ page }) => {

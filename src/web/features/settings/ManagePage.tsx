@@ -90,7 +90,6 @@ export function ManagePage() {
               [
                 ['写真', diag.value.counts.assets],
                 ['アルバム', diag.value.counts.albums],
-                ['ゴミ箱', diag.value.counts.trashed],
                 [
                   '未完了のアップロード',
                   `${diag.value.counts.pendingUploads}${diag.value.counts.expiredUploads > 0 ? `（うち期限切れ ${diag.value.counts.expiredUploads}）` : ''}`,
@@ -105,9 +104,23 @@ export function ManagePage() {
             ))}
           </dl>
           {diag.value.counts.expiredUploads > 0 && (
-            <p class="mt-3 text-sm text-muted-foreground">
-              期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。「メンテナンス」の「保存状態の点検」から整理できます。写真がタイムラインに無ければ、もう一度選んでアップロードしてもかまいません。
-            </p>
+            <div class="mt-3 space-y-2 text-sm">
+              <p class="text-muted-foreground">
+                期限切れのアップロードは中断したもので、写真としては登録されていません。自動では削除されません。メンテナンスで保存状態を点検すると整理できます。写真がタイムラインに無ければ、もう一度選んでアップロードしてもかまいません。
+              </p>
+              {/* The next step is known, so take the member there instead of asking them to find it. */}
+              <a
+                href="/settings/maintenance"
+                onClick={(e) => {
+                  e.preventDefault()
+                  navigate('/settings/maintenance')
+                  window.scrollTo(0, 0)
+                }}
+                class="inline-flex min-h-11 items-center font-medium text-accent hover:underline md:min-h-8"
+              >
+                メンテナンスを開く <span aria-hidden="true">→</span>
+              </a>
+            </div>
           )}
         </div>
       )}

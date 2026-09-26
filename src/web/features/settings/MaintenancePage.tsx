@@ -68,7 +68,7 @@ function StorageCheck() {
     <div class="mt-10 space-y-3 text-sm">
       <h2 class="text-heading">保存状態の点検</h2>
       <p class="text-muted-foreground">
-        写真の記録と、保存されている写真ファイルが食い違っていないか確かめます。点検は読み取りだけで、何も変更しません。
+        写真の記録と、保存されている写真ファイルが食い違っていないか確かめます。点検は読み取りだけで、何も変更しません。中断したアップロードは、点検のあとに整理できます。
       </p>
       <Button variant="secondary" disabled={running.value !== null} onClick={() => void audit()}>
         {running.value === 'audit' ? `点検中…（${progress.value} 枚）` : '点検する'}
@@ -98,7 +98,7 @@ function StorageCheck() {
             ))}
           </ul>
           {list.some((f) => f.tone === 'damage') && (
-            <p class="text-destructive">「要対応」の項目は、EdgePhotos を設置した人に伝えてください。</p>
+            <p class="text-destructive">「要対応」の項目は、EdgePhotos を用意した人に伝えてください。</p>
           )}
           {repairable > 0 && (
             <div class="space-y-2">

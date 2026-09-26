@@ -57,7 +57,7 @@ test('phone layout: navigation, viewer and share page fit and respond to taps', 
   // メンテナンス is one level below 管理 and has no tab; its long labels and dates still fit the width.
   await page
     .getByRole('main')
-    .getByRole('link', { name: /メンテナンス/ })
+    .getByRole('link', { name: /普段は開く必要はありません/ })
     .tap()
   await expect(page.getByRole('heading', { level: 1, name: 'メンテナンス' })).toBeVisible()
   await expect(nav.getByRole('link', { name: '管理' })).toHaveAttribute('aria-current', 'page')
