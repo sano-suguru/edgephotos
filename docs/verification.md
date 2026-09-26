@@ -868,7 +868,7 @@ OS の `prefers-color-scheme` に追従する dark を足した。chrome の tok
 
 コントラスト（oklch から sRGB に変換して計算）: dark で文字/地 15.8、補足の文字/地 7.3、補足の文字/`muted` 6.3、accent/地 7.8、`destructive`/地 6.7、塗りのボタンと選択の check と赤いボタンの文字 6.7〜15.8。hairline/地は 1.38（light は 1.25）。light の値は変えていない。
 
-確認方法: local の dev を Playwright（Chromium、1280px）で `colorScheme` を dark / light にして開き、timeline、選択中の tile と選択 bar、upload 状況、新規アルバムの dialog と input の focus、viewer の上の menu、Undo 付きの toast を撮って見た。dark では影が見えず、dialog と info toast が地に溶けたので、両方の縁に dark だけ hairline を出した。
+確認方法: local の dev を Playwright（Chromium、1280px）で `colorScheme` を dark / light にして開き、timeline、選択中の tile と選択 bar、upload 状況、新規アルバムの dialog と input の focus、viewer の上の menu、Undo 付きの toast を撮って見た。dark では既存の影だけでは dialog と info toast の境界が弱く、地に溶けて見えたので、両方の縁に dark だけ hairline を出した。
 
 `e2e/theme.spec.ts` は、両方の scheme で次を確かめる。
 
