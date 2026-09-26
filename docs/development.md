@@ -260,7 +260,7 @@ pnpm test:e2e
 
 `pnpm dev`（Access と presigned URL の模擬、[D-016](decisions.md)）を `.wrangler/e2e` の使い捨て local D1 / R2 で起動します（`EDGEPHOTOS_STATE_DIR`）。普段の `pnpm dev` の library には触れません。
 
-port 5173 を使うため、`pnpm dev` を止めてから実行します。写真は Browser の canvas で毎回ランダムに描くので、fixture を commit しません。
+port 5173 を使うため、`pnpm dev` を止めてから実行します。CI は chromium と mobile-webkit を別の runner で並列に実行し、それぞれが自分の dev server と library を持ちます。spec は `--project` で 1 つだけ実行しても通るように書きます（もう一方の project が作った写真や album を前提にしない）。写真は Browser の canvas で毎回ランダムに描くので、fixture を commit しません。
 
 すべての spec は `e2e/fixtures.ts` の `test` を使います。page と guest の context で CSP 違反を集め、1 件でもあれば失敗にします。`vite dev` は Vite が挿入する tag にだけ nonce を付け、production と同じ policy で動きます（[D-037](decisions.md)）。test 側の mock が画像を返すときは、`data:` URL ではなく同じ origin の URL を `page.route` で返します。
 
