@@ -80,6 +80,7 @@ async function main() {
     vars: config.vars,
     secretsRequired: config.secrets?.required ?? [],
     previewUrls: config.preview_urls,
+    previews: config.previews,
     bucketName: bucket,
     runWorkerFirst: config.assets?.run_worker_first,
     notFoundHandling: config.assets?.not_found_handling,

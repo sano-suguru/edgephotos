@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "deploy": "node scripts/diagnose.ts --offline && wrangler d1 migrations apply DB --remote && wrangler deploy",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.web.json && tsc -p tsconfig.node.json && tsc -p tsconfig.e2e.json",
     "lint": "biome check .",
@@ -55,5 +56,39 @@
   "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=22.18"
+  },
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "写真の metadata を置く D1 database。名前は自由です。migration は deploy のたびに自動で適用されます。"
+      },
+      "BUCKET": {
+        "description": "写真を置く private R2 bucket。名前を変えたら `R2_BUCKET_NAME` も同じ名前にします（違うと deploy が止まります）。public access は有効にしません。"
+      },
+      "R2_BUCKET_NAME": {
+        "description": "`BUCKET` と同じ bucket 名。"
+      },
+      "HOUSEHOLD_EMAILS": {
+        "description": "写真を見られる人の email を comma 区切りで（例: `you@example.com,partner@example.com`）。Access の Allow policy と同じ人にします。"
+      },
+      "APP_ORIGIN": {
+        "description": "`https://<Worker 名>.<account の subdomain>.workers.dev`（末尾の `/` なし）。Worker 名を変えたら合わせます。"
+      },
+      "ACCESS_TEAM_DOMAIN": {
+        "description": "`<team 名>.cloudflareaccess.com`（host だけ。`https://` は付けない）。[先に行う設定](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#4-cloudflare-access)"
+      },
+      "ACCESS_AUD": {
+        "description": "先に作った private の Access application（`/share` ではない方）の **Application Audience (AUD) Tag**。[先に行う設定](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#4-cloudflare-access)"
+      },
+      "R2_ACCOUNT_ID": {
+        "description": "この Cloudflare account の Account ID（32 桁の hex）。"
+      },
+      "R2_ACCESS_KEY_ID": {
+        "description": "`BUCKET` だけに Object Read & Write を持つ R2 API token の Access Key ID。[作り方](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#3-利用者が設定する値)"
+      },
+      "R2_SECRET_ACCESS_KEY": {
+        "description": "上と同じ R2 API token の Secret Access Key。"
+      }
+    }
   }
 }

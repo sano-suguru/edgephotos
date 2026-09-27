@@ -26,6 +26,7 @@ const goodConfig = {
   vars: { R2_BUCKET_NAME: 'photos' },
   secretsRequired: [...REQUIRED_SECRETS],
   previewUrls: false,
+  previews: undefined,
   bucketName: 'photos',
   runWorkerFirst: ['/*', '!/share/assets/*'],
   notFoundHandling: 'none',
@@ -47,11 +48,13 @@ describe('setup diagnostics', () => {
       vars: { HOUSEHOLD_EMAILS: '', R2_BUCKET_NAME: 'other' },
       secretsRequired: ['HOUSEHOLD_EMAILS'],
       previewUrls: undefined,
+      // Even an empty block lets Workers Builds run `wrangler preview` and publish a Preview hostname.
+      previews: {},
       bucketName: 'photos',
       runWorkerFirst: ['/api/*', '/share/*', '!/share/assets/*'],
       notFoundHandling: 'single-page-application',
     })
-    expect(bad.map((c) => c.status)).toEqual(['fail', 'fail', 'fail', 'fail', 'fail'])
+    expect(bad.map((c) => c.status)).toEqual(['fail', 'fail', 'fail', 'fail', 'fail', 'fail'])
     // Either half of the routing alone reopens a page without the CSP.
     const routing = (runWorkerFirst: string[], notFoundHandling: string) =>
       checkConfig({ ...goodConfig, runWorkerFirst, notFoundHandling }).find((c) => c.name === 'config: assets routing')
