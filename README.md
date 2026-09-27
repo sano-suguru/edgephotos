@@ -43,13 +43,19 @@ VPS や NAS を運用せずに、家族の写真を自分の Cloudflare アカ�
 
 リソースの作成、Access と R2 の設定、セットアップの確認までの手順は [運用・デプロイ・復元](docs/operations.md) にあります。
 
+### Deploy to Cloudflare で作る
+
+> [!IMPORTANT]
+> ボタンを押す前に、[Cloudflare Access](docs/operations.md#4-cloudflare-access) を設定してください。EdgePhotos は、private な画面と API の前に Access があることを前提にしています。Access が無いまま Worker を公開しないでください。
+
+Access の準備ができたら、次のボタンから始めます。
+
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/sano-suguru/edgephotos)
 
-Deploy to Cloudflare ボタンを使うと、D1 と R2 の作成、migration、build と deploy、secret の保存を Cloudflare が行います。ボタンだけでは使える状態になりません。次は手で行います。
+D1 と R2 の作成、migration、build と deploy、secret の保存は Cloudflare が行います。ボタンだけでは使える状態になりません。deploy の後に次を手で行います。
 
-- ボタンを押す前: Cloudflare Access の設定。private な画面と API の前に Access を置いてから Worker を公開するため
-- deploy の後: 作った bucket だけを対象にした R2 API token の作成と、R2 CORS の設定。bucket は deploy で初めてできるため
-- 最後に: `pnpm diagnose` と、写真 1 枚の upload による確認
+- 作った bucket だけを対象にした R2 API token の作成と、R2 CORS の設定。bucket は deploy で初めてできるため
+- `pnpm diagnose` と、写真 1 枚の upload による確認
 
 手順と、ボタンが作る build 経路の扱いは [Deploy to Cloudflare で作る](docs/operations.md#deploy-to-cloudflare-で作る) にあります。
 
