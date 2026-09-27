@@ -57,7 +57,7 @@ Deploy to Cloudflare で作ると、Worker と同じ account に 2 つの経路�
 
 EdgePhotos の Worker には、この token を渡しません。どちらも、Cloudflare account の管理者と同じ程度に守る対象です。
 
-この 2 つを残したくない場合は、setup が済んだあとで Git の接続を切り、build token を削除します（[Deploy to Cloudflare で作る](operations.md#deploy-to-cloudflare-で作る)）。以後は CLI で更新し、Worker の設定と security の境界は CLI で作った場合と同じになります。
+この 2 つを残したくない場合は、setup が済んだあとで Git の接続を切り、「マイプロフィール」>「API トークン」から build token を削除します。Workers Builds の設定から token を外すだけでは、user API token は有効なまま残ります（[Deploy to Cloudflare で作る](operations.md#deploy-to-cloudflare-で作る)）。以後は CLI で更新し、Worker の設定と security の境界は CLI で作った場合と同じになります。
 
 ### 大量の request
 

@@ -1190,7 +1190,7 @@ Workers Builds の preview build は、既定で `wrangler preview` を実行す
 
 受け入れる trade-off:
 
-- ボタンは Workers Builds の build token を user token として作る。期限はなく、D1・R2・Workers Scripts を含む account 全体の権限を持つ。EdgePhotos の Worker には渡らないが、account には残る。setup の後で Git の接続を切って token を削除すれば、CLI で作った場合と同じ状態に戻せる（[Deploy to Cloudflare の build 経路](security.md#deploy-to-cloudflare-の-build-経路)）
+- ボタンは Workers Builds の build token を user token として作る。期限はなく、D1・R2・Workers Scripts を含む account 全体の権限を持つ。EdgePhotos の Worker には渡らないが、account には残る。setup の後で Git の接続を切り、user API token を削除すれば、CLI で作った場合と同じ状態に戻せる。Workers Builds 側で token を外すだけでは user API token は残る（[Deploy to Cloudflare の build 経路](security.md#deploy-to-cloudflare-の-build-経路)）
 - 複製した repo の main への push が deploy になる。repo は private で作るよう手順に書く
 - この経路の migration は、operations の更新手順にある「bookmark を控える」を通らない。戻すときは time travel に時刻を渡す
 - `pnpm diagnose` の実行には、手元の Node.js と `wrangler login` が要る

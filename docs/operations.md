@@ -84,7 +84,7 @@ README の Deploy to Cloudflare ボタンから始めると、Cloudflare が次�
    - D1 と R2 は「新規作成」にする。同じ名前の D1 / R2 が account にあると、画面はそれを既定で選ぶ。別の環境のデータに bind しないよう、必ず確かめる
    - R2 の名前を変えたら、`R2_BUCKET_NAME` も同じ名前にする。違うと `pnpm run deploy` の最初の検査で止まる
    - 7 つの secret を入れる。`R2_ACCESS_KEY_ID` と `R2_SECRET_ACCESS_KEY` は、この時点では仮の値（例: `set-after-deploy`）にする
-   - 「プレビュービルドを有効化」を外す（[preview URL を無効にする](#preview-url-を無効にする)）
+   - 「プレビュービルドを有効化」を外す（[preview URL を無効にする](#preview-url-を無効にする)）。作ったあとでも、Worker の「設定」>「ビルド」の「Previews Base」で「Worker プレビュー用ビルド」を無効にできる
    - 「Protect with Cloudflare Access」は有効にしない。Worker 全体が Access の対象になり、`/share` を公開できない
 3. build が成功したら、R2 の「API トークンの管理」で Account API token を作る。権限は Object Read & Write、対象は作った bucket だけにする。Worker の「設定」>「変数とシークレット」で、2 つの R2 secret をこの token の値で上書きする
 4. R2 bucket の「設定」>「CORS ポリシー」に次を貼る。dashboard の形式で、wrangler の `--file` とは違う
@@ -102,11 +102,13 @@ README の Deploy to Cloudflare ボタンから始めると、Cloudflare が次�
 
 5. [セットアップの確認](#7-セットアップの確認) を行う。`pnpm diagnose` は、複製した repo を手元に clone して実行する。その `wrangler.jsonc` が、作った Worker・D1・R2 の名前を持っているため
 
+build log に出る `Missing required secrets ... Add them to .dev.vars, .env` の WARNING は、build の環境に secret が無いという意味で、deploy には影響しません。secret を repo や build の変数に置かないでください。
+
 `pnpm diagnose` は R2 secret が仮の値のままでも検出できません。library が空の間、`r2: presigned GET` は SKIP になるためです。写真を 1 枚 upload して確かめます。
 
 複製した repo の main へ push すると、そのたびに Workers Builds が migration と deploy を行います。この repository の更新を取り込むには、複製した repo にこの repository を remote として足し、merge して push します。この経路では [更新](#8-更新release-と-migration) の「bookmark を控える」が行われません。migration を戻すときは、`wrangler d1 time-travel restore` に push の直前の時刻を `--timestamp` で渡します。
 
-Workers Builds を使い続けない場合は、Worker の「設定」>「ビルド」で Git の接続を切り、Deploy が作った build token を削除します。以後の更新は CLI で行います。残すかどうかの判断材料は [Deploy to Cloudflare の build 経路](security.md#deploy-to-cloudflare-の-build-経路) にあります。
+Workers Builds を使い続けない場合は、Worker の「設定」>「ビルド」で Git の接続を切ります。build token は、Workers Builds 側で削除しても user API token として残ります。「マイプロフィール」>「API トークン」の `<プロジェクト名> build token` を削除してください。以後の更新は CLI で行います。残すかどうかの判断材料は [Deploy to Cloudflare の build 経路](security.md#deploy-to-cloudflare-の-build-経路) にあります。
 
 ## 3. 利用者が設定する値
 
@@ -257,7 +259,7 @@ Worker の preview URL は無効にします（`wrangler.jsonc` の `"preview_ur
 
 有効だと `<version>-<worker>.<subdomain>.workers.dev` という別 hostname ができ、hostname 単位の Access application の対象外になります。その場合 private API を守るのは Worker 自身の JWT 検証だけになり、「private path は必ず Access が前段にいる」と言えなくなります。
 
-Workers Builds の preview build（main 以外の branch への push）が作る Worker Previews も、同じ理由で使いません。Preview は `<branch>-<worker>.<subdomain>.workers.dev` という別 hostname で、既定で公開されます。`wrangler.jsonc` に `previews` block を置かないため、preview build の `wrangler preview` は Preview を作らずに失敗します。`pnpm diagnose` の `config: previews` が、この block が無いことを確かめます。Deploy to Cloudflare で作った場合は、失敗する build を出さないよう、Worker の「設定」>「ビルド」で preview build を無効にします。
+Workers Builds の preview build（main 以外の branch への push）が作る Worker Previews も、同じ理由で使いません。Preview は `<branch>-<worker>.<subdomain>.workers.dev` という別 hostname で、既定で公開されます。`wrangler.jsonc` に `previews` block を置かないため、preview build の `wrangler preview` は Preview を作らずに失敗します。`pnpm diagnose` の `config: previews` が、この block が無いことを確かめます。Deploy to Cloudflare で作った場合は、失敗する build を出さないよう、Worker の「設定」>「ビルド」の「Previews Base」で preview build を無効にします。
 
 Bypass policy は identity selector を使えず、request log も残りません。`/share/*` の監査は EdgePhotos 側でのみ取得できます。
 
@@ -527,6 +529,12 @@ album の作成の応答が失われた場合は、記録に無い album の名�
 ```
 
 Worker を削除しただけで R2 bucket を自動削除しません。
+
+Deploy to Cloudflare で作った場合は、4 と一緒に次も片付けます。
+
+- Worker の「設定」>「ビルド」で Git の接続を切り、「マイプロフィール」>「API トークン」の build token を削除する
+- 複製した Git repo を削除する。GitHub App（Cloudflare Workers and Pages）をほかで使っていなければ、その install も外す
+- deploy の後に作った R2 の Account API token を削除する
 
 ## 12. 監視と点検
 

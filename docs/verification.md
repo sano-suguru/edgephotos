@@ -949,9 +949,18 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 - 利用者が OTP で login した Browser で、写真を 1 枚 upload した。timeline の 2026年9月に表示され、console に CSP の違反は無かった。D1 は asset が `ready`、upload が `finalized`。R2 には original（38,662 byte、元のファイルと同じ）と `derivatives/v1` の thumbnail・preview があった
 - upload 後の `pnpm diagnose` は `r2: presigned GET` を含めて 20 項目すべて PASS
 
+### 更新と、build 経路を外す操作
+
+- 複製した repo の main に空の commit を push すると、2 回目の build が走り、`pnpm diagnose --offline` → `No migrations to apply!` → `wrangler deploy` の順で成功した。secret は 7 つのまま
+- Worker の「設定」>「ビルド」の「Previews Base」に「Worker プレビュー用ビルド」のトグルがあり、`Preview URLs are disabled`（`preview_urls: false` によるもの）と表示されていた。トグルを外すと preview の記録が消え、その後 `preview-check` へ push しても build は起きなかった
+- 同じ画面で Git の接続を切り、API で Workers Builds の build token を削除した。build token の一覧は空になったが、「マイプロフィール」>「API トークン」の `edgephotos-deploy-test build token` は「有効」のまま残った。削除は user API token の画面で別に行う必要がある
+- 接続を切ったあと、CLI の `wrangler deploy` が通り、`pnpm diagnose` は全 PASS
+
 ### CLI の更新手順
 
 同じ環境に、operations の [更新](operations.md#8-更新release-と-migration) の手順を CLI で行った。`pnpm build`、`wrangler d1 migrations apply`（`No migrations to apply!`）、`wrangler deploy --config dist/edgephotos_deploy_test/wrangler.json`（`--secrets-file` なし）が通り、secret は 7 つ残り、`pnpm diagnose` は全 PASS。この repository では `pnpm check` が通り、`pnpm diagnose --offline`（top-level と `--env remote-test`）も PASS した。
+
+確認後に R2 の object と bucket、D1、Worker、2 つの Access application を API で削除した。production と `remote-test` の資源は残っている。backup と restore を含むアンインストールの手順全体は、ここでは行っていない。
 
 ## 未検証
 
