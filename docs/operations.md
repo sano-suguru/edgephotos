@@ -18,7 +18,7 @@ EdgePhotos v1 のセットアップ、更新、backup / restore、アンイン�
 
 Worker の hostname（`APP_ORIGIN`）は deploy 前から決まっています。workers.dev なら `https://<worker 名>.<account の subdomain>.workers.dev` です。subdomain は Dashboard の Workers & Pages に表示されます。
 
-Deploy to Cloudflare ボタンは Release polish の範囲です（[roadmap.md](roadmap.md)）。
+最初の作成は、Deploy to Cloudflare ボタンと CLI のどちらでも行えます。ボタンは 1 と 4 の deploy を Cloudflare 側で行います。2、3、4 の CORS は、どちらの経路でも手で行います（[Deploy to Cloudflare で作る](#deploy-to-cloudflare-で作る)）。セットアップの確認、backup、restore は、どちらで作っても CLI で行います。
 
 Cloudflare の plan は、試用・評価なら Workers Free、継続して使うなら Workers Paid（月 $5 から）を推奨します。
 
@@ -58,6 +58,55 @@ R2 bucket は public access（r2.dev / custom domain）を有効にしません�
 初回の deploy は、deploy の成功で終わりにしません。[セットアップの確認](#7-セットアップの確認) の `pnpm diagnose` と、Browser での写真 1 枚の upload までを一続きの作業として行います。
 
 migration は forward-only です。通常の test command から remote migration は実行しません。適用は `wrangler d1 migrations apply` だけで行い、`drizzle-kit push` / `migrate` は使いません。`migrations/meta/` は drizzle-kit 用の snapshot で、wrangler は `.sql` だけを適用します。
+
+### Deploy to Cloudflare で作る
+
+README の Deploy to Cloudflare ボタンから始めると、Cloudflare が次を行います。
+
+- この repository を複製した repo を、利用者の GitHub（または GitLab）に作る
+- D1 database と R2 bucket を作り、Worker に bind する。複製した repo の `wrangler.jsonc` には、作った名前と `database_id` が書き込まれる
+- 画面で入力した 7 つの値を、Worker secret として保存する
+- Workers Builds で `pnpm run build` と `pnpm run deploy` を実行する。`deploy` は `pnpm diagnose --offline`、`wrangler d1 migrations apply DB --remote`、`wrangler deploy` の順に動き、設定の誤りがあれば migration の前に止まる
+
+次は自動化されないため、手で行います。
+
+| 作業 | 時期 | 手で行う理由 |
+| --- | --- | --- |
+| [Cloudflare Access](#4-cloudflare-access) の 2 つの application と login 方法 | ボタンを押す前 | Deploy の仕組みは Access application を作れない。Worker が公開される前に、private path の前段に Access を置いておく |
+| bucket だけを対象にした R2 API token | deploy の後 | bucket は deploy で初めて作られる。bucket を限定した token は、bucket が無いと作れない |
+| [R2 CORS](#6-r2-cors) | deploy の後 | Deploy の仕組みは CORS を設定しない |
+
+手順:
+
+1. [Cloudflare Access](#4-cloudflare-access) を設定する。hostname は `<プロジェクト名>.<account の subdomain>.workers.dev` で、プロジェクト名は次の画面で決める値（既定は `edgephotos`）
+2. Deploy ボタンを押し、画面で次を選ぶ
+   - 「プライベート Git リポジトリを作成する」を選ぶ
+   - D1 と R2 は「新規作成」にする。同じ名前の D1 / R2 が account にあると、画面はそれを既定で選ぶ。別の環境のデータに bind しないよう、必ず確かめる
+   - R2 の名前を変えたら、`R2_BUCKET_NAME` も同じ名前にする。違うと `pnpm run deploy` の最初の検査で止まる
+   - 7 つの secret を入れる。`R2_ACCESS_KEY_ID` と `R2_SECRET_ACCESS_KEY` は、この時点では仮の値（例: `set-after-deploy`）にする
+   - 「プレビュービルドを有効化」を外す（[preview URL を無効にする](#preview-url-を無効にする)）
+   - 「Protect with Cloudflare Access」は有効にしない。Worker 全体が Access の対象になり、`/share` を公開できない
+3. build が成功したら、R2 の「API トークンの管理」で Account API token を作る。権限は Object Read & Write、対象は作った bucket だけにする。Worker の「設定」>「変数とシークレット」で、2 つの R2 secret をこの token の値で上書きする
+4. R2 bucket の「設定」>「CORS ポリシー」に次を貼る。dashboard の形式で、wrangler の `--file` とは違う
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://edgephotos.example.workers.dev"],
+    "AllowedMethods": ["GET", "PUT"],
+    "AllowedHeaders": ["content-type", "if-none-match", "if-match", "x-amz-checksum-sha256"],
+    "MaxAgeSeconds": 600
+  }
+]
+```
+
+5. [セットアップの確認](#7-セットアップの確認) を行う。`pnpm diagnose` は、複製した repo を手元に clone して実行する。その `wrangler.jsonc` が、作った Worker・D1・R2 の名前を持っているため
+
+`pnpm diagnose` は R2 secret が仮の値のままでも検出できません。library が空の間、`r2: presigned GET` は SKIP になるためです。写真を 1 枚 upload して確かめます。
+
+複製した repo の main へ push すると、そのたびに Workers Builds が migration と deploy を行います。この repository の更新を取り込むには、複製した repo にこの repository を remote として足し、merge して push します。この経路では [更新](#8-更新release-と-migration) の「bookmark を控える」が行われません。migration を戻すときは、`wrangler d1 time-travel restore` に push の直前の時刻を `--timestamp` で渡します。
+
+Workers Builds を使い続けない場合は、Worker の「設定」>「ビルド」で Git の接続を切り、Deploy が作った build token を削除します。以後の更新は CLI で行います。残すかどうかの判断材料は [Deploy to Cloudflare の build 経路](security.md#deploy-to-cloudflare-の-build-経路) にあります。
 
 ## 3. 利用者が設定する値
 
@@ -208,6 +257,8 @@ Worker の preview URL は無効にします（`wrangler.jsonc` の `"preview_ur
 
 有効だと `<version>-<worker>.<subdomain>.workers.dev` という別 hostname ができ、hostname 単位の Access application の対象外になります。その場合 private API を守るのは Worker 自身の JWT 検証だけになり、「private path は必ず Access が前段にいる」と言えなくなります。
 
+Workers Builds の preview build（main 以外の branch への push）が作る Worker Previews も、同じ理由で使いません。Preview は `<branch>-<worker>.<subdomain>.workers.dev` という別 hostname で、既定で公開されます。`wrangler.jsonc` に `previews` block を置かないため、preview build の `wrangler preview` は Preview を作らずに失敗します。`pnpm diagnose` の `config: previews` が、この block が無いことを確かめます。Deploy to Cloudflare で作った場合は、失敗する build を出さないよう、Worker の「設定」>「ビルド」で preview build を無効にします。
+
 Bypass policy は identity selector を使えず、request log も残りません。`/share/*` の監査は EdgePhotos 側でのみ取得できます。
 
 Access application と identity provider は API でも作成できます。必要な token 権限（account scope）は、application が `Access: Apps and Policies Edit`、identity provider が `Access: Organizations, Identity Providers, and Groups Write` です。作業後は token を revoke します。
@@ -274,7 +325,7 @@ production は `--env` を付けません。確認する内容と、失敗時に
 
 | check | 失敗時に疑うもの |
 | --- | --- |
-| `config: *` | `secrets.required` の不足、secret 名の `vars` 宣言、`R2_BUCKET_NAME` と `BUCKET` binding の不一致、`preview_urls`、`assets` の `run_worker_first` / `not_found_handling`（[D-037](decisions.md)） |
+| `config: *` | `secrets.required` の不足、secret 名の `vars` 宣言、`R2_BUCKET_NAME` と `BUCKET` binding の不一致、`preview_urls`、`previews` block の追加、`assets` の `run_worker_first` / `not_found_handling`（[D-037](decisions.md)） |
 | `worker: secrets` | `wrangler secret put` の漏れ（名前だけ確認。値の形式は下の probe で分かる） |
 | `d1: migrations` | `wrangler d1 migrations apply --remote` の実行漏れ |
 | `r2: r2.dev URL` / `custom domains` | bucket の公開設定（どちらも無効が正） |

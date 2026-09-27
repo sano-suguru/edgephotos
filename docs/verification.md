@@ -10,8 +10,8 @@
 
 ## 現在の状況
 
-- 最終確認: 2026-09-25
-- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login。[家族の写真を入れる前の確認](#家族の写真を入れる前の-production-確認2026-09-25): update の実走、edge の経路、desktop の Browser での CSP、Workers Logs、backup と restore drill。derivative の作り直しは remote-test で往復）
+- 最終確認: 2026-09-27
+- 確認済みの環境: local（Miniflare / `vite dev` / `vite preview`）、`remote-test`、production（[初回 bring-up](#production-の作成と初回-deploy2026-09-24): 作成・deploy・diagnose・1 人目の member の upload、login 方法の One-time PIN への変更と 2 人の login。[家族の写真を入れる前の確認](#家族の写真を入れる前の-production-確認2026-09-25): update の実走、edge の経路、desktop の Browser での CSP、Workers Logs、backup と restore drill。derivative の作り直しは remote-test で往復）、Deploy to Cloudflare で作った使い捨ての環境（[E2E](#deploy-to-cloudflare-の-e2e2026-09-27)）
 - 未確認: iPhone / Android 実機での取り込み、private app の CSP の実機での確認、2 人の household での日常の操作（[未検証](#未検証)）。Access の independent MFA は production で有効にしていない（[D-038](decisions.md)）
 
 各項目に日付がある場合は、その日付が優先します。
@@ -912,6 +912,46 @@ local の dev を Playwright の Chromium（1280px）と iPhone 13 の WebKit �
 local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「バックアップ処理の完了日時」に日時を入れた状態で、点検を実行して撮って見た。日時は ISO 文字列ではなく端末の locale で表示される。
 
 `e2e/library.spec.ts` は、diagnostics と storage audit を差し替えて条件付きの文言をすべて出し、主要なラベルと説明文があること、画面に `pnpm`・`manifest`・`SHA-256`・`D1`・`R2`・`migration`・`backup`・`docs/` が無いことを確かめる。`tests/unit/storage-check.test.ts` は、点検のすべての分類の説明文に同じ語が無いことを確かめる。
+
+## Deploy to Cloudflare の E2E（2026-09-27）
+
+[Deploy to Cloudflare で作る](operations.md#deploy-to-cloudflare-で作る) の手順を、使い捨ての環境 `edgephotos-deploy-test` で最初から通した。ボタンの URL は branch `deploy-to-cloudflare`（`?url=.../tree/deploy-to-cloudflare`）。wrangler 4.136.2。Workers Builds は Node.js 24.18.0、pnpm 11.22.0（`packageManager` から検出）。写真は合成のグラデーション JPEG 1 枚。
+
+### ボタンの画面
+
+- `.dev.vars.example` の 7 つの名前が secret（password 欄）、`R2_BUCKET_NAME` が変数として並び、`package.json` の `cloudflare.bindings` の説明が表示された。説明の中の `<...>` は消えて表示されたため、山括弧を使わない書き方に直した
+- build command は `pnpm run build`、deploy command は `pnpm run deploy` が既定で入った（pnpm 組み込みの `pnpm deploy` ではない）。preview command は `npx wrangler preview` で、「プレビュービルドを有効化」は既定で有効
+- account に `edgephotos` という D1 と R2（production）があったため、画面は既定でそれを選んでいた。「新規作成」に変えて `edgephotos-deploy-test` とした
+- 「プライベート Git リポジトリを作成する」を選んだ。GitHub の接続には、利用者が GitHub に login して Cloudflare Workers and Pages の GitHub App を install する操作が要った
+- Access application（private と `/share`）は、ボタンを押す前に API で作った。R2 の 2 つの secret には仮の値を入れた
+
+### 作られたもの
+
+- D1、R2 bucket、7 つの secret を持つ Worker は、build の開始より前に作られていた。R2 の public access は r2.dev・custom domain ともに無効
+- 複製された repo は private。元の repo との差は `wrangler.jsonc`（Worker 名、D1 の名前と `database_id`、R2 の名前と `preview_bucket_name`、`R2_BUCKET_NAME`）と `package.json` の `name` だけで、コメントと `env.remote-test` はそのまま残った。`.github/workflows/ci.yml` は複製されなかった
+- 入力した値（email、account ID、AUD、team domain、仮の値）は、複製された repo の全 file と全履歴、build log（225 行）のどちらにも無かった
+- build log の順序: install → `pnpm run build` → `pnpm diagnose --offline`（全 PASS）→ migration `0001`〜`0004` の適用 → `wrangler deploy`。bind されたのは D1、R2、ASSETS と変数 `R2_BUCKET_NAME` だけ
+- deploy 後も `wrangler secret list` に 7 つが `secret_text` で残った。Worker の subdomain は `enabled: true`、`previews_enabled: false`
+- build token は user token として作られ、期限なし。権限は account の 20 種（D1、Workers R2 Storage、Workers Scripts、Workers KV Storage、Secrets Store、Queues など）、user の 2 種、全 zone の 3 種
+
+### preview build
+
+- 複製された repo では、作成の直後に Dependabot が 2 つの branch を作った。確認用に `preview-check` branch も push した
+- 3 つの preview build はどれも、`wrangler preview` が `previews` block の無い設定を拒否して失敗した（`Your Wrangler configuration is missing a previews block`）
+- `preview-check-edgephotos-deploy-test...workers.dev` と `<version>-edgephotos-deploy-test...workers.dev` は `404`
+
+### deploy の後の手作業と確認
+
+- 利用者が R2 の「API トークンの管理」で、対象を `edgephotos-deploy-test` だけにした Object Read & Write の Account API token を作り、Worker の「変数とシークレット」で 2 つの R2 secret を上書きした。値は Claude を経由していない
+- R2 CORS は dashboard の「CORS ポリシー」に PascalCase の JSON を貼って保存し、`wrangler r2 bucket cors list` で読み戻した
+- 認証なしの `curl`: `/` と `/api/v1/assets` は Access login へ `302`、`/share` 配下は Access を通らず Worker が応答した
+- 複製した repo を clone した `pnpm diagnose`（`EDGEPHOTOS_URL` と Access token 付き）は、`r2: presigned GET` の SKIP（library が空）以外すべて PASS
+- 利用者が OTP で login した Browser で、写真を 1 枚 upload した。timeline の 2026年9月に表示され、console に CSP の違反は無かった。D1 は asset が `ready`、upload が `finalized`。R2 には original（38,662 byte、元のファイルと同じ）と `derivatives/v1` の thumbnail・preview があった
+- upload 後の `pnpm diagnose` は `r2: presigned GET` を含めて 20 項目すべて PASS
+
+### CLI の更新手順
+
+同じ環境に、operations の [更新](operations.md#8-更新release-と-migration) の手順を CLI で行った。`pnpm build`、`wrangler d1 migrations apply`（`No migrations to apply!`）、`wrangler deploy --config dist/edgephotos_deploy_test/wrangler.json`（`--secrets-file` なし）が通り、secret は 7 つ残り、`pnpm diagnose` は全 PASS。この repository では `pnpm check` が通り、`pnpm diagnose --offline`（top-level と `--env remote-test`）も PASS した。
 
 ## 未検証
 

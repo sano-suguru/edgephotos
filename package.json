@@ -72,10 +72,10 @@
         "description": "写真を見られる人の email を comma 区切りで（例: `you@example.com,partner@example.com`）。Access の Allow policy と同じ人にします。"
       },
       "APP_ORIGIN": {
-        "description": "`https://<Worker 名>.<account の subdomain>.workers.dev`（末尾の `/` なし）。Worker 名を変えたら合わせます。"
+        "description": "Worker の URL（例: `https://edgephotos.example.workers.dev`。`edgephotos` はプロジェクト名、`example` は account の workers.dev subdomain）。末尾の `/` は付けません。"
       },
       "ACCESS_TEAM_DOMAIN": {
-        "description": "`<team 名>.cloudflareaccess.com`（host だけ。`https://` は付けない）。[先に行う設定](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#4-cloudflare-access)"
+        "description": "Zero Trust の team domain（例: `example.cloudflareaccess.com`）。host だけで、`https://` は付けません。[先に行う設定](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#4-cloudflare-access)"
       },
       "ACCESS_AUD": {
         "description": "先に作った private の Access application（`/share` ではない方）の **Application Audience (AUD) Tag**。[先に行う設定](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#4-cloudflare-access)"
@@ -84,10 +84,10 @@
         "description": "この Cloudflare account の Account ID（32 桁の hex）。"
       },
       "R2_ACCESS_KEY_ID": {
-        "description": "`BUCKET` だけに Object Read & Write を持つ R2 API token の Access Key ID。[作り方](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#3-利用者が設定する値)"
+        "description": "bucket はこの deploy で作られるので、ここでは仮の値（例: `set-after-deploy`）を入れます。deploy 後に、`BUCKET` だけに Object Read & Write を持つ R2 API token を作り、その Access Key ID で上書きします。[手順](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#deploy-to-cloudflare-で作る)"
       },
       "R2_SECRET_ACCESS_KEY": {
-        "description": "上と同じ R2 API token の Secret Access Key。"
+        "description": "上と同じく、ここでは仮の値を入れ、deploy 後に同じ R2 API token の Secret Access Key で上書きします。"
       }
     }
   }

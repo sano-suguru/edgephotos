@@ -6,6 +6,12 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## Deploy to Cloudflare（2026-09-27）
+
+README に Deploy to Cloudflare ボタンを置きました（[D-041](decisions.md)）。D1 と R2 の作成、migration、build と deploy、secret の保存を Cloudflare が行います。Access、bucket を限定した R2 API token、R2 CORS は、これまでどおり手で行います（[Deploy to Cloudflare で作る](operations.md#deploy-to-cloudflare-で作る)）。
+
+`package.json` に `deploy` script が加わりました。`pnpm run deploy` は `pnpm diagnose --offline`、D1 migration、`wrangler deploy` の順に動きます。CLI の手順は変わりません。`pnpm diagnose` は、`wrangler.jsonc` に `previews` block があると `config: previews` を FAIL にします。
+
 ## 「管理」と「メンテナンス」の分離（2026-09-26）
 
 下部ナビの「ライブラリ」タブを「管理」にし、保守の機能を「管理」から開く「メンテナンス」画面（`/settings/maintenance`）へ移しました（[D-039](decisions.md)）。「管理」には件数・ゴミ箱・「削除を再開」が残ります。アップロードは、期限を過ぎても終わらなかったものだけを「中断したアップロード」として出し、進行中のものは出しません。「メンテナンス」には、バックアップ処理の完了日時と保存状態の点検（旧「ストレージの点検」、作り直しと整理を含む）があります。どちらも member 全員が使えます。
