@@ -351,7 +351,7 @@ Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠�
 
 - 写真を 1 枚 upload して timeline に表示される（`pnpm diagnose` は PUT を実行しないため、upload の成立はここで確かめる）
 - 共有リンクを作成し、private window で表示でき、revoke 後は表示できない
-- 上の 2 つの間、開発者ツールの console に `Content Security Policy` の違反が出ない（[verification.md](verification.md#private-app-の-csp-を-production-で確かめる)）
+- 上の 2 つの間、開発者ツールの console に `Content Security Policy` の違反が出ない（[verification.md](verification.md#csp-の確認手順)）
 - 家族の写真を入れる前に、Workers Logs に credential が生で残っていないことを確かめる（[確認手順](verification.md#確認手順再実行用)）
 
 `pnpm diagnose` では見えない Access の設定は、Cloudflare dashboard と Browser で確認します。production の初回 deploy と、member を増減したあとに行います。
