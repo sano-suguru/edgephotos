@@ -12,29 +12,47 @@
 
 2026-09-27 時点。
 
-production の主要な経路、backup と restore、desktop の Browser での操作は確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、migration を含む更新、uninstall です。
+production では、upload から share の revoke までの操作、backup と restore、desktop の Browser での表示を確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、migration を含む更新、uninstall です。
 
-状態は「確認済み」「一部確認」「未確認」「対象外」のどれかです。
+状態は「確認済み」「一部確認」「未確認」「未使用」のどれかです。「未使用」は、今の構成で有効にしていない機能です。
 
-| 対象 | 状態 | 確認日 | 備考 |
+環境:
+
+| 対象 | 状態 | 確認 | 備考 |
 | --- | --- | --- | --- |
-| [local](#local) | 確認済み | CI で毎回 | workerd の test と `vite dev` の Browser E2E |
-| [主要な外部境界](#remote-test2026-09-1617) | 確認済み | 2026-09-16〜17 | remote-test。Access、R2 の CORS と checksum、presigned URL |
-| [production の作成と初回 deploy](#production-の作成と初回-deploy2026-09-24) | 確認済み | 2026-09-24 | — |
-| [更新（migration なし）](#deploy-と-diagnose) | 確認済み | 2026-09-25 | production |
-| 更新（migration あり） | 未確認 | — | [roadmap.md](roadmap.md) |
-| [upload から share の revoke まで](#browser-での-csp) | 確認済み | 2026-09-25 | production の desktop（Chromium・WebKit） |
-| [private app の CSP](#private-app-の-csp2026-09-25) | 一部確認 | 2026-09-25 | desktop のみ |
-| [Workers Logs に credential が生で残らない](#workers-logs) | 確認済み | 2026-09-25 | production |
-| [backup と restore](#restore-drilledgephotos-restore-test) | 確認済み | 2026-09-25 | production の backup を空の環境へ restore |
-| [derivative の作り直し](#derivative-の作り直しremote-test) | 一部確認 | 2026-09-25 | remote-test のみ |
-| [Access の login（One-time PIN）](#login-方法を-one-time-pin-にする2026-09-24) | 確認済み | 2026-09-24〜25 | 2 人目の login は利用者の報告 |
-| [Access の independent MFA](#access-の-independent-mfa) | 対象外 | — | 有効にしていない（[D-038](decisions.md)） |
+| [local の自動テスト](#local) | 確認済み | CI で毎回 | — |
+| [Access と R2 の境界](#remote-test2026-09-1617) | 確認済み | 2026-09-16〜17 | remote-test |
+
+運用:
+
+| 対象 | 状態 | 確認 | 備考 |
+| --- | --- | --- | --- |
+| [初回 deploy](#production-の作成と初回-deploy2026-09-24) | 確認済み | 2026-09-24 | — |
+| [更新（migration なし）](#deploy-と-diagnose) | 確認済み | 2026-09-25 | — |
+| 更新（migration あり） | 未確認 | — | — |
+| [backup と restore](#restore-drilledgephotos-restore-test) | 確認済み | 2026-09-25 | — |
 | [Deploy to Cloudflare](#deploy-to-cloudflare-の-e2e2026-09-27) | 確認済み | 2026-09-27 | 使い捨ての環境 |
-| uninstall | 未確認 | — | [roadmap.md](roadmap.md) |
-| [iPhone 実機](#利用者の端末での確認) | 一部確認 | 2026-09-25 | 利用者の報告で upload 5 枚と original のダウンロードのみ。phone 幅の表示と大量の取り込みは未確認 |
-| [Android 実機](#iphone--android-実機での取り込み) | 未確認 | — | — |
-| [2 人の household での利用](#2-人の-household-での利用) | 一部確認 | 2026-09-25 | login と upload のみ |
+| uninstall | 未確認 | — | — |
+
+機能と安全性:
+
+| 対象 | 状態 | 確認 | 備考 |
+| --- | --- | --- | --- |
+| [upload から share の revoke まで](#browser-での-csp) | 確認済み | 2026-09-25 | — |
+| [private app の CSP](#private-app-の-csp2026-09-25) | 一部確認 | 2026-09-25 | desktop のみ |
+| [Workers Logs に credential が生で残らない](#workers-logs) | 確認済み | 2026-09-25 | — |
+| [derivative の作り直し](#derivative-の作り直しremote-test) | 一部確認 | 2026-09-25 | remote-test のみ |
+| [Access の login](#login-方法を-one-time-pin-にする2026-09-24) | 確認済み | 2026-09-25 | 2 人目は利用者の報告 |
+| [Access の independent MFA](#access-の-independent-mfa) | 未使用 | — | [D-038](decisions.md) |
+
+端末と利用:
+
+| 対象 | 状態 | 確認 | 備考 |
+| --- | --- | --- | --- |
+| [desktop の Browser](#browser-での-csp) | 確認済み | 2026-09-25 | Chromium・WebKit |
+| [iPhone](#利用者の端末での確認) | 一部確認 | 2026-09-25 | 利用者の報告。upload 5 枚と original のダウンロード |
+| [Android](#iphone--android-実機での取り込み) | 未確認 | — | — |
+| [2 人での利用](#2-人の-household-での利用) | 一部確認 | 2026-09-25 | login と upload |
 
 v1 までに残っている確認:
 
