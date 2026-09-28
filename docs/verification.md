@@ -2,7 +2,7 @@
 
 実環境と Browser で確認した結果と、まだ確認していない項目を書きます。
 
-最初の 2 節が現在の状態です。その下の [検証の記録](#検証の記録) は、判定の根拠です。記録を足したり直したりして状態が変わったら、同じ変更で [現在の状態](#現在の状態) の表も直します。
+最初の 2 節が現在の状態です。その下の [検証の記録](#検証の記録) は、判定の根拠です。記録を足したり直したりして状態が変わったら、同じ変更で [現在の状態](#現在の状態) の表も直します。表には判定だけを書き、理由と経緯は記録に書きます。
 
 記録には、環境・日付・使ったデータ・結果を、再現と判断に必要な範囲で書きます。同じ対象を確認し直したときは、既存の記述を最新の結果で更新します。追記するのは、新しい対象を確認したときと、経緯を残す必要があるときだけです。
 
@@ -12,34 +12,41 @@
 
 2026-09-27 時点。
 
-| 対象 | 状態 | 確認日 | 記録 |
+production の主要な経路、backup と restore、desktop の Browser での操作は確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、migration を含む更新、uninstall です。
+
+状態は「確認済み」「一部確認」「未確認」「対象外」のどれかです。
+
+| 対象 | 状態 | 確認日 | 備考 |
 | --- | --- | --- | --- |
-| local（Miniflare、`vite dev`、`vite preview`） | migration、fail-closed、upload から share と revoke まで、export と restore を確認済み | — | [local](#local) |
-| 主要な外部境界（Access、R2 の CORS と checksum、presigned URL） | remote-test で確認済み | 2026-09-16〜17 | [remote-test](#remote-test2026-09-1617) |
-| production の作成と初回 deploy | 確認済み | 2026-09-24 | [production の作成と初回 deploy](#production-の作成と初回-deploy2026-09-24) |
-| 更新（migration なし） | production で確認済み | 2026-09-25 | [deploy と diagnose](#deploy-と-diagnose) |
-| 更新（migration あり） | 未実走 | — | [roadmap.md](roadmap.md) |
-| upload → timeline → viewer → share → revoke | production の desktop の Browser（Chromium・WebKit）で確認済み | 2026-09-25 | [Browser での CSP](#browser-での-csp) |
-| private app の CSP | desktop で確認済み。実機は未確認 | 2026-09-25 | [private app の CSP](#private-app-の-csp2026-09-25) |
-| Workers Logs の記録に credential が生で残らない | production で確認済み | 2026-09-25 | [Workers Logs](#workers-logs) |
-| backup と restore | production の backup を空の環境へ restore して確認済み | 2026-09-25 | [restore drill](#restore-drilledgephotos-restore-test) |
-| derivative の作り直し | remote-test で確認済み。production では行っていない | 2026-09-25 | [derivative の作り直し（remote-test）](#derivative-の作り直しremote-test) |
-| Access の login（One-time PIN） | 利用者の報告では、2 人が login でき、登録していない email には code が届かない | 2026-09-24〜25 | [login 方法を One-time PIN にする](#login-方法を-one-time-pin-にする2026-09-24) |
-| Access の independent MFA | 有効にしていない（[D-038](decisions.md)）。確認も行っていない | — | [Access の independent MFA](#access-の-independent-mfa) |
-| Deploy to Cloudflare | 使い捨ての環境で、作成・更新・build 経路の切り離しまで確認済み | 2026-09-27 | [Deploy to Cloudflare の E2E](#deploy-to-cloudflare-の-e2e2026-09-27) |
-| uninstall | 未実走 | — | [roadmap.md](roadmap.md) |
-| iPhone 実機 | 利用者の報告では、5 枚の upload と original のダウンロードに失敗なし。User-Agent はデスクトップ表示の形で、phone 幅の表示・タッチ操作・大量の取り込みは確かめたことにならない | 2026-09-25 | [利用者の端末での確認](#利用者の端末での確認) |
-| Android 実機 | 未確認 | — | [iPhone / Android 実機での取り込み](#iphone--android-実機での取り込み) |
-| 2 人の household での日常の操作 | 未確認。2 人の login と upload までは確認済み | — | [2 人の household での利用](#2-人の-household-での利用) |
+| [local](#local) | 確認済み | CI で毎回 | workerd の test と `vite dev` の Browser E2E |
+| [主要な外部境界](#remote-test2026-09-1617) | 確認済み | 2026-09-16〜17 | remote-test。Access、R2 の CORS と checksum、presigned URL |
+| [production の作成と初回 deploy](#production-の作成と初回-deploy2026-09-24) | 確認済み | 2026-09-24 | — |
+| [更新（migration なし）](#deploy-と-diagnose) | 確認済み | 2026-09-25 | production |
+| 更新（migration あり） | 未確認 | — | [roadmap.md](roadmap.md) |
+| [upload から share の revoke まで](#browser-での-csp) | 確認済み | 2026-09-25 | production の desktop（Chromium・WebKit） |
+| [private app の CSP](#private-app-の-csp2026-09-25) | 一部確認 | 2026-09-25 | desktop のみ |
+| [Workers Logs に credential が生で残らない](#workers-logs) | 確認済み | 2026-09-25 | production |
+| [backup と restore](#restore-drilledgephotos-restore-test) | 確認済み | 2026-09-25 | production の backup を空の環境へ restore |
+| [derivative の作り直し](#derivative-の作り直しremote-test) | 一部確認 | 2026-09-25 | remote-test のみ |
+| [Access の login（One-time PIN）](#login-方法を-one-time-pin-にする2026-09-24) | 確認済み | 2026-09-24〜25 | 2 人目の login は利用者の報告 |
+| [Access の independent MFA](#access-の-independent-mfa) | 対象外 | — | 有効にしていない（[D-038](decisions.md)） |
+| [Deploy to Cloudflare](#deploy-to-cloudflare-の-e2e2026-09-27) | 確認済み | 2026-09-27 | 使い捨ての環境 |
+| uninstall | 未確認 | — | [roadmap.md](roadmap.md) |
+| [iPhone 実機](#利用者の端末での確認) | 一部確認 | 2026-09-25 | 利用者の報告で upload 5 枚と original のダウンロードのみ。phone 幅の表示と大量の取り込みは未確認 |
+| [Android 実機](#iphone--android-実機での取り込み) | 未確認 | — | — |
+| [2 人の household での利用](#2-人の-household-での利用) | 一部確認 | 2026-09-25 | login と upload のみ |
 
 v1 までに残っている確認:
 
-1. iPhone / Android の実機での取り込み。大量の選択、画面のロックや background への移動、memory、HEIC の扱い、実機での CSP を見る
+1. iPhone / Android の実機での取り込み
 2. 2 人の household での日常の操作
-3. migration を含む更新と、uninstall の実走（[roadmap.md](roadmap.md)）
-4. Access の independent MFA を有効にする場合の確認
+3. migration を含む更新と、uninstall の実走
 
-## 未検証
+設定を変えるときに行う確認:
+
+- Access の independent MFA を有効にする場合。v1 の条件ではない（[D-038](decisions.md)）
+
+## 残っている検証
 
 確認の手順と合格の条件です。結果が出たら [検証の記録](#検証の記録) に書き、この節から外します。
 
@@ -831,7 +838,7 @@ deploy した後に行う。2026-09-25 の production での結果は、上の d
 
 ### 家族の写真を入れる前の production 確認（2026-09-25）
 
-家族の写真を入れる前に、main の `8218a7e` を production に deploy し直し、Browser・Workers Logs・Access・backup を確かめた。derivative の作り直しは remote-test で往復した。実機・2 人での操作は [未検証](#未検証) に残る。
+家族の写真を入れる前に、main の `8218a7e` を production に deploy し直し、Browser・Workers Logs・Access・backup を確かめた。derivative の作り直しは remote-test で往復した。実機・2 人での操作は [残っている検証](#残っている検証) にある。
 
 #### deploy と diagnose
 
