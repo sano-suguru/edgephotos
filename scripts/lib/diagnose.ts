@@ -41,6 +41,8 @@ export type WorkerConfig = {
   vars: Record<string, unknown>
   secretsRequired: string[]
   previewUrls: boolean | undefined
+  // The Worker Previews block. Without it, `wrangler preview` (the Workers Builds preview command) fails.
+  previews: unknown
   bucketName: string | undefined
   // assets.run_worker_first / assets.not_found_handling
   runWorkerFirst: boolean | string[] | undefined
@@ -71,6 +73,13 @@ export function checkConfig(config: WorkerConfig): Check[] {
           'config: preview_urls',
           'fail',
           'must be false: preview hostnames are not covered by the Access application',
+        ),
+    config.previews === undefined
+      ? check('config: previews', 'pass', 'no previews block; `wrangler preview` cannot publish a Preview')
+      : check(
+          'config: previews',
+          'fail',
+          'remove the previews block: a Worker Preview has its own hostname, not covered by the Access application',
         ),
     // Every private HTML document reaches the Worker for its CSP, and a miss under the public
     // /share/assets/* is a 404 rather than the app without its CSP (docs/decisions.md D-037).

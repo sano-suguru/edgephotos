@@ -1,5 +1,12 @@
-# Not needed for `pnpm dev` (the dev server injects local-only values).
-# Copy to .dev.vars only if you run `wrangler dev` against real R2 credentials.
-# Never commit real values.
+# The Worker secrets (wrangler.jsonc `secrets.required`). Deploy to Cloudflare asks for each name listed
+# here; the descriptions are in package.json `cloudflare.bindings`. Never commit real values.
+#
+# Not needed for `pnpm dev` (the dev server injects local-only values). Copy to .dev.vars only if you run
+# `wrangler dev` against real R2 credentials.
+HOUSEHOLD_EMAILS=
+APP_ORIGIN=
+ACCESS_TEAM_DOMAIN=
+ACCESS_AUD=
+R2_ACCOUNT_ID=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=

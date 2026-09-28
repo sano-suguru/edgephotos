@@ -31,6 +31,7 @@ EdgePhotos が信頼するもの（これが侵害されると写真を守れま
 - Cloudflare アカウントの管理者
 - household member 全員と、その端末（[member 間の信頼](#member-間の信頼)）
 - backup ディレクトリを置く場所（下の「backup ディレクトリ」）
+- Deploy to Cloudflare で作った場合は、複製した Git repo に push できる人と、Workers Builds の build token（下の「Deploy to Cloudflare の build 経路」）
 
 EdgePhotos が信頼しないもの:
 
@@ -46,6 +47,17 @@ Cloudflare アカウントの完全侵害と、利用端末の完全侵害は v1
 `pnpm backup export` が書くディレクトリには、original（EXIF の位置情報を含みうる）、derivative、`manifest.json`（元のファイル名・撮影日時・album 名・upload した member の email）が平文で入ります。EdgePhotos は backup を暗号化しません。
 
 置き場所のアクセス制御と暗号化（ディスクの暗号化など）は利用者が行います。`manifest.json` に credential、JWT、share secret、presigned URL は入りません（`tests/integration/export-restore.test.ts` で検査しています）。
+
+### Deploy to Cloudflare の build 経路
+
+Deploy to Cloudflare で作ると、Worker と同じ account に 2 つの経路が加わります。CLI だけで作った場合にはありません。
+
+- 複製した Git repo の main への push が、そのまま migration と deploy になる。push できる人は、R2 credential を持つ Worker の code を置き換えられる
+- Workers Builds が使う build token。Deploy の仕組みが user token として作り、期限はない。権限は D1、Workers R2 Storage、Workers Scripts を含む account の 20 種、user の 2 種、全 zone の 3 種（2026-09-27 の実測。[verification.md](verification.md#deploy-to-cloudflare-の-e2e2026-09-27)）
+
+EdgePhotos の Worker には、この token を渡しません。どちらも、Cloudflare account の管理者と同じ程度に守る対象です。
+
+この 2 つを残したくない場合は、setup が済んだあとで Git の接続を切り、「マイプロフィール」>「API トークン」から build token を削除します。Workers Builds の設定から token を外すだけでは、user API token は有効なまま残ります（[Deploy to Cloudflare で作る](operations.md#deploy-to-cloudflare-で作る)）。以後は CLI で更新し、Worker の設定と security の境界は CLI で作った場合と同じになります。
 
 ### 大量の request
 

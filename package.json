@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "deploy": "node scripts/diagnose.ts --offline && wrangler d1 migrations apply DB --remote && wrangler deploy",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.web.json && tsc -p tsconfig.node.json && tsc -p tsconfig.e2e.json",
     "lint": "biome check .",
@@ -55,5 +56,39 @@
   "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=22.18"
+  },
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "写真の metadata を置く D1 database。名前は自由です。migration は deploy のたびに自動で適用されます。"
+      },
+      "BUCKET": {
+        "description": "写真を置く private R2 bucket。名前を変えたら `R2_BUCKET_NAME` も同じ名前にします（違うと deploy が止まります）。public access は有効にしません。"
+      },
+      "R2_BUCKET_NAME": {
+        "description": "`BUCKET` と同じ bucket 名。"
+      },
+      "HOUSEHOLD_EMAILS": {
+        "description": "写真を見られる人の email を comma 区切りで（例: `you@example.com,partner@example.com`）。Access の Allow policy と同じ人にします。"
+      },
+      "APP_ORIGIN": {
+        "description": "Worker の URL（例: `https://edgephotos.example.workers.dev`。`edgephotos` はプロジェクト名、`example` は account の workers.dev subdomain）。末尾の `/` は付けません。"
+      },
+      "ACCESS_TEAM_DOMAIN": {
+        "description": "Zero Trust の team domain（例: `example.cloudflareaccess.com`）。host だけで、`https://` は付けません。[先に行う設定](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#4-cloudflare-access)"
+      },
+      "ACCESS_AUD": {
+        "description": "先に作った private の Access application（`/share` ではない方）の **Application Audience (AUD) Tag**。[先に行う設定](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#4-cloudflare-access)"
+      },
+      "R2_ACCOUNT_ID": {
+        "description": "この Cloudflare account の Account ID（32 桁の hex）。"
+      },
+      "R2_ACCESS_KEY_ID": {
+        "description": "bucket はこの deploy で作られるので、ここでは仮の値（例: `set-after-deploy`）を入れます。deploy 後に、`BUCKET` だけに Object Read & Write を持つ R2 API token を作り、その Access Key ID で上書きします。[手順](https://github.com/sano-suguru/edgephotos/blob/main/docs/operations.md#deploy-to-cloudflare-で作る)"
+      },
+      "R2_SECRET_ACCESS_KEY": {
+        "description": "上と同じく、ここでは仮の値を入れ、deploy 後に同じ R2 API token の Secret Access Key で上書きします。"
+      }
+    }
   }
 }

@@ -1165,3 +1165,39 @@ Web UI の「写真とアルバムの情報をダウンロード」は「メン�
 - 「CLI を使わず Browser だけで取れる」ことだけでは、独立したユーザー価値とみなさない。仕事を最後まで終えられない操作を、通常の画面に残さない
 
 将来、member 自身によるデータの持ち出し、他サービスへの移行、Browser だけで完結する export が要件になった場合は、写真本体を含めるか、使い方まで定義した export 機能として改めて設計する。
+
+## D-041: Deploy to Cloudflare を、手作業を減らす追加の導入経路にする
+
+**状態:** 採用（2026-09-27）
+
+**Deploy to Cloudflare ボタンを README に置く。** Cloudflare が安全に行える作業だけを任せ、Access、R2 の署名用 credential、CORS は手で行う。ボタン用の runtime mode や別の security model は作らず、CLI で作った環境と同じ Worker・同じ設定になる。
+
+ボタンに任せるもの:
+
+- D1 と R2 の作成と bind。`wrangler.jsonc` の既定の名前を、画面で変えられる
+- 7 つの Worker secret の入力。`.dev.vars.example` に名前を並べ、説明は `package.json` の `cloudflare.bindings` に書く。値は repo・vars・build log に残らない
+- build と deploy。`pnpm run deploy` は `pnpm diagnose --offline`、`wrangler d1 migrations apply DB --remote`、`wrangler deploy` の順に動く。migration は binding 名で指定する。画面で D1 の名前を変えても同じ command で動くようにするため
+
+`diagnose --offline` を先頭に置くのは、画面で bucket の名前だけを変えて `R2_BUCKET_NAME` が食い違ったまま deploy するのを止めるためである。
+
+手で残すもの:
+
+- Access application と login 方法。ボタンは Access application を作れない。Worker が公開される前に、private path の前段へ Access を置く。ボタンの画面にある「Protect with Cloudflare Access」は Worker 全体を対象にするため、`/share` を Bypass にできない（[Cloudflare Access](operations.md#4-cloudflare-access)）
+- R2 の署名用 credential。bucket を限定した token は bucket があるときしか作れず、bucket はボタンの deploy で初めてできる。deploy の画面では 2 つの R2 secret に仮の値を入れ、deploy の後に上書きする。仮の値の間、presigned URL は R2 に拒否されるだけで、公開範囲は広がらない
+- R2 CORS。origin は `APP_ORIGIN` で、Deploy の仕組みは CORS を設定しない。build の中で設定するには、build にも origin と R2 の書き込み権限を渡す必要がある
+
+Workers Builds の preview build は、既定で `wrangler preview` を実行する。Worker Previews は `<branch>-<worker>.<subdomain>.workers.dev` という公開の hostname を作り、hostname 単位の Access application の対象外になる。`wrangler.jsonc` に `previews` block を置かなければ、CI の `wrangler preview` は Preview を作らずに失敗する（wrangler 4.136 の実装と実測で確認）。この block が加わらないよう、`pnpm diagnose` の `config: previews` を FAIL にする。
+
+受け入れる trade-off:
+
+- ボタンは Workers Builds の build token を user token として作る。期限はなく、D1・R2・Workers Scripts を含む account 全体の権限を持つ。EdgePhotos の Worker には渡らないが、account には残る。setup の後で Git の接続を切り、user API token を削除すれば、CLI で作った場合と同じ状態に戻せる。Workers Builds 側で token を外すだけでは user API token は残る（[Deploy to Cloudflare の build 経路](security.md#deploy-to-cloudflare-の-build-経路)）
+- 複製した repo の main への push が deploy になる。repo は private で作るよう手順に書く
+- この経路の migration は、operations の更新手順にある「bookmark を控える」を通らない。戻すときは time travel に時刻を渡す
+- `pnpm diagnose` の実行には、手元の Node.js と `wrangler login` が要る
+
+見送った案:
+
+- R2 bucket と token を先に手で作り、画面で既存の bucket を選ぶ。token の値をボタンの画面に入れられて仮の値が要らない一方、ボタンが作るものが D1 だけになり、手作業は減らない
+- D1 / R2 を画面の既定の名前で既存の資源に bind させる。同じ名前の資源が account にあると、画面は既存のものを既定で選ぶ。新しい環境は「新規作成」を選ぶよう手順に書く
+
+再検討の条件: ボタンが Access application、bucket を限定した R2 credential、CORS のどれかを作れるようになったとき。絞った権限の build token で Workers Builds を運用できると確かめたとき。
