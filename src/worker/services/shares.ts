@@ -164,7 +164,7 @@ export async function sharedAlbum(
   page: { limit: number; cursor?: string },
 ): Promise<SharedAlbum> {
   const { share, album } = await authorizeShare(ctx, shareId, authorization)
-  const { rows, nextCursor } = await listAssets(ctx, { ...page, albumId: album.id })
+  const { rows, nextCursor } = await listAssets(ctx, { limit: page.limit, cursor: page.cursor, albumId: album.id })
   const ttl = shareUrlTtl(share.expires_at, ctx.now())
   const signed = await Promise.all(rows.map((r) => ctx.signer.signGet(objectKey(r.id, 'thumbnail'), ttl)))
   return {

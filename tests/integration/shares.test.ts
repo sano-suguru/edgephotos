@@ -90,6 +90,18 @@ describe('public share API', () => {
     }
   })
 
+  it('ignores direction: a share is only read from its newest photo down', async () => {
+    const app = await makeApp()
+    const { created } = await sharedAlbumWith(app, 3)
+    type Page = { items: { id: string }[]; nextCursor: string | null }
+    const first = (await (await guest(app, `/shares/${created.share.id}?limit=1`, created.secret)).json()) as Page
+    const res = await guest(app, `/shares/${created.share.id}?limit=1&direction=newer`, created.secret)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Page
+    expect(body.items.map((i) => i.id)).toEqual(first.items.map((i) => i.id))
+    expect(body.nextCursor).toBe(first.nextCursor)
+  })
+
   it('issues preview/thumbnail URLs capped at 300 seconds', async () => {
     const app = await makeApp()
     const { assets, created } = await sharedAlbumWith(app, 1)

@@ -120,6 +120,9 @@ function checkedPageQuery<T extends { cursor?: string; direction?: 'older' | 'ne
   return q
 }
 
+// A share is read oldest-to-newest by its viewer only, so it takes no direction: an unknown key is dropped.
+const SharePageQuery = PageQuery.omit({ direction: true })
+
 const boolQuery = z
   .enum(['true', 'false'])
   .transform((v) => v === 'true')
@@ -756,7 +759,7 @@ export function createApp(options: AppOptions) {
       method: 'get',
       path: '/shares/{shareId}',
       tags: tag('share-public'),
-      request: { params: ShareParams, query: PageQuery },
+      request: { params: ShareParams, query: SharePageQuery },
       responses: { 200: json(SharedAlbumSchema, 'Shared album contents'), ...errorResponses },
     }),
     async (c) =>
