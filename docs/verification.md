@@ -12,7 +12,7 @@
 
 2026-09-27 時点。
 
-production では、upload から share の revoke までの操作、backup と restore、desktop の Browser での表示を確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、migration を含む更新、uninstall です。
+production では、upload から share の revoke までの操作、backup と restore、desktop の Browser での表示を確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、production での migration を含む更新、uninstall です。
 
 状態は「確認済み」「一部確認」「未確認」「未使用」のどれかです。「未使用」は、今の構成で有効にしていない機能です。
 
@@ -29,7 +29,7 @@ production では、upload から share の revoke までの操作、backup と 
 | --- | --- | --- | --- |
 | [初回 deploy](#production-の作成と初回-deploy2026-09-24) | 確認済み | 2026-09-24 | — |
 | [更新（migration なし）](#deploy-と-diagnose) | 確認済み | 2026-09-25 | — |
-| 更新（migration あり） | 未確認 | — | — |
+| [更新（migration あり）](#upload-した人の記録2026-09-24) | 一部確認 | 2026-09-24 | remote-test のみ |
 | [backup と restore](#restore-drilledgephotos-restore-test) | 確認済み | 2026-09-25 | — |
 | [Deploy to Cloudflare](#deploy-to-cloudflare-の-e2e2026-09-27) | 確認済み | 2026-09-27 | 使い捨ての環境 |
 | uninstall | 未確認 | — | — |
@@ -39,7 +39,7 @@ production では、upload から share の revoke までの操作、backup と 
 | 対象 | 状態 | 確認 | 備考 |
 | --- | --- | --- | --- |
 | [upload から share の revoke まで](#browser-での-csp) | 確認済み | 2026-09-25 | — |
-| [private app の CSP](#private-app-の-csp2026-09-25) | 一部確認 | 2026-09-25 | desktop のみ |
+| [private app の CSP](#private-app-の-csp2026-09-25) | 一部確認 | 2026-09-25 | desktop と iPhone（利用者の報告） |
 | [Workers Logs に credential が生で残らない](#workers-logs) | 確認済み | 2026-09-25 | — |
 | [derivative の作り直し](#derivative-の作り直しremote-test) | 一部確認 | 2026-09-25 | remote-test のみ |
 | [Access の login](#login-方法を-one-time-pin-にする2026-09-24) | 確認済み | 2026-09-25 | 2 人目は利用者の報告 |
@@ -53,16 +53,6 @@ production では、upload から share の revoke までの操作、backup と 
 | [iPhone](#利用者の端末での確認) | 一部確認 | 2026-09-25 | 利用者の報告。upload 5 枚と original のダウンロード |
 | [Android](#iphone--android-実機での取り込み) | 未確認 | — | — |
 | [2 人での利用](#2-人の-household-での利用) | 一部確認 | 2026-09-25 | login と upload |
-
-v1 までに残っている確認:
-
-1. iPhone / Android の実機での取り込み
-2. 2 人の household での日常の操作
-3. migration を含む更新と、uninstall の実走
-
-設定を変えるときに行う確認:
-
-- Access の independent MFA を有効にする場合。v1 の条件ではない（[D-038](decisions.md)）
 
 ## 残っている検証
 
@@ -105,7 +95,7 @@ remote-test に 2 アカウントを設定し、実機 2 台で次を確認し�
 
 ### Access の independent MFA
 
-有効にする場合の確認です（[D-038](decisions.md)、[MFA を足す](operations.md#mfa-を足す推奨)）。remote-test で先に行い、production では household の全員が登録するまで家族の写真を入れない。
+有効にする場合の確認で、v1 の条件ではありません（[D-038](decisions.md)、[MFA を足す](operations.md#mfa-を足す推奨)）。remote-test で先に行い、production では household の全員が登録するまで家族の写真を入れない。
 
 - 登録済みの member が OTP だけを入力した段階では、private app と `/api/v1/me` に届かない。MFA を通すと届く。届けば不合格
 - `/share/{shareId}` は MFA も login も無しで開ける。login を求められれば不合格（Bypass の application を変えていない）
@@ -379,7 +369,7 @@ paged export: 1 件ずつ・2 件ずつのページを重複なく連結でき�
 
 backup manifest v1（[D-025](decisions.md)）:
 
-- export が書いた manifest はそのまま通り、未知の key を足しても通った
+- export が書いた manifest はそのまま通り、未知の key を足しても通った。今の manifest は未知の key を拒否する（[D-035](decisions.md)）
 - 15 件以上あるときは 10 件と残件数を出した
 
 次のものを、field の位置と理由付きで拒否した。
@@ -599,7 +589,7 @@ Chromium はどれも `InvalidStateError`。
 - 同じ HEIC を別の household member が upload すると `DUPLICATE_ASSET` で同じ asset に収束する
 - backup → restore で HEIC の original bytes と checksum が維持され、manifest が v2 で `image/heic` を持つ。`verifyLibrary` も通る
 - share では derivative しか出ず、応答に `originals/`・filename・`image/heic`・SHA-256 のいずれも現れない。preview は `derivatives/v1/{id}/preview.jpg` の JPEG
-- v1 manifest は今も読め、v1 で `image/heic` を名乗る manifest は `contentType` を名指しして拒否される
+- この時点では v1 manifest も読め、v1 で `image/heic` を名乗る manifest は `contentType` を名指しして拒否された。今の CLI は v1 / v2 の manifest を拒否する（[D-035](decisions.md)）
 - e2e: WebKit は HEIC を追加し、記録された形式が `image/heic`、寸法が 32x64（EXIF Orientation 6 が反映された値）、`takenAt` が `2019-07-14T09:30:05`。timeline の thumbnail も 32x64 で、derivative 自体が正しい向きになっている。Chromium は「このブラウザでは HEIC を処理できません」と表示し、reserve へ進まない
 - e2e: 半分で切った HEIC と、`ftyp` の後を padding にした HEIC は、WebKit では「ファイルが最後まで揃っていません」、Chromium では decode 不能として先に止まり、どちらでも asset にならない
 - box header が finalize の 256KB window を越える original は、判定しきれないものとして `structure_unverified` で拒否される
@@ -733,7 +723,7 @@ CI は Linux runner の WebKit で HEIC を decode できないため、この a
 
 同じ写真を API（`GET /api/v1/assets`）でも確かめた。最新の 1 枚（2026-09-24 03:03 UTC）の `uploadedBy` には email が入り、それより前の写真は `null` だった。
 
-2 人目の member による upload は、実環境では確かめていない（[2 人の household での利用](#2-人の-household-での利用)）。
+この時点では、2 人目の member による upload は確かめていない。2026-09-25 に確かめた（[login 方法を One-time PIN にする](#login-方法を-one-time-pin-にする2026-09-24)）。
 
 ### 初回 deploy の secret の渡し方（2026-09-24）
 
@@ -828,7 +818,7 @@ Workers Logs では、この 3 つの header の値は伏せられた状態で�
 
 ### private app の CSP（2026-09-25）
 
-local で確かめた後、remote-test と production に deploy した（[D-037](decisions.md)）。desktop の Browser での確認まで済んだ。実機は未確認（[iPhone / Android 実機での取り込み](#iphone--android-実機での取り込み)）。deploy のたびに行う確認は、この節の最後の [CSP の確認手順](#csp-の確認手順) にある。
+local で確かめた後、remote-test と production に deploy した（[D-037](decisions.md)）。desktop の Browser と、利用者の報告による iPhone で確かめた（[利用者の端末での確認](#利用者の端末での確認)）。Android は未確認。deploy のたびに行う確認は、この節の最後の [CSP の確認手順](#csp-の確認手順) にある。
 
 - `pnpm test:e2e`（Chromium、WebKit）の全 spec が、CSP 違反 0 件で通った。`e2e/fixtures.ts` がすべての page と guest の context で `securitypolicyviolation` を集め、1 件でもあれば失敗にする。upload の presigned PUT、thumbnail / preview の表示、original のダウンロード（presigned GET の `fetch()`）、共有ページ、Base UI の Dialog / Menu を含む
 - `e2e/csp.spec.ts`: `/`、`/albums`、未知の path の HTML に CSP が付く。注入した inline `<script>`、`onerror=`、別の origin の `<img>` が拒否される。`page.evaluate()` からの `eval()` は DevTools の評価として CSP の対象外になるため、`eval()` は header に `'unsafe-eval'` が無いことで確かめた
