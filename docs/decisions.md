@@ -208,7 +208,7 @@ Migration:
 
 既存の `0001_initial.sql` は手書きのまま baseline として扱い、drizzle-kit の snapshot と journal を後から合わせました。production DB の再作成は不要です。
 
-baseline の具体的な扱い（journal の `idx: 1`、SQL と snapshot の差、CI の rehearsal が保証する範囲）は開発ガイドの [D1 / migration](development.md#7-d1--migration) にあります。
+baseline の具体的な扱い（journal の `idx: 1`、SQL と snapshot の差、CI の rehearsal が保証する範囲）は [migrations/README.md](../migrations/README.md) にあります。
 
 ## D-018: original の SHA-256 を R2 に upload 時に検証させる
 
@@ -392,7 +392,7 @@ D1 と R2 は 1 transaction にできません。以前は、期限切れの `up
 却下した案:
 
 - Cron で定期実行する: 件数を観測できるようになり、手動の実行で足りる。中断した upload は写真の整合性を壊さず、急いで消す理由がない。定期実行が要るのは、owner が実行しないまま R2 の料金や件数が問題になった場合
-- `uploads.status` に `abandoned` を足す: `uploads` の CHECK を変えるには table の作り直しが要り、baseline の無名 UNIQUE の扱いが難しい（[D1 / migration](development.md#7-d1--migration)）。`duplicate` + `duplicate_of = NULL` で「asset を作らずに終わった upload」を表す（`src/worker/db/schema.ts` に注記）
+- `uploads.status` に `abandoned` を足す: `uploads` の CHECK を変えるには table の作り直しが要り、baseline の無名 UNIQUE の扱いが難しい（[migrations/README.md](../migrations/README.md)）。`duplicate` + `duplicate_of = NULL` で「asset を作らずに終わった upload」を表す（`src/worker/db/schema.ts` に注記）
 - R2 lifecycle rule で `originals/` を期限切れにする: 写真の original まで消える
 
 影響: 中断した upload を後から finalize すると、cleanup の前なら従来どおり完了し、cleanup の後なら `410`（片付け途中）または `404`（行が消えた）になります。Web の再試行は、どちらでも新しい reservation からやり直します（[D-020](#d-020-取り込みの頑健性は-client-側の最小修正で担保する)）。

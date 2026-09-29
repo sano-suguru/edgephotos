@@ -29,7 +29,7 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  # Real-browser checks (docs/development.md §7). Local `vite dev` with emulated Access and a throwaway
+  # Real-browser checks ("Browser E2E" in docs/development.md). Local `vite dev` with emulated Access and a throwaway
   # local D1/R2; no Cloudflare credentials are available or needed. Each project runs on its own runner
   # with its own dev server and library, so the two share no state and run side by side.
   e2e-browser:

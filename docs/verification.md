@@ -111,6 +111,15 @@ remote-test に 2 アカウントを設定し、実機 2 台で次を確認し�
 
 migration 適用、fail-closed、upload → timeline → album → share → revoke、export / restore / verify を確認済み。
 
+### Base UI の採用確認（2026-09-16）
+
+`@base-ui/react` 1.8 + `preact/compat`、local の `pnpm dev` と Chromium。
+
+- Dialog / Menu: production build と TypeScript が通った。Dialog の focus 移動、Escape で閉じる、trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore を確認した
+- Select / Combobox: 2026-09-16 時点で UI に無く、確認していない。使うときの条件は開発ガイドの [UI primitive を足すとき](development.md#5-ui-primitive-を足すとき)
+
+常設の回帰は `e2e/keyboard.spec.ts`（focus trap、Escape、focus restore、Menu の矢印キー移動、Menu から Dialog を開いて Enter で送信）。touch は `e2e/mobile.spec.ts` が iPhone 13 相当の viewport と touch（Playwright WebKit）で確かめる。実機の touch は [iPhone / Android 実機での取り込み](#iphone--android-実機での取り込み) に残っている。
+
 ### remote-test（2026-09-16〜17）
 
 #### 環境と設定
