@@ -162,7 +162,8 @@ describe('a batch of photos', () => {
     await h.batch.enqueue([photo('a'), photo('b'), photo('c'), photo('d'), photo('e')])
     expect(h.batch.items.value.every((u) => u.state === 'done')).toBe(true)
     expect(h.server.assets.size).toBe(5)
-    expect(h.batch.libraryVersion.value).toBe(5)
+    // How often the views refetch is the throttle's; see 'refetches the library at most once per interval'.
+    expect(h.batch.libraryVersion.value).toBeGreaterThan(0)
     expect(uploadHeadline(countUploads(h.batch.items.value))).toBe('5 枚を追加しました')
   })
 
@@ -193,7 +194,8 @@ describe('a batch of photos', () => {
     expect(failed[0].retryable).toBe(true)
     expect(h.batch.items.value.filter((u) => u.state === 'done')).toHaveLength(4)
     expect(h.server.assets.size).toBe(4)
-    expect(h.batch.libraryVersion.value).toBe(4)
+    // How often the views refetch is the throttle's; see 'refetches the library at most once per interval'.
+    expect(h.batch.libraryVersion.value).toBeGreaterThan(0)
     const counts = countUploads(h.batch.items.value)
     expect(uploadHeadline(counts)).toBe('4 枚を追加しました、1 枚は追加できませんでした')
   })
@@ -221,7 +223,33 @@ describe('retrying a batch', () => {
     expect(h.batch.items.value.every((u) => u.state === 'done')).toBe(true)
     // One asset per photo: the retry neither re-sent a stored photo nor made a second asset for its own.
     expect(h.server.assets.size).toBe(5)
-    expect(h.batch.libraryVersion.value).toBe(5)
+    // How often the views refetch is the throttle's; see 'refetches the library at most once per interval'.
+    expect(h.batch.libraryVersion.value).toBeGreaterThan(0)
+  })
+
+  it('refetches the library at most once per interval, and once after the last photo', async () => {
+    const h = harness()
+    let clock = NOW
+    const timers: { at: number; fire: () => void }[] = []
+    const batch = createUploadBatch({
+      ...h.deps,
+      now: () => clock,
+      wait: (ms) => new Promise<void>((fire) => timers.push({ at: clock + ms, fire })),
+    })
+    await batch.enqueue([photo('a'), photo('b'), photo('c'), photo('d'), photo('e')])
+    // The first photo shows at once; the other four wait for one refetch instead of four.
+    expect(batch.libraryVersion.value).toBe(1)
+    expect(timers).toHaveLength(1)
+    clock = timers[0].at
+    timers[0].fire()
+    await Promise.resolve()
+    expect(batch.libraryVersion.value).toBe(2)
+    expect(timers).toHaveLength(1)
+    // Long after, the next photo shows at once again.
+    clock += 10_000
+    await batch.enqueue([photo('f')])
+    expect(batch.libraryVersion.value).toBe(3)
+    expect(timers).toHaveLength(1)
   })
 
   it('registers a photo whose bytes arrived but whose finalize did not, without sending them again', async () => {
