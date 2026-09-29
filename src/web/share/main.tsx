@@ -5,6 +5,7 @@ import type { SharedAlbum, SignedUrl } from '../../contracts/schemas'
 import { buttonClass } from '../components/ui/button'
 import { Close } from '../components/ui/icons'
 import '../styles.css'
+import { isShareGone, previewFailureMessage, ShareApiError } from './share-error'
 
 // Public share page. The secret comes from the URL fragment (never sent in the page request) and is
 // passed to the share API in the Authorization header. No cookies, no storage, no third parties.
@@ -13,8 +14,11 @@ const shareId = window.location.pathname.split('/').filter(Boolean)[1] ?? ''
 const secret = window.location.hash.slice(1)
 
 const album = signal<SharedAlbum | null>(null)
+// The link itself no longer works: the whole page says so.
 const failed = signal(false)
-const viewing = signal<{ id: string; url: string | null } | null>(null)
+// A page of the album could not be read for another reason; 'first' means nothing is shown yet.
+const loadError = signal<'first' | 'more' | null>(null)
+const viewing = signal<{ id: string; url: string | null; error?: string } | null>(null)
 // When the first page arrived (performance.now(), independent of the device clock).
 let loadedAt = 0
 let refreshing = false
@@ -29,7 +33,11 @@ async function shareApi<T>(path: string): Promise<T> {
     cache: 'no-store',
     referrerPolicy: 'no-referrer',
   })
-  if (!res.ok) throw new Error(String(res.status))
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null
+    const code = body?.error?.code
+    throw new ShareApiError(res.status, typeof code === 'string' ? code : null)
+  }
   return res.json() as Promise<T>
 }
 
@@ -37,12 +45,14 @@ const albumPage = (cursor?: string | null) =>
   shareApi<SharedAlbum>(`?limit=120${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
 
 async function loadAlbum(cursor?: string) {
+  loadError.value = null
   try {
     const page = await albumPage(cursor)
     album.value = cursor && album.value ? { ...page, items: [...album.value.items, ...page.items] } : page
     if (!cursor) loadedAt = performance.now()
-  } catch {
-    failed.value = true
+  } catch (err) {
+    if (isShareGone(err)) failed.value = true
+    else loadError.value = cursor ? 'more' : 'first'
   }
 }
 
@@ -66,7 +76,7 @@ async function refreshExpired() {
     }
     loadedAt = performance.now()
   } catch (err) {
-    if (err instanceof Error && err.message === '404') failed.value = true
+    if (isShareGone(err)) failed.value = true
   } finally {
     refreshing = false
   }
@@ -77,15 +87,19 @@ async function openPreview(id: string) {
   try {
     const signed = await shareApi<SignedUrl>(`/assets/${id}/preview`)
     if (viewing.value?.id === id) viewing.value = { id, url: signed.url }
-  } catch {
-    viewing.value = null
-    failed.value = true
+  } catch (err) {
+    if (isShareGone(err)) {
+      viewing.value = null
+      failed.value = true
+    } else if (viewing.value?.id === id) {
+      viewing.value = { id, url: null, error: previewFailureMessage(err) }
+    }
   }
 }
 
 // The enlarged photo. While it is open the page behind is inert, so keyboard focus cannot reach it; on close
 // focus returns to the photo that was opened.
-function PhotoOverlay(props: { id: string; url: string | null }) {
+function PhotoOverlay(props: { id: string; url: string | null; error?: string }) {
   const close = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     // Set here rather than as a prop, so the page is usable again before focus moves back to it.
@@ -119,7 +133,7 @@ function PhotoOverlay(props: { id: string; url: string | null }) {
       {props.url ? (
         <img src={props.url} alt="" referrerPolicy="no-referrer" class="max-h-full max-w-full object-contain" />
       ) : (
-        <span class="text-sm text-on-stage">読み込み中…</span>
+        <span class="text-sm text-on-stage">{props.error ?? '読み込み中…'}</span>
       )}
       <button
         ref={close}
@@ -139,6 +153,16 @@ function PhotoOverlay(props: { id: string; url: string | null }) {
 function SharePage() {
   if (failed.value) {
     return <p class="p-8 text-center text-sm">このリンクは無効か、期限切れです。</p>
+  }
+  if (!album.value && loadError.value === 'first') {
+    return (
+      <div class="p-8 text-center text-sm">
+        <p>読み込めませんでした。</p>
+        <button type="button" class={`mt-4 ${buttonClass('secondary')}`} onClick={() => loadAlbum()}>
+          再読み込み
+        </button>
+      </div>
+    )
   }
   if (!album.value) return <p class="p-8 text-center text-sm text-muted-foreground">読み込み中…</p>
   const a = album.value
@@ -177,13 +201,16 @@ function SharePage() {
         </ul>
         {a.nextCursor && (
           <div class="mt-6 text-center">
+            {loadError.value === 'more' && <p class="mb-2 text-sm">読み込めませんでした。</p>}
             <button type="button" class={buttonClass('secondary')} onClick={() => loadAlbum(a.nextCursor ?? undefined)}>
-              さらに表示
+              {loadError.value === 'more' ? 'もう一度読み込む' : 'さらに表示'}
             </button>
           </div>
         )}
       </main>
-      {viewing.value && <PhotoOverlay key={viewing.value.id} id={viewing.value.id} url={viewing.value.url} />}
+      {viewing.value && (
+        <PhotoOverlay key={viewing.value.id} id={viewing.value.id} url={viewing.value.url} error={viewing.value.error} />
+      )}
     </>
   )
 }
