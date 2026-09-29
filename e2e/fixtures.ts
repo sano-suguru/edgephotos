@@ -99,6 +99,30 @@ export async function makeJpeg(page: Page, width: number, height: number): Promi
   return Buffer.from(base64, 'base64')
 }
 
+// A JPEG with a synthetic EXIF DateTimeOriginal: an APP1 segment right after SOI holding a big-endian TIFF with
+// IFD0 -> Exif IFD -> DateTimeOriginal. `date` is EXIF's own spelling, 'YYYY:MM:DD HH:MM:SS'.
+export function withExifDate(jpeg: Buffer, date: string): Buffer {
+  const tiff = Buffer.alloc(64)
+  tiff.write('MM\0*', 0, 'latin1')
+  tiff.writeUInt32BE(8, 4) // IFD0
+  tiff.writeUInt16BE(1, 8)
+  tiff.writeUInt16BE(0x8769, 10) // Exif IFD pointer
+  tiff.writeUInt16BE(4, 12) // LONG
+  tiff.writeUInt32BE(1, 14)
+  tiff.writeUInt32BE(26, 18)
+  tiff.writeUInt32BE(0, 22)
+  tiff.writeUInt16BE(1, 26) // Exif IFD
+  tiff.writeUInt16BE(0x9003, 28) // DateTimeOriginal
+  tiff.writeUInt16BE(2, 30) // ASCII
+  tiff.writeUInt32BE(20, 32)
+  tiff.writeUInt32BE(44, 36)
+  tiff.writeUInt32BE(0, 40)
+  tiff.write(`${date}\0`, 44, 'latin1')
+  const header = Buffer.from([0xff, 0xe1, 0, 2 + 6 + tiff.length])
+  const app1 = Buffer.concat([header, Buffer.from('Exif\0\0', 'latin1'), tiff])
+  return Buffer.concat([jpeg.subarray(0, 2), app1, jpeg.subarray(2)])
+}
+
 export async function openApp(page: Page, path = '/') {
   await page.goto(path)
   await expect(page.getByRole('navigation', { name: 'メイン' })).toBeVisible()
