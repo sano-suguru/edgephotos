@@ -1,20 +1,46 @@
 # 開発ガイド
 
-コードをどこに置き、どう検証し、どう変更するかをまとめます。
+コードをどこに置き、どう検証し、どう変更するかの入口です。すべてをここで説明するわけではありません。
+
+食い違ったときの正本は、動作は code と test、検証の結果は [verification.md](verification.md)、性能の数値は [benchmarks.md](benchmarks.md)、判断の理由は [decisions.md](decisions.md) です。詳しくは [ドキュメントの規約](#13-ドキュメントの規約) にあります。
 
 ## 1. 変更の進め方
 
-通常変更は次の流れで十分です。
+通常の変更は次の流れで十分です。
 
 ```text
 実装 -> 必要なテスト -> CI -> commit
 ```
 
-構造を変える場合だけ、実装前に [decisions.md](decisions.md) へ理由と採用案を短く記録します。対象は、認証境界、API 境界、upload protocol、object layout、migration 等です。
+構造を変える場合だけ、実装前に [decisions.md](decisions.md) へ理由と採用案を短く記録します。対象は、認証境界、API 境界、upload protocol、object layout、migration などです。
 
 Issue、PR、ADR を変更ごとに義務化しません。
 
-## 2. repository の構成
+merge の前に、`pnpm check` と CI（Browser E2E を含む）が通っていることを確かめます。
+
+変更ごとに最低限やること:
+
+| 変更 | 最低限やること |
+| --- | --- |
+| 画面の見た目 | [design.md](design.md) の規則に合わせる。儀式的なテストは足さない |
+| Browser でしか起きない挙動 | Browser E2E の spec を足すか直し、`pnpm test:e2e` |
+| API | `src/worker/app.ts` の route schema を変え、integration test で固定する |
+| D1 schema | [D1 / migration](#7-d1--migration) の手順 |
+| [AGENTS.md の「テストの厚さはリスクで決める」](../AGENTS.md#9-テストの厚さはリスクで決める) に挙げた領域 | 回帰テストが必須 |
+| `scripts/` の CLI | `pnpm cli:check`（`pnpm check` に含む） |
+| 性能に効く変更 | `pnpm bench` で測り、[benchmarks.md](benchmarks.md) に記録する |
+
+## 2. コードの置き場所
+
+迷ったら次で決めます。
+
+- 画面の機能: `src/web/features/`
+- API: `src/worker/app.ts`（route と OpenAPI の契約）と `src/worker/services/`
+- D1 schema: `src/worker/db/schema.ts`。migration は生成する（[D1 / migration](#7-d1--migration)）
+- Worker と Browser が共有する schema と純関数: `src/contracts/`
+- 運用の CLI: `scripts/`
+
+全体の構成:
 
 ```text
 index.html                 private app entry
@@ -71,31 +97,19 @@ e2e/                       real-browser tests (Playwright, `pnpm test:e2e`)
 playwright.config.ts
 ```
 
-route は現状 `src/worker/app.ts` に集約しています。route 数が増えて見通しが悪くなった時点で `routes/` へ分割します。
+route は今は `src/worker/app.ts` にまとめています。route が増えて見通しが悪くなったら `routes/` へ分けます。
 
-`contracts/` に置くのは 2 種類だけです。Browser bundle に公開してよい API schema / type と、Worker と Client が同じ結果を出す必要のある小さな純関数（manifest の組み立て、形式の判定）です。
+`contracts/` に置くのは 2 種類だけです。Browser に配信してよい API の schema と型と、Worker と Browser が同じ結果を出す必要のある小さな純関数（manifest の組み立て、形式の判定）です。server secret の型や storage の credential を扱う実装は置きません。
 
-server secret 型や storage credential 実装は置きません。
+`scripts/` は Node の型除去（type stripping）でそのまま実行します。相対 import には `.ts` を付け、parameter property など型除去で動かない構文を使いません。workerd の test は bundler を通すのでこの違いを検出できず、`pnpm cli:check` が CLI を実際に起動して確かめます。
 
-`scripts/` は Node の型除去（type stripping）でそのまま実行します。相対 import には `.ts` を付け、parameter property など型除去で動かない構文を使いません。
+## 3. Client state と Server state
 
-workerd の test は bundler を通すため、この違いを検出できません。`pnpm cli:check`（`pnpm check` に含む）が CLI を実際に起動して確かめます。
+Signals は、画面の中だけで完結する state とそこから派生する値に使います。選択中の asset、upload の進み具合、dialog の開閉、filter、件数などです。
 
-## 3. Preact / Signals
+保存が完了したかどうかの最終判定は Server が行います。Signals にその正しさを持たせません。
 
-Signals は Client UI state と派生 state に使用します。
-
-例:
-
-- 選択中 asset
-- upload progress
-- dialog state
-- filter
-- derived count
-
-Server state の正しさまで Signals に背負わせません。保存完了の最終判定は Server が行います。
-
-v1 は `fetch` を使う小さな API client から始めます。data-fetching framework は、cache invalidation が実際に複雑になった場合のみ追加判断します。
+API の呼び出しは `fetch` を使う小さな client で書きます。data-fetching framework は、cache の無効化が実際に複雑になってから導入を検討します。
 
 ## 4. ローカル開発
 
@@ -105,49 +119,30 @@ pnpm db:migrate:local      # local D1 (.wrangler/state) に migration を適用
 pnpm dev                   # http://localhost:5173
 ```
 
-`pnpm dev` は Access を模擬し、`DEV_HOUSEHOLD_EMAILS`（既定 `you@localhost.test,partner@localhost.test`）の最初の member として API を呼べます（[D-016](decisions.md)）。値の形式は production の `HOUSEHOLD_EMAILS` と同じです。member を切り替えた状態を見たい場合は、先頭を入れ替えて起動し直します。
+`pnpm dev` は Access を模擬し、`DEV_HOUSEHOLD_EMAILS`（既定 `you@localhost.test,partner@localhost.test`）の最初の member として API を呼べます（[D-016](decisions.md)）。値の形式は production の `HOUSEHOLD_EMAILS` と同じです。別の member として操作したいときは、先頭を入れ替えて起動し直します。
 
 `APP_ORIGIN` は `http://localhost:5173` 固定です。`127.0.0.1` で開くと Origin check で書き込みが拒否されます。
 
 `pnpm build && pnpm preview` は production build を local で起動します。Access や R2 の設定がないため、private API は `503` を返します。
 
-## 5. shadcn/ui + Base UI の採用条件
+## 5. UI primitive を足すとき
 
-feature 実装前に、少なくとも次の component を Preact の production build で確認します。
+UI primitive は shadcn/ui + Base UI です。まだ使っていない component（Select、Combobox など）を足すときは、機能を作り込む前に Preact の production build で次を確かめます。
 
-- Dialog
-- Menu / Dropdown
-- Select または Combobox
+- build と typecheck が通る
+- Signals で制御した state で動く
+- keyboard で操作でき、閉じたあとに focus が戻る
+- touch で操作できる
 
-確認項目:
+成り立たなければ、機能の実装より先に primitive の選定だけをやり直します。
 
-- build できる
-- Signals controlled state で動く
-- keyboard navigation
-- focus restore
-- touch interaction
-- TypeScript errors がない
-
-不成立の場合は、feature code を積む前に UI primitive のみ再選定します。
-
-確認結果（2026-09、`@base-ui/react` 1.8 + `preact/compat`）:
-
-- Dialog / Menu: production build・TypeScript は成立。`e2e/keyboard.spec.ts` で自動化済み（focus trap、Escape、focus restore、Menu の矢印キー移動、Menu から Dialog を開いて Enter で送信）
-  - `pnpm dev` 上の Chromium で確認した内容: Dialog の focus 移動、Escape で閉じる、trigger への focus restore、Menu の ArrowDown / Enter 操作と focus restore
-- Select / Combobox: 現状の UI で未使用のため未確認
-- touch interaction: iPhone 13 相当の viewport と touch（Playwright WebKit）で tap 操作を自動化済み（`e2e/mobile.spec.ts`）。実機では未確認
+Dialog と Menu の確認結果は [verification.md](verification.md#base-ui-の採用確認2026-09-16) にあります。
 
 ## 6. Hono / OpenAPI
 
-API route は `@hono/zod-openapi` で schema と route contract を定義します。
+API route は `@hono/zod-openapi` で schema と route の契約を定義します。同じ schema を runtime の検証、TypeScript の型推論、OpenAPI の生成に使います。
 
-同じ schema を以下に利用します。
-
-- runtime validation
-- TypeScript inference
-- OpenAPI generation
-
-手書き OpenAPI YAML と別の runtime schema を二重管理しません。
+手書きの OpenAPI YAML と別の runtime schema を二重に管理しません。
 
 開発環境では OpenAPI JSON を取得できるようにし、本番では private area に置きます。
 
@@ -175,104 +170,81 @@ pnpm db:check && pnpm test
 
 - migration は forward-only。適用済みの `.sql` を編集・改名しない
 - 実際に適用されるのは commit した `migrations/*.sql` で、`schema.ts` と食い違う場合も `.sql` が優先される。一致は `pnpm db:check`（snapshot との差分）と `tests/integration/migrations.test.ts`（適用後の D1 との差分）で検証する
-- 既存データがある前提で migration を書く
+- 既存データがある前提で migration を書く。CI は空の D1 に適用するだけなので、データを変換する migration を初めて書くときは fixture を足す
 - `drizzle-kit push` / `drizzle-kit migrate` は使わない。適用は `wrangler d1 migrations apply` だけ
-- production migration を通常の test command から実行しない
+- production の migration を通常の test command から実行しない
 
-### baseline（`0001_initial`）
-
-`0001_initial.sql` は Drizzle 導入前に手書きした migration で、baseline として扱います。
-
-`0001_initial.sql` は変更しません。production の `d1_migrations` は file 名で記録されているため、改名や再生成もしません。
-
-`migrations/meta/0001_snapshot.json` は、同じ schema を drizzle-kit で生成した snapshot です。journal の entry は `idx: 1` / `tag: 0001_initial` です。drizzle-kit は次の番号を「最後の idx + 1」で決めるため、以後の migration は `0002_*` から始まります。この journal を `idx: 0` へ「直さない」でください。
-
-`0001_initial.sql` と snapshot の差は次の 2 点だけで、どちらも既存データに影響しません。
-
-- SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
-- `uploads.asset_id` の UNIQUE は、SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
-
-この差が原因で生成 SQL が誤っていれば CI で分かります。test の setup は空の D1 へ `0001` から順に全 migration を適用し、drift test が `schema.ts` と比較します。生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通ります。
-
-rehearsal が保証するのは、DDL として適用できることだけです。table は空なので、既存データの保存（table 作り直し時の列の対応、値の変換、NOT NULL や CHECK の強化）は検証しません。データを変換する migration を初めて書くときは、その migration 用の fixture を追加します。
-
-例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗します。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通ります。
-
-`wrangler` と `readD1Migrations` は `.sql` だけを読むため、`migrations/meta/` は適用対象になりません。
+`0001_initial` は Drizzle 導入前の特殊な baseline です。変更・改名・再生成をせず、journal の `idx: 1` も直しません。`uploads.asset_id` の UNIQUE を変える migration は手で直す必要があります。理由と既知の差は [migration の baseline](#12-migration-の-baseline0001_initial) にあります。
 
 ## 8. テスト方針
 
 ### Unit
 
-純粋な domain logic、hash / ID validation、error mapping 等。
+純粋な domain logic、hash / ID の検証、error の対応付けなど。
 
 ### Integration
 
-特に次を重視します。
+Server の挙動を固定する中心の層です。特に次を重視します。
 
-- upload reservation
-- finalize idempotency
-- D1 / R2 partial failure
-- storage audit の分類とページ境界、cleanup が消してよいものだけを消すこと
-- 差分 backup、backup の検査、restore の再開（呼び出しのどこで止まっても同じ結果になること）
+- upload の予約と finalize の冪等性
+- D1 / R2 の片側だけの失敗
 - authorization
 - album membership
-- share revoke
-- migration
+- share の revoke
+- storage audit の分類とページ境界、cleanup が消してよいものだけを消すこと
 - export / restore
+- 差分 backup、backup の検査、restore の再開（どこで止まっても同じ結果になること）
+- migration
+
+integration test は `createApp()` に test 用の Access 鍵と local blob signer を注入します。D1 と R2 の binding は、実際の migration を適用したものを使います。D1 / R2 の障害は、binding を Proxy で包んで再現します。
 
 ### E2E（workerd）
 
-全画面網羅ではなく、重要な縦経路を優先します。
+全画面は網羅せず、重要な縦の経路を通します。`tests/e2e/vertical.test.ts` が HTTP だけで次を通します。
 
 ```text
-auth
--> upload
--> ready
--> timeline
--> album
--> share
+auth -> upload -> ready -> timeline -> album -> share
 ```
-
-`tests/e2e/vertical.test.ts` が HTTP だけでこの経路を通します。
 
 ### Browser E2E（Playwright）
 
-workerd の test では見えない、Browser 固有の部分だけを対象にします。Server の挙動（認可、finalize の検査、share の検証など）は integration test が固定します。Browser E2E では再検査せず、判断が分かれた場合も integration test を優先します。
+workerd の test では見えない、Browser 固有の部分だけを対象にします。Server の挙動（認可、finalize の検査、share の検証など）は integration test が固定するので、ここでは再検査しません。判断が分かれたら integration test を優先します。
 
-| spec | 確認すること | project |
+spec を増やすのは、Browser でしか起きない不具合を直したときだけです。
+
+| spec | 守るもの | project |
 | --- | --- | --- |
-| `upload.spec.ts` | file input → canvas で作った derivative（512 / 2048 の上限）→ finalize 成功（WebKit の APP1 / APP13 除去を含む）→ timeline と viewer の表示。HEIC は実際に probe して decode できた環境で形式・向き・撮影日時まで確認し、できない環境では拒否の文言を確認する（decode の可否は engine ではなく実行環境で決まり、CI の Linux runner の WebKit は decode できない）。HEIC を名乗る壊れた bytes はどちらでも拒否される。presigned URL の期限切れ後に画像が回復すること。全件完了したアップロード表示だけが数秒後に消えること（実行中・失敗ありでは残る）。年月 navigation が実 library の月を出すこと | chromium, mobile-webkit |
-| `share.spec.ts` | album 作成 → viewer の menu から追加 → 共有リンク → 別 context の guest が閲覧（secret は Authorization header だけ、Cookie なし。thumbnail URL の期限切れから回復）→ 拡大表示の focus（閉じるボタンへ移り、Tab でも dialog 内に留まり、閉じると元の写真へ戻る）→ 再発行・無効化の確認 dialog（キャンセル・Escape では何も変わらない）→ 旧リンクと無効化したリンクは無効表示 | chromium |
-| `keyboard.spec.ts` | Base UI の Dialog / Menu の keyboard 操作と focus。viewer の ←/→ での移動（Menu 内では写真が変わらない）と、閉じたあとに最後の写真へ focus が戻ること。複数選択を keyboard だけで開始・選択・解除・終了できること | chromium |
-| `timeline.spec.ts` | 年月 navigation。数千枚・数年分の library は test 側が答えるので、確認するのは Browser 側だけ: 月を選ぶと URL に残りその月から表示されること、back / forward と reload で戻れること、上へ読んでも重複・欠けが出ないこと、月の見出しが scroll 中も上端に残ること、写真のある月だけが件数付きで並ぶこと。複数選択（選択中の tap が viewer を開かないこと、件数、全解除、page を足しても選択が残ること、album へまとめて追加、1 枚だけ失敗したときに失敗した写真だけが選択に残り再試行がその 1 枚だけを送ること、再試行が通れば選択が終わること、実行中は選択を変えられないこと（Escape を含む）、選択を始めるたびに album 一覧を読み直すこと、album が消えていれば再試行を出さず選択を残すこと、実行中に別 member が消した写真が選択へ戻らないこと、ゴミ箱の確認（Escape / キャンセルでは選択が消えないこと）とまとめての移動後に timeline から消えること、月を移ると選択が終わること） | chromium, mobile-webkit |
-| `viewer.spec.ts` | preview の取得失敗・読み込み失敗で「高画質で表示できませんでした」と再試行が出ること。album が多い menu が画面内に収まり、keyboard で末尾までスクロールできること。情報の panel に最初に追加した member が出ること（記録が無い写真ではそう書くこと）。original の保存が presigned URL へ移動せずにダウンロードになること | chromium |
-| `trash.spec.ts` | viewer からゴミ箱へ移した写真が toast の「元に戻す」で戻ること。ゴミ箱から復元した写真の「元に戻す」がゴミ箱へ戻し、復元後も favorite と album が残ること。完全に削除は確認 dialog を通り、キャンセルでは残り、確定すると「元に戻す」を出さずに消えること。album から外した写真が「元に戻す」で album へ戻り、reload 後も残ること | chromium |
-| `manage.spec.ts` | 「管理」は対応の要るものが無いと写真・アルバムの件数とゴミ箱へのリンクだけを出し、期限切れのアップロードや止まった完全削除があるときだけ行を足すこと。点検・作り直しは「メンテナンス」にあり、`/settings/maintenance` を直接開けること | chromium |
-| `theme.spec.ts` | OS の dark / light に合わせて private app と共有ページの地・文字・header の hairline が変わること。error toast の閉じるボタンが hover で toast の文字の側へ濃くなること | chromium |
-| `csp.spec.ts` | private app の HTML（未知の path を含む）に CSP が付き、注入した inline script・inline event handler・別の origin の画像が拒否されること | chromium |
-| `mobile.spec.ts` | iPhone 相当の viewport で横スクロールがないこと、下部タブが scroll 後も画面内にあり、ゴミ箱へは「管理」から行け、ゴミ箱では「管理」のタブが現在地になり戻れること、「管理」から「メンテナンス」へ移って戻れること、dark で下部タブの地・hairline・現在のタブが読めること、Undo toast のボタンが 44px 以上で離れていること、共有 dialog の入力欄が 16px 以上であること、tap で viewer（写真が画面幅か高さいっぱい）・共有 dialog が開き、画面内に収まること、選択の入口と操作が 44px 以上で bar が scroll 後も上端に残り、tap が写真を選ぶこと | mobile-webkit |
+| `upload.spec.ts` | canvas での derivative 生成から finalize と表示まで。HEIC、URL の期限切れからの回復 | chromium, mobile-webkit |
+| `share.spec.ts` | 共有リンクの発行から guest の閲覧、再発行・無効化まで | chromium |
+| `keyboard.spec.ts` | Base UI の Dialog / Menu、viewer、複数選択の keyboard 操作と focus | chromium |
+| `timeline.spec.ts` | 年月 navigation と複数選択 | chromium, mobile-webkit |
+| `viewer.spec.ts` | preview の失敗表示、長い menu、情報 panel、original の保存 | chromium |
+| `trash.spec.ts` | ゴミ箱・復元・album から外す操作と「元に戻す」 | chromium |
+| `manage.spec.ts` | 「管理」と「メンテナンス」の表示 | chromium |
+| `theme.spec.ts` | dark / light の配色 | chromium |
+| `csp.spec.ts` | CSP が付き、違反する script と画像が拒否されること | chromium |
+| `mobile.spec.ts` | phone 幅の layout、下部タブ、touch target、tap 操作 | mobile-webkit |
+
+個々の確認内容は spec の test 名にあります。
 
 ```bash
 pnpm exec playwright install --only-shell chromium webkit   # 初回のみ
 pnpm test:e2e
 ```
 
-`pnpm dev`（Access と presigned URL の模擬、[D-016](decisions.md)）を `.wrangler/e2e` の使い捨て local D1 / R2 で起動します（`EDGEPHOTOS_STATE_DIR`）。普段の `pnpm dev` の library には触れません。
+`pnpm dev`（Access と presigned URL の模擬、[D-016](decisions.md)）を `.wrangler/e2e` の使い捨ての local D1 / R2 で起動します（`EDGEPHOTOS_STATE_DIR`）。普段の `pnpm dev` の library には触れません。port 5173 を使うため、`pnpm dev` を止めてから実行します。
 
-port 5173 を使うため、`pnpm dev` を止めてから実行します。CI は chromium と mobile-webkit を別の runner で並列に実行し、それぞれが自分の dev server と library を持ちます。spec は `--project` で 1 つだけ実行しても通るように書きます（もう一方の project が作った写真や album を前提にしない）。写真は Browser の canvas で毎回ランダムに描くので、fixture を commit しません。
+spec の書き方:
 
-すべての spec は `e2e/fixtures.ts` の `test` を使います。page と guest の context で CSP 違反を集め、1 件でもあれば失敗にします。`vite dev` は Vite が挿入する tag にだけ nonce を付け、production と同じ policy で動きます（[D-037](decisions.md)）。test 側の mock が画像を返すときは、`data:` URL ではなく同じ origin の URL を `page.route` で返します。
-
-spec を増やすのは、Browser でしか起きない不具合を直したときだけにします。
+- `--project` で 1 つだけ実行しても通るように書く。CI は chromium と mobile-webkit を別の runner で並列に実行し、それぞれが自分の dev server と library を持つ
+- `e2e/fixtures.ts` の `test` を使う。page と guest の context で CSP 違反を集め、1 件でもあれば失敗にする。`vite dev` も production と同じ policy で動く（[D-037](decisions.md)）
+- mock が画像を返すときは、`data:` URL ではなく同じ origin の URL を `page.route` で返す
+- 写真は canvas で毎回ランダムに描き、fixture を commit しない
+- Browser の対応を engine 名で分岐しない。HEIC の decode のように、同じ engine でも実行環境で結果が変わる（[verification.md](verification.md#heic--heif-の取り込み2026-09-22)）
 
 ### Scale benchmark
 
-`pnpm bench` は `tests/bench/scale.bench.ts` を実行します。assert はしません。
-
-合成データで表示するのは、主要 API の時間、SQL の query plan と rows_read、storage audit の全走査、backup / restore の request 数です。
-
-結果と判断は [benchmarks.md](benchmarks.md) に記録します。
+`pnpm bench` は `tests/bench/scale.bench.ts` を実行します。assert はしません。合成データで、主要 API の時間、SQL の query plan と rows_read、storage audit の全走査、backup / restore の request 数を表示します。結果と判断は [benchmarks.md](benchmarks.md) に記録します。
 
 ```bash
 pnpm bench                                                        # 1,000 / 10,000 件
@@ -299,55 +271,27 @@ pnpm cli:check   # CLI が Node の型除去で起動するか
 pnpm check       # typecheck + lint + db:check + cli:check + test + build
 ```
 
-integration test は `createApp()` に test 用の Access 鍵と local blob signer を注入します。D1 と R2 binding は、実際の migration を適用したものを使います。
-
-D1 / R2 の障害は、binding を Proxy で包んで再現します。
-
 ## 9. テスト用 fixture
 
-実人物・実位置情報を使いません。
+実在の人物と実際の位置情報を使いません。画像は合成で作ります。
 
-用意する合成 fixture:
+- workerd の test: `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS を含む）を組み立てる。Worker は画像を decode しないので、これで足りる
+- Browser E2E: canvas で描いた JPEG
+- HEIC: Browser で作れないため、合成画像から作った小さな HEIC だけを `tests/fixtures/` に commit している。生成手順は `tests/fixtures/README.md`。壊れた HEIC や brand 違いは実行時に組み立てる
 
-- 通常 JPEG
-- EXIF orientation 各種
-- 架空 GPS 付き JPEG
-- timezone 不明日時
-- 透明 PNG
-- WebP
-- 壊れた画像
-- 拡張子偽装
-- 上限付近のサイズ / 画素数
+Browser ごとの decode の差（orientation、透明 PNG、WebP、壊れた画像など）は一度きりの検証で確かめ、常設の fixture にはしていません。結果は [verification.md](verification.md#browser-での取り込み2026-09-17) にあります。
 
-original の期待 SHA-256 を fixture metadata として固定します。
-
-現状の自動テストは、Worker が decode しない前提で `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS segment を含む）を生成して使います。Browser E2E は canvas で描いた JPEG を使います。
-
-HEIC だけは Browser で作れないので、合成画像から作った小さな HEIC を 2 つ commit しています（`tests/fixtures/`、計 1.7KB、実人物・実位置情報なし）。生成手順は `tests/fixtures/README.md` にあります。workers の test runtime には fs がないため、`vitest.config.ts` が base64 の binding として渡します（`TEST_MIGRATIONS` と同じ経路）。E2E は同じファイルを `readFileSync` で読みます。壊れた HEIC や brand 違いは、実行時に byte 列を組み立てて作り、commit しません。
-
-orientation、透明 PNG、WebP、壊れた画像などの decode 差は、下記の一度きりの検証で確認済みで、常設の fixture にはしていません。
-
-Browser での取り込み検証（decode、orientation、derivative、memory）は、公開されている実機サンプルと合成画像を使いました。scratch 環境で一度きりの Playwright script として実施し、fixture も script も commit していません。
-
-結果は [verification.md](verification.md) に、memory の数値は [benchmarks.md](benchmarks.md) にあります。
-
-Browser 差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（`tests/unit/web-image.test.ts`。WebKit が実際に出力した APP1 / APP13 の byte 列を含みます）。
+Browser の差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（例: `tests/unit/web-image.test.ts` は WebKit が実際に出力した APP1 / APP13 の byte 列を含む）。
 
 ## 10. 環境分離
 
-最低限次を分離します。
+local、remote-test、production を分けます。
 
-- local
-- remote-test
-- production
-
-D1、R2、Access application、signing credential を production と共有しません。
+D1、R2、Access application、署名用の credential を production と共有しません。
 
 ローカル用の認証 bypass を production build に混ぜません。
 
 ## 11. CI
-
-最初は次だけで十分です。
 
 - typecheck
 - lint / format check
@@ -360,7 +304,28 @@ GitHub Actions は commit SHA で固定します。Dependabot（`.github/dependa
 
 Remote の破壊操作を通常の test command に含めません。CI は Cloudflare の credential を持ちません。
 
-## 12. ドキュメントの規約
+## 12. migration の baseline（`0001_initial`）
+
+`0001_initial.sql` は Drizzle 導入前に手書きした migration で、baseline として扱います。
+
+`0001_initial.sql` は変更しません。production の `d1_migrations` は file 名で記録されているため、改名や再生成もしません。
+
+`migrations/meta/0001_snapshot.json` は、同じ schema を drizzle-kit で生成した snapshot です。journal の entry は `idx: 1` / `tag: 0001_initial` です。drizzle-kit は次の番号を「最後の idx + 1」で決めるため、以後の migration は `0002_*` から始まります。この journal を `idx: 0` へ「直さない」でください。
+
+`0001_initial.sql` と snapshot の差は次の 2 点だけで、どちらも既存データに影響しません。
+
+- SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
+- `uploads.asset_id` の UNIQUE は、SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
+
+この差が原因で生成 SQL が誤っていれば CI で分かります。test の setup は空の D1 へ `0001` から順に全 migration を適用し、drift test が `schema.ts` と比較します。生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通ります。
+
+rehearsal が保証するのは、DDL として適用できることだけです。table は空なので、既存データの保存（table 作り直し時の列の対応、値の変換、NOT NULL や CHECK の強化）は検証しません。
+
+例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗します。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通ります。
+
+`wrangler` と `readD1Migrations` は `.sql` だけを読むため、`migrations/meta/` は適用対象になりません。
+
+## 13. ドキュメントの規約
 
 ### どこに何を書くか
 
