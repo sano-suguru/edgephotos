@@ -2,7 +2,7 @@
 
 コードをどこに置き、どう検証し、どう変更するかの入口です。すべてをここで説明するわけではありません。
 
-食い違ったときの正本は、動作は code と test、検証の結果は [verification.md](verification.md)、性能の数値は [benchmarks.md](benchmarks.md)、判断の理由は [decisions.md](decisions.md) です。詳しくは [ドキュメントの規約](#13-ドキュメントの規約) にあります。
+食い違ったときの正本は、動作は code と test、検証の結果は [verification.md](verification.md)、性能の数値は [benchmarks.md](benchmarks.md)、判断の理由は [decisions.md](decisions.md) です。詳しくは [ドキュメントの規約](#12-ドキュメントの規約) にあります。
 
 ## 1. 変更の進め方
 
@@ -26,76 +26,21 @@ merge の前に、`pnpm check` と CI（Browser E2E を含む）が通ってい�
 | Browser でしか起きない挙動 | Browser E2E の spec を足すか直し、`pnpm test:e2e` |
 | API | `src/worker/app.ts` の route schema を変え、integration test で固定する |
 | D1 schema | [D1 / migration](#7-d1--migration) の手順 |
-| [AGENTS.md の「テストの厚さはリスクで決める」](../AGENTS.md#9-テストの厚さはリスクで決める) に挙げた領域 | 回帰テストが必須 |
+| 認証・認可（household の許可リストを含む）、upload finalize と重複、削除と復元、share の revoke、R2 key、migration、export / restore | 回帰テストが必須。一覧の正本は [AGENTS.md の「テストの厚さはリスクで決める」](../AGENTS.md#9-テストの厚さはリスクで決める) |
 | `scripts/` の CLI | `pnpm cli:check`（`pnpm check` に含む） |
 | 性能に効く変更 | `pnpm bench` で測り、[benchmarks.md](benchmarks.md) に記録する |
 
 ## 2. コードの置き場所
 
-迷ったら次で決めます。
+迷ったら次で決めます。細かい構成は repository そのものを見てください。
 
 - 画面の機能: `src/web/features/`
 - API: `src/worker/app.ts`（route と OpenAPI の契約）と `src/worker/services/`
 - D1 schema: `src/worker/db/schema.ts`。migration は生成する（[D1 / migration](#7-d1--migration)）
 - Worker と Browser が共有する schema と純関数: `src/contracts/`
+- 共有ページ: `src/web/share/`（`share.html` の entry）。private app の画面や API client を import しない
 - 運用の CLI: `scripts/`
-
-全体の構成:
-
-```text
-index.html                 private app entry
-share.html                 public share page entry
-src/
-  web/
-    app.tsx                shell + routing
-    main.tsx
-    logo.svg               logo: favicon of both entries, app header, README
-    components/ui/         shadcn/ui-style wrappers (Button, Dialog, DropdownMenu on Base UI), PageHeader, EmptyState
-    features/
-      uploads/  timeline/  albums/  shares/  settings/
-    lib/
-      api/client.ts        fetch client for /api/v1 (api/error.ts: ApiRequestError, DOM-free)
-      image.ts             SHA-256, EXIF, canvas derivatives
-      task-limit.ts        upload concurrency shared across selections
-      original-limit.ts    original size limit checked before reading a file
-      original-type.ts     original format from its first bytes (same check as finalize)
-    share/main.tsx         share page (no private app code)
-    state/router.ts
-  worker/
-    index.ts               Worker entry (dev-only wiring behind import.meta.env.DEV)
-    app.ts                 Hono app: middleware + all route contracts (OpenAPI)
-    auth/access.ts         Access assertion -> AppPrincipal
-    http/                  errors, Origin check, security headers
-    db/
-      schema.ts            D1 schema (Drizzle) -> row types, simple queries, generated migrations
-      index.ts             Db type + createDb (Drizzle over the D1 binding)
-    services/              uploads / assets / albums / shares / export / storage-audit (query builder or explicit SQL)
-    storage/               object keys, R2 presigner, finalize inspection, local blob emulation
-  contracts/
-    schemas.ts             zod schemas shared by Worker (runtime + OpenAPI) and Web (types only)
-    export-manifest.ts     manifest format id, paged-export assembly, integrity rules (zod-free)
-    image-type.ts          magic-byte format detection (finalize and Web)
-    errors.ts
-migrations/                D1 migrations (forward-only, applied by wrangler)
-  meta/                    drizzle-kit snapshots / journal (generated; not applied)
-drizzle.config.ts          drizzle-kit generate settings (no D1 credentials)
-scripts/
-  backup.ts                backup export / check / restore / verify CLI
-  storage.ts               storage audit / cleanup CLI (`pnpm storage`)
-  diagnose.ts              read-only setup diagnostics CLI (`pnpm diagnose`)
-  cli-client.ts            API client for the CLIs (EDGEPHOTOS_URL / EDGEPHOTOS_ACCESS_TOKEN)
-  cli-check.ts             starts the CLIs under Node type stripping (`pnpm cli:check`)
-  db-check.ts              schema vs committed migrations drift check
-  lib/backup.ts            API-based export / restore / verify (used by CLI and tests)
-  lib/diagnose.ts          setup checks (used by CLI and tests)
-  vite-dev-access.ts       dev server Access emulation
-tests/
-  unit/  integration/  e2e/   workerd tests (`pnpm test`)
-  bench/                   scale measurements (`pnpm bench`, not part of `pnpm check`)
-  helpers.ts               test app factory, signed assertions, synthetic image fixtures
-e2e/                       real-browser tests (Playwright, `pnpm test:e2e`)
-playwright.config.ts
-```
+- テスト: workerd 上は `tests/`、Browser は `e2e/`
 
 route は今は `src/worker/app.ts` にまとめています。route が増えて見通しが悪くなったら `routes/` へ分けます。
 
@@ -174,7 +119,7 @@ pnpm db:check && pnpm test
 - `drizzle-kit push` / `drizzle-kit migrate` は使わない。適用は `wrangler d1 migrations apply` だけ
 - production の migration を通常の test command から実行しない
 
-`0001_initial` は Drizzle 導入前の特殊な baseline です。変更・改名・再生成をせず、journal の `idx: 1` も直しません。`uploads.asset_id` の UNIQUE を変える migration は手で直す必要があります。理由と既知の差は [migration の baseline](#12-migration-の-baseline0001_initial) にあります。
+`0001_initial` は Drizzle 導入前の特殊な baseline です。変更・改名・再生成をせず、journal の `idx: 1` も直しません。`uploads.asset_id` の UNIQUE を変える migration は手で直す必要があります。理由と既知の差は [migrations/README.md](../migrations/README.md) にあります。
 
 ## 8. テスト方針
 
@@ -279,7 +224,7 @@ pnpm check       # typecheck + lint + db:check + cli:check + test + build
 - Browser E2E: canvas で描いた JPEG
 - HEIC: Browser で作れないため、合成画像から作った小さな HEIC だけを `tests/fixtures/` に commit している。生成手順は `tests/fixtures/README.md`。壊れた HEIC や brand 違いは実行時に組み立てる
 
-Browser ごとの decode の差（orientation、透明 PNG、WebP、壊れた画像など）は一度きりの検証で確かめ、常設の fixture にはしていません。結果は [verification.md](verification.md#browser-での取り込み2026-09-17) にあります。
+Browser ごとの decode の差（orientation、透明 PNG、WebP、壊れた画像など）は常設の fixture にせず、一度きりの検証で確かめました（[verification.md](verification.md#browser-での取り込み2026-09-17)）。
 
 Browser の差に起因する修正は、DOM に依存しない純関数へ切り出し、unit test で固定します（例: `tests/unit/web-image.test.ts` は WebKit が実際に出力した APP1 / APP13 の byte 列を含む）。
 
@@ -293,39 +238,11 @@ D1、R2、Access application、署名用の credential を production と共有�
 
 ## 11. CI
 
-- typecheck
-- lint / format check
-- schema と migration の drift check（`pnpm db:check`）
-- unit / integration tests
-- production build
-- Browser E2E（別 job。Chromium と WebKit）
+CI は typecheck、lint、`pnpm db:check`、`pnpm test`、build と、Browser E2E（Chromium と WebKit の別 job）を実行します。Cloudflare の credential を持たず、Remote の破壊操作を通常の test command に含めません。
 
 GitHub Actions は commit SHA で固定します。Dependabot（`.github/dependabot.yml`）が npm と Actions の更新 PR を週 1 回作ります。
 
-Remote の破壊操作を通常の test command に含めません。CI は Cloudflare の credential を持ちません。
-
-## 12. migration の baseline（`0001_initial`）
-
-`0001_initial.sql` は Drizzle 導入前に手書きした migration で、baseline として扱います。
-
-`0001_initial.sql` は変更しません。production の `d1_migrations` は file 名で記録されているため、改名や再生成もしません。
-
-`migrations/meta/0001_snapshot.json` は、同じ schema を drizzle-kit で生成した snapshot です。journal の entry は `idx: 1` / `tag: 0001_initial` です。drizzle-kit は次の番号を「最後の idx + 1」で決めるため、以後の migration は `0002_*` から始まります。この journal を `idx: 0` へ「直さない」でください。
-
-`0001_initial.sql` と snapshot の差は次の 2 点だけで、どちらも既存データに影響しません。
-
-- SQL 側の TEXT PRIMARY KEY は `NOT NULL` を明示していない（SQLite の歴史的仕様で NULL を受け付ける）。snapshot は `NOT NULL` として扱う。app は常に id を指定する
-- `uploads.asset_id` の UNIQUE は、SQL 側では column 制約（無名の autoindex）、snapshot では `uploads_asset_id_unique` という index
-
-この差が原因で生成 SQL が誤っていれば CI で分かります。test の setup は空の D1 へ `0001` から順に全 migration を適用し、drift test が `schema.ts` と比較します。生成 migration は毎回「0001 適用済みの DB に対する rehearsal」を通ります。
-
-rehearsal が保証するのは、DDL として適用できることだけです。table は空なので、既存データの保存（table 作り直し時の列の対応、値の変換、NOT NULL や CHECK の強化）は検証しません。
-
-例: `asset_id` の `.unique()` を外して生成すると `DROP INDEX uploads_asset_id_unique;` になり、setup が `no such index` で失敗します。table を作り直す migration（`__new_uploads` を作ってコピーし、rename する）に手で直すと通ります。
-
-`wrangler` と `readD1Migrations` は `.sql` だけを読むため、`migrations/meta/` は適用対象になりません。
-
-## 13. ドキュメントの規約
+## 12. ドキュメントの規約
 
 ### どこに何を書くか
 
