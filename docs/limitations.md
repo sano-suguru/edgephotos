@@ -1,62 +1,97 @@
 # 既知の制約
 
-現在わかっている制約をまとめます。どれも v1 の完成条件には含めません。
+EdgePhotos は現在 alpha です。使い始める前に知っておいてほしい制約をまとめます。各項目には、何が起きるか、どう対処するか、いつ見直すかを書きます。
 
-これからの作業は [roadmap.md](roadmap.md)、判断の経緯は [decisions.md](decisions.md) にあります。
+特に次の 4 つを先に確認してください。
 
-## 1. 中断した upload の片付けは手動
+1. EdgePhotos を写真の唯一の保存先にしない。別の場所に原本を残し、定期的に backup を取る（[Backup と export](operations.md#9-backup-と-export)）
+2. 大きな library では、初回の backup と restore に何時間もかかる（[backup / restore には時間がかかる](#backup--restore-には時間がかかる)）
+3. 点検で見つかった問題の一部は、自動では直らない。CLI、アプリのメンテナンス画面、R2 の Dashboard のどれかで対応する（[片付けと修復](#3-片付けと修復)）
+4. WebP には撮影日時が付かず、向きが Browser によって変わる（[WebP は写真ライブラリには勧めない](#webp-は写真ライブラリには勧めない)）
 
-finalize されなかった upload の行と object は、member が storage cleanup を実行するまで残ります（[D-023](decisions.md)）。写真の整合性には影響しません。
+どれも v1 までに直す予定はありません。これからの作業は [roadmap.md](roadmap.md)、判断の経緯は [decisions.md](decisions.md) にあります。
 
-定期実行は入れていません。次のどちらかが続く場合に、Cron も候補に含めて検討します（[将来要件を先回りしない](../AGENTS.md#6-将来要件を先回りしない)）。
+## 1. 想定している規模
 
-- cleanup を実行しても `library: interrupted uploads` の件数がすぐに増える
-- R2 使用量が、export manifest の `originalSize` 合計を大きく上回り、storage audit に出ない差がある
+10 万枚までの library を想定して測っています。ただし、10 万枚の library を日常的に使えることはまだ確かめていません。確かめた範囲は次のとおりです（数値は [benchmarks.md](benchmarks.md)）。
 
-## 2. original の破損の修復は手作業
+| 対象 | 確かめた範囲 |
+| --- | --- |
+| API（timeline・album・export・点検） | 合成 10 万枚を local で測定。timeline は library の大きさによらず一定 |
+| Browser の timeline | 合成 1 万枚を desktop の Chromium / WebKit で測定 |
+| backup / restore | 1 万枚まで local で測定。remote は数十枚で実走し、大きな library の所要時間は見積もり |
+| スマートフォン | 未確認。数千枚の timeline を v1 までに実機で確かめる（[Post-merge verification](roadmap.md#post-merge-verification)） |
+| 10 万枚を超える library | 測っていない |
 
-storage audit は original / derivative の欠落や違いを見つけますが、original は直しません。backup の original から upload し直す手順は運用の [監視と点検](operations.md#12-監視と点検) にあります。
+## 2. 使うときの制約
 
-欠けた derivative だけは、original に触れずに作り直せます（[D-026](decisions.md)）。
+### backup / restore には時間がかかる
 
-## 3. audit は derivative の中身を見ない
+初回の backup と restore は、写真の枚数に比例して時間がかかります。remote では 1 万枚で 1〜1.5 時間、10 万枚で 10 時間を超える見積もりです。original の転送時間は含まないため、回線によってはさらに延びます。
 
-storage audit は object の有無だけを見ます。そのため「object はあるが JPEG として使えない derivative」は `missing_derivative` に出ず、表示が崩れたままでも「問題なし」と数えられます。
+途中で止まっても、最初からやり直す必要はありません。
 
-この状態を作れるのは、作り直しで使えない bytes を PUT したまま戻ってこなかった client だけです（[D-026](decisions.md) の「残るリスク」）。その写真をもう一度作り直せば `If-Match` で置き換わります。
+- backup: 同じコマンドを再実行すると、取得済みの写真を飛ばして続きから取得します。書きかけのファイルは残らず、前回の `manifest.json` は完了するまで有効なままです
+- restore: `--resume` を付けて再実行すると、restore 済みの写真を飛ばして続けます
+- 2 回目以降の backup は差分で、変わった写真だけを取得します
 
-10 万枚の audit で derivative を 1 つずつ読み直す代価に見合わないため、`--deep` にも入れていません。必要になった場合の候補は、通常の audit は有無だけのままにして、`--deep` に derivative の header 検査を足すことです。
+手順は [Backup と export](operations.md#9-backup-と-export) と [Restore](operations.md#10-restore) にあります。
 
-## 4. どの行も指さない object は消さない
+### WebP は写真ライブラリには勧めない
 
-D1 の time travel の後などに残る `unreferenced_objects` は報告だけします。取り出しと削除は R2 の Dashboard で行います。
+WebP で取り込むと、次の 2 つが起きます。JPEG で取り込めるなら、そちらを使ってください。
 
-## 5. 大きな album の 1 ページは album の大きさに比例して読む
+- 撮影日時が付かない。timeline では、ライブラリに入った日時の位置に並びます
+- 向きが Browser によって変わる。回転情報を持つ WebP は、Safari などの WebKit で取り込むと回転し、Chrome などの Chromium で取り込むと回転しません
 
-album の中身を撮影日時順に返すため、album の全 member を読んで並べ替えます（[benchmarks.md](benchmarks.md)）。
+EdgePhotos が WebP の EXIF を読まないためです（`takenAt` は常に `null`）。向きは取り込んだ Browser の decoder が決め、そのまま thumbnail / preview と width / height に残ります。
 
-直すには `album_assets` に `sort_at` を持たせる非正規化とデータ移行が要ります。
+### 途中で切れた JPEG は WebKit では登録される
 
-## 6. backup / restore は逐次
+後半が欠けた JPEG を取り込むと、Chrome などの Chromium は拒否します。Safari などの WebKit は受け付け、欠けた部分が灰色の thumbnail / preview を作って、欠けた original をそのまま保存します。
 
-10 万枚の初回 backup と restore は、remote で 10 時間を超える見積もりです。差分 backup と `--resume` により、途中で止まっても最初からにはなりません（[D-024](decisions.md)）。
+灰色の写真を見つけたら、元の写真が壊れていないか確かめてください。無事なら取り込み直し、灰色の方は削除します。
 
-## 7. WebP の EXIF は読まない
+### 大きな album は開くたびに album 全体を読む
 
-WebP の `takenAt` は常に `null` です。EXIF orientation は WebKit では適用され、Chromium では適用されないため、同じ WebP でも Browser によって width / height と derivative の向きが変わります。
+album の中身を撮影日時順に並べるため、1 ページ開くたびに album の全写真を読みます。album が大きいほど重くなり、5 万枚の album では 1 ページごとに約 15 万行を読みます。Workers Free の D1 の上限（1 日 500 万行）では、1 日に 30 回あまり開くと上限に達します（[benchmarks.md](benchmarks.md)）。
 
-## 8. derivative の検査は header segment の種類まで
+直すには、album の中身の並び順を別に持たせる schema 変更とデータ移行が要ります。Free の上限に当たるか、体感で遅くなった時点で行います。
 
-finalize が derivative について保証するのは、先頭 256 KiB のうち最初の scan（SOS）までが length 付きの segment だけで並び、どれも allowlist に入っていること、APP0 / APP14 が決まった形であること、SOF があることだけです（[security.md](security.md#7-metadata-の漏れ防止)）。次は検査しません。
+## 3. 片付けと修復
 
-- SOF / DHT / DQT / DRI の中身
-- APP0 / APP14 のうち、signature・長さ・thumbnail の有無以外の field の値（JFIF の version / units / density、Adobe の version / flags / transform）
-- progressive JPEG の scan の間に挟んだ segment
-- EOI の後ろに付けたデータ
-- 画素そのもの
+storage audit（メンテナンス画面の「保存状態の点検」、または `pnpm storage audit`）が見つけた問題のうち、次のものは自動では片付きません。分類ごとの対応は [D1 と R2 の突合](operations.md#d1-と-r2-の突合storage-audit--cleanup) にあります。
 
-canvas の encoder はこうした場所に情報を書かないため、正規の client の derivative には現れません。household member が細工した bytes を直接 PUT した場合は、上の場所に載せた情報が share 閲覧者へ届く derivative に残ります。
+### 中断した upload は自動では片付かない
 
-## 9. 途中で切れた JPEG の扱いが Browser で違う
+通信の切断や画面ロックで upload が途中で止まると、登録されなかった写真のデータが R2 に残ります。library の写真には影響しませんが、保存容量を使います。
 
-Chromium は拒否し、WebKit は読めた部分から derivative を作って original を保存します。
+中断から 1 日たったものは、メンテナンス画面の「中断したアップロードを整理する」か `pnpm storage cleanup --apply` で片付けられます。定期的な自動実行はしていません（[D-023](decisions.md)）。
+
+cleanup の直後に `library: interrupted uploads` の件数がまた増える、または R2 の使用量が export manifest の `originalSize` の合計を大きく上回り、audit にも出ない差がある場合に、定期実行（Cron）を検討します。
+
+### どの写真も指さないデータは自動では消さない
+
+D1 を time travel で過去の状態へ戻した後などに、どの写真にも結び付かないデータが R2 に残ります。time travel の後なら、戻した期間に upload した写真のデータの可能性があります。audit は `unreferenced_objects` として報告するだけで、削除しません。
+
+写真を取り戻したい場合も、不要なので消したい場合も、R2 の Dashboard で操作します。
+
+### 壊れた original は自動では直らない
+
+audit が original の欠落や破損を見つけても、EdgePhotos は original を直しません。backup の original から戻します。現在の手順は、その写真をアプリで完全削除し、backup の original を upload し直すことです。album と favorite は付け直します。
+
+thumbnail / preview が欠けているだけなら、メンテナンス画面の「サムネイルを作り直す」で直せます。original は変わりません（[D-026](decisions.md)）。
+
+### 点検は thumbnail / preview の中身を見ない
+
+audit は thumbnail / preview があるかどうかだけを見ます。データはあるのに画像として表示できない thumbnail / preview は、表示が崩れていても「問題なし」と数えられます。
+
+メンテナンス画面の「サムネイルを作り直す」は audit が欠けていると挙げた写真だけを対象にするため、この写真は画面からは直せません。
+
+この状態が起きるのは、作り直しの途中で壊れたデータを送ったまま止まった client があった場合だけです（[D-026](decisions.md) の「残るリスク」）。10 万枚の audit で全件を読み直す代価に見合わないため、`--deep` にも検査を入れていません。必要になったら、`--deep` に JPEG header の検査を足し、見つかった写真を作り直せるようにします。
+
+## 4. 共有の画像に残りうる情報
+
+共有リンクで渡す thumbnail / preview は、JPEG として完全には検査していません。
+
+EdgePhotos のアプリが作った画像には、撮影場所などの metadata は入りません。ただし household member がアプリを通さずに細工した画像を直接 upload した場合は、検査しない部分に載せた情報が共有先に届くことがあります。検査の範囲は [metadata の漏れ防止](security.md#7-metadata-の漏れ防止) にあります。

@@ -193,7 +193,17 @@ finalize は、derivative の最初の scan（SOS）までの header segment を
 - 上記以外の segment（APP1 の EXIF / XMP、APP13 の IPTC、COM、APP2 の ICC profile と MPF、APP11 の JUMBF など）を含む derivative は `422` で拒否する
 - SOS の前に SOF が無い bytes と、SOS の前に fill byte（`FF FF`）・RSTn・TEM・EOI を置いた bytes も拒否する
 
-検査するのは segment の種類と、APP0 / APP14 の形だけです。SOF / DHT / DQT / DRI の中身、最初の scan より後ろ、EOI の後ろは検査しません（[limitations.md](limitations.md#8-derivative-の検査は-header-segment-の種類まで)）。Client は PUT 前に、同じ判定関数（`src/contracts/jpeg-segments.ts`）で許可されない segment を取り除きます。
+Client は PUT 前に、同じ判定関数（`src/contracts/jpeg-segments.ts`）で許可されない segment を取り除きます。
+
+finalize が保証するのは、先頭 256 KiB のうち最初の scan までが length 付きの segment だけで並び、どれも allowlist に入っていること、APP0 / APP14 が決まった形であること、SOF があることだけです。次は検査しません（[共有の画像に残りうる情報](limitations.md#4-共有の画像に残りうる情報)）。
+
+- SOF / DHT / DQT / DRI の中身
+- APP0 / APP14 のうち、signature・長さ・thumbnail の有無以外の field の値（JFIF の version / units / density、Adobe の version / flags / transform）
+- progressive JPEG の scan の間に挟んだ segment
+- EOI の後ろに付けたデータ
+- 画素そのもの
+
+canvas の encoder はこうした場所に情報を書かないため、正規の client の derivative には現れません。household member が細工した bytes を直接 PUT した場合は、上の場所に載せた情報が share 閲覧者へ届く derivative に残ります。
 
 ### 画像を解析する箇所
 
