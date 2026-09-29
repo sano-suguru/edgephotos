@@ -8,11 +8,12 @@
 
 ## main 全体のレビューで見つかった不具合の修正（2026-09-29）
 
-API の挙動が 3 つ変わりました。
+API の挙動が 2 つ変わりました。
 
 - `takenAt` は、実在する日時（月 1〜12、その月の日数、時 0〜23）と ±14:00 以内の offset だけを受け付けます。reserve と backup manifest の両方に効きます
-- 共有 API（`GET /share/api/v1/shares/{shareId}`）は `direction` を受け付けません
-- 完了した完全削除を再試行すると `404 ASSET_NOT_FOUND` になります。これは OpenAPI の説明にも書きました。Web はこの 404 を完了として扱います
+- 共有 API（`GET /share/api/v1/shares/{shareId}`）は `direction` を無視し、常に新しい写真から読みます
+
+完全削除の OpenAPI の説明を、実際の挙動に合わせました。完了した削除を再試行すると `404 ASSET_NOT_FOUND` になります。Web はこの 404 を完了として扱います。
 
 更新時は migration `0005_null_invalid_taken_at` を適用します。この migration は、保存済みの実在しない `taken_at` を NULL にし、その写真をアップロード日時の位置に並べ直します。
 

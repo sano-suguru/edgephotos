@@ -282,6 +282,7 @@ Web 版が保存する original は「Browser から受け取った byte 列」�
 - timeline の並び順（`sort_at`）だけは、offset の無い日時を UTC とみなして計算します。そのため、日本時間で動く offset を書かないカメラの写真は、同じ瞬間に offset 付きで撮った写真より 9 時間新しいものとして並びます
 - EXIF は original に残っているため、将来 GPS や端末の設定から offset を推定する場合も、保存済みの original から計算し直せます
 - `takenAt` は backup / restore でも文字列のまま保持されます
+- 実在しない日時（13 月、2 月 30 日、24 時）と ±14:00 を超える offset は、API が受け付けません。Client は、日時が実在しなければ `takenAt` を付けず、offset だけが範囲外なら offset を外します
 
 年月 navigation（[D-031](decisions.md)）の月は、`takenAt` があればその先頭の digits、無ければ `createdAt`（UTC）です。`takenAt` のある写真は、grid の見出しと必ず同じ月になります。`takenAt` の無い写真だけは、navigation が UTC の月、見出しが閲覧端末の timezone の月なので、月境界の数時間だけ違う月に見えることがあります。並び順の fallback 自体は変えていません。
 
@@ -365,7 +366,7 @@ share から発行する URL の期限は 300 秒以下で、share の残り期�
 
 - `trash` は論理削除です。timeline・album・share から見えなくなりますが、original は残ります
 - `restore` で元に戻せます。album 所属も復帰します
-- 完全削除は trash 内の asset に対してのみ実行できます。`purging` に遷移して全画面から隠したあと、R2 object を削除し、最後に D1 row を削除します。途中で失敗した場合も、同じ `DELETE` を再実行すれば再開できます
+- 完全削除は trash 内の asset に対してのみ実行できます。`purging` に遷移して全画面から隠したあと、R2 object を削除し、最後に D1 row を削除します。途中で失敗した場合も、同じ `DELETE` を再実行すれば再開できます。削除が完了した後の再実行は `404 ASSET_NOT_FOUND` になり、Web はこれを完了として扱います
 - 止まった削除の asset ID は `GET /api/v1/diagnostics` の `purgingAssetIds`（古い順に最大 100 件）で分かります。管理画面の「削除を再開」がそれぞれに `DELETE` を送ります。同じ写真を upload し直した場合も、reserve / finalize が削除を完了させます（[D-014](decisions.md)）
 - 完全削除は、asset が `ready` かつ trash 内である場合だけ `purging` にします。別の tab からの復元が間に入った場合は `409 ASSET_NOT_TRASHED` で、何も削除しません
 
@@ -405,7 +406,7 @@ original 本体を含む backup（差分）、backup ディレクトリの検査
 | `contentType` | `image/jpeg` \| `image/png` \| `image/webp` \| `image/heic` \| `image/heif` | | original の形式（[D-030](decisions.md)） |
 | `filename` | 1〜255 文字 | ✓ | upload 時のファイル名。object key には使いません |
 | `width` / `height` | 正の整数 | ✓ | pixel |
-| `takenAt` | ISO 8601 date-time（offset 任意） | ✓ | EXIF の撮影日時。**instant ではなく壁時計**で、offset の無い値をそのまま保ちます |
+| `takenAt` | 実在する ISO 8601 date-time（offset 任意） | ✓ | EXIF の撮影日時。**instant ではなく壁時計**で、offset の無い値をそのまま保ちます |
 | `isFavorite` | boolean | | |
 | `trashedAt` | instant | ✓ | 非 null なら trash 内。restore 先でも trash に入ります |
 | `createdAt` | instant | | ライブラリに入った時刻。restore が送り直すので保たれます |
