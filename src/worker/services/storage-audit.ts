@@ -187,7 +187,8 @@ export async function auditStorage(
       else if (!recorded) {
         checksumsUnrecorded++
         issues.push({ kind: 'original_checksum_unrecorded', assetId: asset.id })
-      } else if (toHex(recorded) !== asset.sha256) issues.push({ kind: 'original_checksum_mismatch', assetId: asset.id })
+      } else if (toHex(recorded) !== asset.sha256)
+        issues.push({ kind: 'original_checksum_mismatch', assetId: asset.id })
     })
   }
 

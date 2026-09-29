@@ -209,7 +209,12 @@ function SharePage() {
         )}
       </main>
       {viewing.value && (
-        <PhotoOverlay key={viewing.value.id} id={viewing.value.id} url={viewing.value.url} error={viewing.value.error} />
+        <PhotoOverlay
+          key={viewing.value.id}
+          id={viewing.value.id}
+          url={viewing.value.url}
+          error={viewing.value.error}
+        />
       )}
     </>
   )
