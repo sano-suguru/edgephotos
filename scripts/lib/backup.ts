@@ -543,6 +543,13 @@ export const DAMAGE_KINDS = new Set<StorageAuditIssue['kind']>([
   'audit_incomplete',
 ])
 
+// The deep audit hashes an original only when its size matches, so these leave its digest unconfirmed.
+const ORIGINAL_DAMAGE_KINDS = new Set<StorageAuditIssue['kind']>([
+  'missing_original',
+  'original_size_mismatch',
+  'original_checksum_mismatch',
+])
+
 export type VerifyReport = {
   ok: boolean
   checkedOriginals: number
@@ -616,19 +623,22 @@ export async function verifyLibrary(
 
   const audit = await auditLibrary(client, { deep: opts.quick })
   const unrecorded = new Set<string>()
+  const originalDamaged = new Set<string>()
   for (const issue of audit.issues) {
     const line = `storage: ${issue.kind} ${issue.assetId ?? issue.key ?? ''}`.trim()
     if (issue.kind === 'original_checksum_unrecorded' && issue.assetId) unrecorded.add(issue.assetId)
     else if (DAMAGE_KINDS.has(issue.kind)) problems.push(line)
     else notes.push(line)
+    if (ORIGINAL_DAMAGE_KINDS.has(issue.kind) && issue.assetId) originalDamaged.add(issue.assetId)
   }
 
   let checkedOriginals = 0
   let checksumVerified = 0
   for (const [i, a] of actual.assets.entries()) {
     if (opts.quick && !unrecorded.has(a.id)) {
-      // The deep audit found no mismatch: R2's recorded digest equals assets.sha256, which equals the manifest.
-      checksumVerified++
+      // A damaged original is already a problem above and was not confirmed. For the rest, the deep audit
+      // found no mismatch: R2's recorded digest equals assets.sha256, which equals the manifest.
+      if (!originalDamaged.has(a.id)) checksumVerified++
       continue
     }
     const original = await apiJson<{ url: string }>(client, `/api/v1/assets/${a.id}/original`)
