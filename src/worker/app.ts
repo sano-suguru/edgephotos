@@ -120,7 +120,8 @@ function checkedPageQuery<T extends { cursor?: string; direction?: 'older' | 'ne
   return q
 }
 
-// A share is read oldest-to-newest by its viewer only, so it takes no direction: an unknown key is dropped.
+// A share is only read from its newest photo down (the share page pages with nextCursor), so it takes no
+// direction: the unknown key is dropped.
 const SharePageQuery = PageQuery.omit({ direction: true })
 
 const boolQuery = z
