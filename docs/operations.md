@@ -146,7 +146,7 @@ Vars（`wrangler.jsonc` の `vars`、値が公開されても害がないもの�
 
 secret と同じ名前の binding が 2 つになるため、deploy が拒否されるか、空文字の var が secret を隠します。どちらの場合も private API は `503` のままです。
 
-以前の top-level 設定は空文字の `vars` を持っていたため、production を手順どおりに作るとこの状態になりました（2026-09-17 に `remote-test` と同じ形へ修正。実際の production deploy では未確認）。`pnpm diagnose --offline` がこの状態を検出します。
+`pnpm diagnose --offline` がこの状態を検出します。
 
 secret 未設定の binding は `undefined` になるため、`readAppConfig()` は `null` を返します。private API と share API は `503 SERVER_MISCONFIGURED` で fail-closed のままです。`secrets.required` は deploy を止めるための仕組みであり、fail-closed の根拠ではありません。
 
@@ -196,7 +196,7 @@ Worker がまだ無い初回は、`wrangler deploy --secrets-file <file>` で 7 
 
 `--secrets-file` の無い初回 deploy は `secrets.required` で失敗します。2 回目以降の deploy では `--secrets-file` を付けません。secret は前回の deploy から引き継がれます（[verification.md](verification.md#初回-deploy-の-secret-の渡し方2026-09-24)）。
 
-`wrangler secret put` で先に Worker を作る方法は使いません。そのあとで `wrangler deploy` すると、deploy 前に入れた secret は残りませんでした（2026-09-18 に `restore-test` で確認）。Worker ができたあとの値の変更は `wrangler secret put` で構いません。
+`wrangler secret put` で先に Worker を作る方法は使いません。そのあとで `wrangler deploy` すると、deploy 前に入れた secret は残りません（[verification.md](verification.md#restore-drill2026-09-18edgephotos-restore-test)）。Worker ができたあとの値の変更は `wrangler secret put` で構いません。
 
 また、標準入力が端末でない環境（CI、エディタ内のシェル）では、`wrangler secret put` が値の入力を求めないまま空の secret を「Success」として保存します。値が入ったかどうかは `pnpm diagnose` で確認してください。
 
@@ -351,7 +351,7 @@ Worker が `503 SERVER_MISCONFIGURED` を返すときは、Workers Logs に欠�
 
 - 写真を 1 枚 upload して timeline に表示される（`pnpm diagnose` は PUT を実行しないため、upload の成立はここで確かめる）
 - 共有リンクを作成し、private window で表示でき、revoke 後は表示できない
-- 上の 2 つの間、開発者ツールの console に `Content Security Policy` の違反が出ない（[verification.md](verification.md#private-app-の-csp-を-production-で確かめる)）
+- 上の 2 つの間、開発者ツールの console に `Content Security Policy` の違反が出ない（[verification.md](verification.md#csp-の確認手順)）
 - 家族の写真を入れる前に、Workers Logs に credential が生で残っていないことを確かめる（[確認手順](verification.md#確認手順再実行用)）
 
 `pnpm diagnose` では見えない Access の設定は、Cloudflare dashboard と Browser で確認します。production の初回 deploy と、member を増減したあとに行います。
@@ -615,7 +615,7 @@ share secret が漏れた場合は、その share を revoke するか再発行�
 
 年に 1 回程度、または大きな変更の前に、restore できることを確かめます。
 
-手順は [リソース作成とデプロイ](#2-リソース作成とデプロイ) から [Cloudflare Access](#4-cloudflare-access) までで空の環境（例: `restore-test`）を作り、[Restore](#10-restore) を実行するだけです。2026-09-16 の drill の記録は [verification.md](verification.md) にあります。
+手順は [リソース作成とデプロイ](#2-リソース作成とデプロイ) から [Cloudflare Access](#4-cloudflare-access) までで空の環境（例: `restore-test`）を作り、[Restore](#10-restore) を実行するだけです。drill の記録は [verification.md](verification.md#restore-drilledgephotos-restore-test) にあります。
 
 drill で見るもの:
 
