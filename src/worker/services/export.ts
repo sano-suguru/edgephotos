@@ -73,7 +73,7 @@ export async function exportMembershipsPage(db: Db, after: { albumId: string; as
 }
 
 // Pending uploads past expires_at can no longer be PUT: they are interrupted uploads, not ones in flight.
-// Nothing cleans them up (docs/roadmap.md); the count only makes the leftovers visible.
+// Nothing removes them automatically; `storage cleanup` (D-023, run by hand) does, and the count shows when to.
 // Purging assets are hidden everywhere, so their ids are listed here to let the owner resume the delete.
 const PURGING_IDS_MAX = 100
 

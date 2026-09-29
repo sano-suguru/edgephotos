@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import type { StorageAuditIssue, StorageAuditPage, StorageCleanupResult } from '../../contracts/schemas'
 import { uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
+import { toHex } from '../lib/crypto'
 import { DERIVATIVE_VERSION, objectKey } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import type { ServiceContext } from './context'
@@ -24,8 +25,6 @@ const R2_LIST_MAX = 1000
 type Present = { original?: number; thumbnail?: true; preview?: true }
 type AssetProbe = { id: string; status: 'ready' | 'purging'; sha256: string; original_size: number }
 type UploadProbe = { id: string; asset_id: string; status: 'pending' | 'finalized' | 'duplicate'; expires_at: string }
-
-const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 
 export async function auditStorage(
   ctx: ServiceContext,
@@ -188,7 +187,7 @@ export async function auditStorage(
       else if (!recorded) {
         checksumsUnrecorded++
         issues.push({ kind: 'original_checksum_unrecorded', assetId: asset.id })
-      } else if (hex(recorded) !== asset.sha256) issues.push({ kind: 'original_checksum_mismatch', assetId: asset.id })
+      } else if (toHex(recorded) !== asset.sha256) issues.push({ kind: 'original_checksum_mismatch', assetId: asset.id })
     })
   }
 
