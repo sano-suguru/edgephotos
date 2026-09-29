@@ -102,26 +102,32 @@ export function createPageList<T>(
 
   // Reads the loaded range again, in the order it was assembled, and returns it with the boundaries it now
   // ends at. Used for fresh presigned URLs; the caller decides what to keep from the current items.
-  // Returns null when a reset happened meanwhile.
+  // A page added meanwhile (the reader scrolled on) is not in the answer, and the caller's answer would drop
+  // it while `requests` kept it, so the range is read again. Returns null when a reset happened meanwhile,
+  // or when the list kept growing and no read caught up with it.
   async function reloadRange(): Promise<{ items: T[]; nextCursor: string | null; topCursor: string | null } | null> {
     const mine = generation
-    let above: T[] = []
-    let below: T[] = []
-    let next = cursor.peek()
-    let top = topCursor.peek()
-    for (const request of requests) {
-      const page = await load(request.cursor, request.direction)
-      if (mine !== generation) return null
-      if (request.direction === 'newer') {
-        above = [...page.items, ...above]
-        top = page.prevCursor ?? null
-      } else {
-        below = [...below, ...page.items]
-        next = page.nextCursor
-        if (request === requests[0]) top = page.prevCursor ?? null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const read = requests
+      let above: T[] = []
+      let below: T[] = []
+      let next = cursor.peek()
+      let top = topCursor.peek()
+      for (const request of read) {
+        const page = await load(request.cursor, request.direction)
+        if (mine !== generation) return null
+        if (request.direction === 'newer') {
+          above = [...page.items, ...above]
+          top = page.prevCursor ?? null
+        } else {
+          below = [...below, ...page.items]
+          next = page.nextCursor
+          if (request === read[0]) top = page.prevCursor ?? null
+        }
       }
+      if (requests === read) return { items: [...above, ...below], nextCursor: next, topCursor: top }
     }
-    return { items: [...above, ...below], nextCursor: next, topCursor: top }
+    return null
   }
 
   // True while no reset has started since the returned check was taken.

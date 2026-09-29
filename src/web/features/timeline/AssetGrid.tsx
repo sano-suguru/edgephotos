@@ -222,7 +222,8 @@ export function AssetGrid(props: AssetGridProps) {
     try {
       // Reads exactly the pages this list was built from, so a list that starts at a month stays on it.
       const fresh = await list.current?.reloadRange()
-      // Null after a reset: another read replaced the list, and it is that read's answer that counts.
+      // Null after a reset (another read replaced the list, and it is that read's answer that counts) or
+      // while the reader keeps loading pages: those pages come from the server as it is now.
       if (!fresh) return true
       const previous = new Map(items.value.map((a) => [a.id, a]))
       items.value = fresh.items.map((a) => {
