@@ -217,4 +217,53 @@ describe('D1 migrations', () => {
       await cleanup()
     })
   })
+
+  it('0005 forgets capture times no clock shows and places those photos by upload time', async () => {
+    const migration = env.TEST_MIGRATIONS.find((m) => m.name.startsWith('0005_'))!
+    const createdAt = '2025-03-04T05:06:07.089Z'
+    const cases = {
+      valid: '2024-02-29T23:59:59.5+09:00',
+      validNoOffset: '2024-05-01T10:20:30',
+      month13: '2024-13-01T00:00:00',
+      feb30: '2024-02-30T10:00:00Z',
+      hour24: '2024-01-01T24:00:00',
+      offset: '2024-01-01T10:00:00+15:00',
+      offsetMinutes: '2024-01-01T10:00:00+09:75',
+    }
+    for (const [name, takenAt] of Object.entries(cases)) {
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO assets (id, status, sha256, original_size, original_content_type, taken_at, sort_at,
+             created_at, updated_at)
+           VALUES (?, 'ready', ?, 1, 'image/jpeg', ?, 1, ?, 'x')`,
+        ).bind(`data-${name}`, `data-${name}`, takenAt, createdAt),
+        env.DB.prepare(
+          `INSERT INTO uploads (id, asset_id, status, sha256, original_size, original_content_type,
+             thumbnail_size, preview_size, taken_at, created_at, expires_at)
+           VALUES (?, ?, 'pending', 'abc', 1, 'image/jpeg', 1, 1, ?, 'x', 'x')`,
+        ).bind(`data-${name}`, `data-asset-${name}`, takenAt),
+      ])
+    }
+    for (const query of migration.queries) await env.DB.prepare(query).run()
+
+    const assets = await all<{ id: string; taken_at: string | null; sort_at: number }>(
+      "SELECT id, taken_at, sort_at FROM assets WHERE id LIKE 'data-%' ORDER BY id",
+    )
+    const uploads = await all<{ id: string; taken_at: string | null }>(
+      "SELECT id, taken_at FROM uploads WHERE id LIKE 'data-%' ORDER BY id",
+    )
+    for (const [name, takenAt] of Object.entries(cases)) {
+      const kept = name.startsWith('valid')
+      expect(assets.find((a) => a.id === `data-${name}`)).toEqual({
+        id: `data-${name}`,
+        taken_at: kept ? takenAt : null,
+        sort_at: kept ? 1 : Date.parse(createdAt),
+      })
+      expect(uploads.find((u) => u.id === `data-${name}`)?.taken_at).toBe(kept ? takenAt : null)
+    }
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM assets WHERE id LIKE 'data-%'"),
+      env.DB.prepare("DELETE FROM uploads WHERE id LIKE 'data-%'"),
+    ])
+  })
 })

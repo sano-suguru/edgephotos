@@ -1,5 +1,6 @@
 import { z } from '@hono/zod-openapi'
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION } from './export-manifest.ts'
+import { takenAtExists } from './taken-at.ts'
 
 // API schemas shared by the Worker (runtime validation + OpenAPI) and clients (types only).
 // Nothing here may reference server secrets or storage credentials.
@@ -38,9 +39,16 @@ export const MemberEmailSchema = z
   .refine((value) => value === value.toLowerCase(), 'Expected the stored (lowercase) email')
 
 // ISO 8601 date-time. The offset is optional because EXIF often lacks timezone information.
+// As with InstantSchema, the spelling is checked first and alone, then the value must exist: the timeline and
+// the month list read the digits as they are. migrations/0005_null_invalid_taken_at.sql removes values stored
+// before this check.
 export const TakenAtSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?$/, 'Expected ISO 8601 date-time')
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?$/, {
+    error: 'Expected ISO 8601 date-time',
+    abort: true,
+  })
+  .refine(takenAtExists, 'Expected a date and time that exists')
   .openapi({ example: '2024-05-01T10:20:30+09:00' })
 
 export const ErrorSchema = z

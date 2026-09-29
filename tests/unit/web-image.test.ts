@@ -51,6 +51,12 @@ describe('EXIF date conversion', () => {
     expect(exifDateToIso('2021:07:04 12:34:56', '+09:00')).toBe('2021-07-04T12:34:56+09:00')
   })
 
+  it('keeps the date but drops an offset no clock uses', () => {
+    expect(exifDateToIso('2024:02:29 10:00:00', '+15:00')).toBe('2024-02-29T10:00:00')
+    expect(exifDateToIso('2024:02:29 10:00:00', '+09:75')).toBe('2024-02-29T10:00:00')
+    expect(exifDateToIso('2024:02:29 10:00:00', '-14:00')).toBe('2024-02-29T10:00:00-14:00')
+  })
+
   it('leaves timezone-unknown dates without an offset', () => {
     expect(exifDateToIso('2021:07:04 12:34:56', undefined)).toBe('2021-07-04T12:34:56')
     expect(exifDateToIso('2021:07:04 12:34:56', 'garbage')).toBe('2021-07-04T12:34:56')
@@ -60,6 +66,10 @@ describe('EXIF date conversion', () => {
     expect(exifDateToIso('0000:00:00 00:00:00', undefined)).toBeUndefined()
     expect(exifDateToIso('    :  :     :  :  ', undefined)).toBeUndefined()
     expect(exifDateToIso('2023:13:45 25:61:61', undefined)).toBeUndefined()
+    // Dates the JavaScript parser rolls over instead of refusing: the API would reject them.
+    expect(exifDateToIso('2024:02:30 10:00:00', undefined)).toBeUndefined()
+    expect(exifDateToIso('2023:02:29 10:00:00', undefined)).toBeUndefined()
+    expect(exifDateToIso('2024:01:01 24:00:00', undefined)).toBeUndefined()
     expect(exifDateToIso('not a date', undefined)).toBeUndefined()
     expect(exifDateToIso(1234, undefined)).toBeUndefined()
   })
