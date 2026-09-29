@@ -166,3 +166,52 @@ test('a guest sees a markup-looking album title as plain text', async ({ page, b
   expect(await guest.evaluate(() => (window as { __xss?: number }).__xss)).toBeUndefined()
   await guestContext.close()
 })
+
+test('a photo that fails to open leaves the shared album on screen', async ({ page, browser }) => {
+  await openApp(page)
+  const photo = `${uniqueName('shared')}.jpg`
+  await uploadPhoto(page, photo)
+  // Album and link through the API: the flow that makes them is covered above.
+  const url = await page.evaluate(async (filename) => {
+    const post = (path: string, body: unknown) =>
+      fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const assets = (await (await fetch('/api/v1/assets?limit=200')).json()) as {
+      items: { id: string; filename: string }[]
+    }
+    const asset = assets.items.find((i) => i.filename === filename) as { id: string }
+    const album = (await (await post('/api/v1/albums', { title: 'Partly gone' })).json()) as { id: string }
+    await fetch(`/api/v1/albums/${album.id}/assets/${asset.id}`, { method: 'PUT' })
+    const share = (await (await post(`/api/v1/albums/${album.id}/shares`, { expiresInDays: 1 })).json()) as {
+      url: string
+    }
+    return share.url
+  }, photo)
+
+  const guestContext = await browser.newContext()
+  const guest = await guestContext.newPage()
+  let answer: 'gone' | 'offline' = 'gone'
+  await guest.route('**/share/api/v1/shares/*/assets/*/preview', (route) =>
+    answer === 'gone'
+      ? route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 'ASSET_NOT_FOUND', message: 'x', requestId: 'x' } }),
+        })
+      : route.abort('internetdisconnected'),
+  )
+  await guest.goto(url)
+  await expect(guest.getByRole('heading', { name: 'Partly gone' })).toBeVisible()
+
+  const overlay = guest.getByRole('dialog', { name: '写真' })
+  await guest.getByRole('button', { name: '拡大表示' }).click()
+  await expect(overlay).toContainText('この写真は公開が終わりました')
+  await overlay.getByRole('button', { name: '閉じる' }).click()
+  await expect(guest.getByRole('heading', { name: 'Partly gone' })).toBeVisible()
+
+  answer = 'offline'
+  await guest.getByRole('button', { name: '拡大表示' }).click()
+  await expect(overlay).toContainText('表示できませんでした')
+  await overlay.getByRole('button', { name: '閉じる' }).click()
+  await expect(guest.getByText('このリンクは無効か、期限切れです。')).toHaveCount(0)
+  await guestContext.close()
+})

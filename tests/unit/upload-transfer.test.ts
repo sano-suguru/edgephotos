@@ -106,6 +106,20 @@ describe('transferPhoto', () => {
     }
   })
 
+  it('keeps the earlier reservation when finalize is refused for a reason that is not about it', async () => {
+    for (const error of [
+      new ApiRequestError(401, 'UNAUTHENTICATED', 'x'),
+      new ApiRequestError(403, 'FORBIDDEN', 'x'),
+    ]) {
+      const f = fake([error])
+      const previous = reservation(7)
+      f.deps.remember(previous)
+      await expect(transferPhoto(f.deps, f.bodies, previous, () => {})).rejects.toBe(error)
+      expect(f.remembered()).toBe(previous)
+      expect(f.log).toEqual(['finalize upload-7'])
+    }
+  })
+
   it('keeps the earlier reservation when the retry cannot reach the server', async () => {
     const f = fake([new TypeError('offline'), new TypeError('offline'), new TypeError('offline')])
     const previous = reservation(7)

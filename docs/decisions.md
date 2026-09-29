@@ -312,7 +312,8 @@ file ではなく画面そのものへの拒否（`403 FORBIDDEN`、`403 ORIGIN_
 
 memory は decode 後の bitmap が支配的で、並列数を増やすと Chromium では peak が増えました。bitmap は PUT の前に close されるため、転送中に保持するのは File と小さな derivative だけになります。測定値は [benchmarks.md](benchmarks.md) にあります。
 
-- 入れなかったもの: ArrayBuffer を早く手放す案と、canvas を 0×0 にして解放する案（測定の揺れを超える差が出なかった）。Web Worker
+- 入れなかったもの: canvas を 0×0 にして解放する案（測定の揺れを超える差が出なかった）。Web Worker
+- ArrayBuffer を早く手放す案も、当時の測定（original は最大 23MB）では差が出なかった。2026-09-29 に入れた。original の上限は 100MB で、その大きさでは bitmap と同じ桁になりうるため。変更は decode の前に参照を切るだけで、仕組みは増えない。100MB での測定はまだない
 - 再検討の条件: mobile では、並列化で得る速度より peak memory の増加の方が重い可能性がある。iPhone の実機で大きな写真を続けて取り込み、Safari が memory 不足で落ちる場合は、まず並列数 1 を試す
 - 2 は選択の回数によらず、画面全体での上限とする。後から選んだ写真は先の写真の後ろに並ぶ（`src/web/lib/task-limit.ts`）
 
@@ -439,11 +440,11 @@ original が壊れている・無い写真は名前を挙げて続行し、最�
 
 「値が正しいか」と「全体が整合しているか」は別の問いで、巨大な schema にまとめません。
 
-**各 field を `UploadReserveSchema` と同じかそれ以上に厳しくする。** restore は写真ごとに `POST /uploads` へ送り直すので、緩いままだと「schema は通るが 5,000 枚 upload した後で 400 になる」manifest を許してしまいます。各 field の条件は次のとおりです。`originalSize` は 1〜100 MiB、`width` / `height` は正、`filename` は 1〜255 文字、`takenAt` は ISO 8601、album の `title` は 1〜200 文字かつ保存されている綴りのままとします。
+**各 field を `UploadReserveSchema` と同じかそれ以上に厳しくする。** restore は写真ごとに `POST /uploads` へ送り直すので、緩いままだと「schema は通るが 5,000 枚 upload した後で 400 になる」manifest を許してしまいます。各 field の条件は次のとおりです。`originalSize` は 1〜100 MiB、`width` / `height` は正、`filename` は 1〜255 文字、`takenAt` は ISO 8601 かつ実在する日時、album の `title` は 1〜200 文字かつ保存されている綴りのままとします。
 
 **instant の綴りを固定する。** `createdAt` / `trashedAt` / `exportedAt` / album の `createdAt` は `new Date().toISOString()` そのまま（UTC・ミリ秒・`Z`）に固定します。`verify` はこれらを文字列として比較するので、同じ時刻の別の綴りを認めると「restore はできたが verify が永久に `createdAt differs` を出す」状態になります。
 
-綴りだけでなく、実在する日時かも見ます。正規表現は `2024-99-99T99:99:99.999Z` を通し、`2024-02-30` は 3 月 1 日に繰り上がるためです。`takenAt` は EXIF 由来の壁時計なので対象外です（offset 任意のまま）。
+綴りだけでなく、実在する日時かも見ます。正規表現は `2024-99-99T99:99:99.999Z` を通し、`2024-02-30` は 3 月 1 日に繰り上がるためです。`takenAt` は EXIF 由来の壁時計なので、綴りは固定しません（offset 任意のまま）。実在する日時かどうかは、2026-09-29 から reserve と manifest の両方で見ます（`src/contracts/taken-at.ts`）。それ以前に保存された実在しない値は、migration `0005_null_invalid_taken_at` が NULL にします。
 
 **未知の key は無視する。** ただし backup は 10 年後に古い CLI が読む可能性があります。v1 に足してよいのは「その field を完全に無視する reader でも、data・意味・検証結果を失わずに restore できる optional field」だけと決めます。条件を満たすか判断できない追加は `formatVersion` を上げる側に倒します。知らない `formatVersion` は部分的に読まずに拒否します。
 

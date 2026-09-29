@@ -341,6 +341,8 @@ describe('export and restore to an empty environment', () => {
     // Quick mode catches it without a download: the size differs from what finalize verified.
     const quick = await verifyLibrary(apiClient(source), manifest, { quick: true })
     expect(quick.problems).toContain(`storage: original_size_mismatch ${victim.id}`)
+    // ...and does not count the damaged original among those whose digest it confirmed.
+    expect(quick.checksumVerified).toBe(manifest.assets.length - 1)
 
     // A backup does not stop at the damaged photo: the others are copied and the damaged one is named.
     const fresh = memoryStore()

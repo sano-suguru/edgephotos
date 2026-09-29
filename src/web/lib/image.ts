@@ -47,9 +47,11 @@ export async function sha256Hex(data: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-async function readTakenAt(buffer: ArrayBuffer): Promise<string | undefined> {
+// Given the File, exifr reads only the parts it needs (the EXIF segment, or the item a HEIC's iloc points at)
+// instead of the whole original.
+async function readTakenAt(file: Blob): Promise<string | undefined> {
   try {
-    const tags = (await exifr.parse(buffer, {
+    const tags = (await exifr.parse(file, {
       pick: ['DateTimeOriginal', 'OffsetTimeOriginal', 'CreateDate', 'OffsetTime'],
       reviveValues: false,
     })) as Record<string, unknown> | undefined
@@ -146,6 +148,14 @@ export async function renderDerivatives(
   }
 }
 
+// The only place the whole original is in memory: the box walk and the digest need every byte. The copy is
+// released before decoding, so it never sits next to the bitmap, which dominates memory (D-020).
+async function checkAndHash(file: File, contentType: ContentType): Promise<string> {
+  const buffer = await file.arrayBuffer()
+  refuseIfIncomplete(contentType, new Uint8Array(buffer))
+  return sha256Hex(buffer)
+}
+
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
   if (file.size > ORIGINAL_MAX_BYTES) throw new FileTooLargeError(`File is larger than ${ORIGINAL_MAX_BYTES} bytes`)
   // The format comes from the bytes, never from the name or the type the picker guessed: a camera file
@@ -156,14 +166,12 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
   // Before the reservation and before any PUT: a photo this browser cannot turn into derivatives must not
   // reach storage half-done.
   await refuseIfHeicIsUndecodableHere(contentType)
-  const buffer = await file.arrayBuffer()
-  refuseIfIncomplete(contentType, new Uint8Array(buffer))
-  const sha256 = await sha256Hex(buffer)
+  const sha256 = await checkAndHash(file, contentType)
   const bitmap = await decode(file, contentType)
   try {
     // Only now, on a file a real decoder accepted: the metadata reader is the least defensive thing we run
     // over an untrusted file, so it is the last to see one (docs/decisions.md D-030).
-    const takenAt = await readTakenAt(buffer)
+    const takenAt = await readTakenAt(file)
     const { thumbnail, preview } = await renderAll(bitmap, ['thumbnail', 'preview'])
     return {
       file,

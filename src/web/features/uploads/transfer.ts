@@ -28,6 +28,14 @@ export type TransferDeps = {
 }
 
 const VARIANTS: Variant[] = ['original', 'thumbnail', 'preview']
+// Finalize answers after which the earlier reservation cannot finish as it is. UPLOAD_OBJECT_MISSING can still
+// be finished by sending the missing parts while the signed URLs last.
+const FINISHED_RESERVATION_CODES = new Set([
+  'UPLOAD_NOT_FOUND',
+  'UPLOAD_RESULT_GONE',
+  'UPLOAD_OBJECT_INVALID',
+  'UPLOAD_OBJECT_MISSING',
+])
 // A PUT that starts this close to expiry may be refused before it completes.
 const URL_MARGIN_MS = 30_000
 
@@ -43,7 +51,9 @@ export async function transferPhoto(
       onStage('finalizing')
       return done(deps, await finalizeWithRetry(deps, previous.upload.id))
     } catch (err) {
-      if (!(err instanceof ApiRequestError) || err.status >= 500) throw err
+      // Only these answers are about the reservation itself. Any other (the sign-in lapsed, a key fetch failed)
+      // says nothing about it, so it is kept for the next try instead of sending the original again.
+      if (!(err instanceof ApiRequestError) || !FINISHED_RESERVATION_CODES.has(err.code)) throw err
       if (err.code === 'UPLOAD_OBJECT_MISSING') missing = (err.details?.missing as Variant[] | undefined) ?? VARIANTS
     }
     const usable = Date.parse(previous.upload.expiresAt) - deps.now() > URL_MARGIN_MS

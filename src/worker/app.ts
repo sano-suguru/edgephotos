@@ -120,6 +120,10 @@ function checkedPageQuery<T extends { cursor?: string; direction?: 'older' | 'ne
   return q
 }
 
+// A share is only read from its newest photo down (the share page pages with nextCursor), so it takes no
+// direction: the unknown key is dropped.
+const SharePageQuery = PageQuery.omit({ direction: true })
+
 const boolQuery = z
   .enum(['true', 'false'])
   .transform((v) => v === 'true')
@@ -389,7 +393,7 @@ export function createApp(options: AppOptions) {
       tags: tag('assets'),
       request: { params: AssetParams },
       responses: {
-        204: { description: 'Permanently deleted (safe to retry)' },
+        204: { description: 'Permanently deleted. A retry of a delete that finished answers 404 ASSET_NOT_FOUND' },
         409: json(ErrorSchema, 'Asset is not in trash'),
         ...errorResponses,
       },
@@ -756,7 +760,7 @@ export function createApp(options: AppOptions) {
       method: 'get',
       path: '/shares/{shareId}',
       tags: tag('share-public'),
-      request: { params: ShareParams, query: PageQuery },
+      request: { params: ShareParams, query: SharePageQuery },
       responses: { 200: json(SharedAlbumSchema, 'Shared album contents'), ...errorResponses },
     }),
     async (c) =>

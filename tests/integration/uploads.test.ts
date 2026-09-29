@@ -307,6 +307,44 @@ describe('upload finalize', () => {
     expect(other.sha256).not.toBe(p.sha256)
   })
 
+  it('finishes a permanent delete that took the same bytes during the race, then creates the asset', async () => {
+    const p = await photo()
+    const purgingId = crypto.randomUUID()
+    let raced = false
+    // Between the duplicate check and the insert, an asset with the same SHA-256 appears already `purging`:
+    // its permanent delete started but has not removed the row yet.
+    const racingDb = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        if (prop === 'batch' && !raced) {
+          return async (statements: D1PreparedStatement[]) => {
+            raced = true
+            await target
+              .prepare(
+                `INSERT INTO assets (id, status, sha256, original_size, original_content_type, sort_at, created_at, updated_at)
+                 VALUES (?, 'purging', ?, 1, 'image/jpeg', 0, 'x', 'x')`,
+              )
+              .bind(purgingId, p.sha256)
+              .run()
+            return target.batch(statements)
+          }
+        }
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const app = await makeApp({ env: { DB: racingDb } })
+    const r = await reserve(app, p)
+    for (const v of ['original', 'thumbnail', 'preview'] as const) await putObject(app, r.targets[v], p[v])
+
+    const result = await callJson(app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 200 })
+    expect(raced).toBe(true)
+    expect(result.result).toBe('created')
+    expect(await assetCount(p.sha256)).toBe(1)
+    expect(await env.DB.prepare('SELECT 1 FROM assets WHERE id = ?').bind(purgingId).first()).toBeNull()
+    expect(await uploadStatus(r.upload.id)).toBe('finalized')
+    expect(await env.BUCKET.head(assetIdFromTarget(r.targets.original.url))).not.toBeNull()
+  })
+
   it('never deletes its own objects when the unique fallback finds the asset it just created', async () => {
     const p = await photo()
     let injected = false

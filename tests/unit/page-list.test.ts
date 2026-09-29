@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { PageDirection } from '../../src/web/features/timeline/page-list'
 import { createPageList } from '../../src/web/features/timeline/page-list'
 
@@ -245,6 +245,29 @@ describe('paged list starting at a month', () => {
     await Promise.resolve()
     calls[5].resolve({ items: ['n1'], nextCursor: 'ignored', prevCursor: 'above-n1b' })
     expect(await range).toEqual({ items: ['n1', 'm1', 'm2'], nextCursor: 'c2b', topCursor: 'above-n1b' })
+  })
+
+  it('reads the range again when a page was added while it was being read', async () => {
+    const { calls, load } = manualLoader()
+    const list = createPageList(load, () => 'failed')
+    const first = list.loadPage(true, null)
+    calls[0].resolve({ items: ['a1'], nextCursor: 'c1' })
+    await first
+    const range = list.reloadRange()
+    // The reader scrolls on while the range is being read.
+    const more = list.loadPage(false)
+    expect(calls[2]).toMatchObject({ cursor: 'c1', direction: 'older' })
+    calls[2].resolve({ items: ['a2'], nextCursor: 'c2' })
+    await more
+    calls[1].resolve({ items: ['a1'], nextCursor: 'c1' })
+    await vi.waitFor(() => expect(calls).toHaveLength(4))
+    // The second read covers both pages, so the answer keeps the one that was added.
+    expect(calls.slice(3).map((c) => c.cursor)).toEqual([null])
+    calls[3].resolve({ items: ['a1'], nextCursor: 'c1' })
+    await vi.waitFor(() => expect(calls).toHaveLength(5))
+    expect(calls[4].cursor).toBe('c1')
+    calls[4].resolve({ items: ['a2'], nextCursor: 'c2' })
+    expect(await range).toEqual({ items: ['a1', 'a2'], nextCursor: 'c2', topCursor: null })
   })
 
   it('drops a range that was read while the list was replaced', async () => {

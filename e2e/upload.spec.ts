@@ -13,7 +13,23 @@ import {
   uploadPanel,
   uploadPhoto,
   uploadRow,
+  withExifDate,
 } from './fixtures'
+
+test('records the capture time from the EXIF of a JPEG', async ({ page }) => {
+  await openApp(page)
+  const name = `${uniqueName('exif')}.jpg`
+  const rows = await uploadFiles(page, [
+    { name, mimeType: 'image/jpeg', buffer: withExifDate(await makeJpeg(page, 640, 480), '2018:03:04 05:06:07') },
+  ])
+  expect(rows.get(name)).toContain('完了')
+  const stored = await page.evaluate(async (filename) => {
+    const res = await fetch('/api/v1/assets?limit=200')
+    const body = (await res.json()) as { items: { filename: string; takenAt: string | null }[] }
+    return body.items.find((i) => i.filename === filename)
+  }, name)
+  expect(stored?.takenAt).toBe('2018-03-04T05:06:07')
+})
 
 test('uploads a photo with browser-made derivatives, and takes HEIC where it can decode it', async ({ page }) => {
   await openApp(page)

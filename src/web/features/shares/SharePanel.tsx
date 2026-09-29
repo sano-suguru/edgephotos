@@ -102,8 +102,12 @@ export function SharePanel({ albumId }: { albumId: string }) {
             <Button
               variant="secondary"
               onClick={async () => {
-                await navigator.clipboard.writeText(fresh.value?.url ?? '')
-                copied.value = true
+                try {
+                  await navigator.clipboard.writeText(fresh.value?.url ?? '')
+                  copied.value = true
+                } catch {
+                  error.value = 'コピーできませんでした。リンクを選択してコピーしてください。'
+                }
               }}
             >
               {copied.value ? 'コピー済み' : 'コピー'}

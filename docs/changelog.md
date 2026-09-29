@@ -6,6 +6,27 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## main 全体のレビューで見つかった不具合の修正（2026-09-29）
+
+API の挙動が 2 つ変わりました。
+
+- `takenAt` は、実在する日時（月 1〜12、その月の日数、時 0〜23）と ±14:00 以内の offset だけを受け付けます。reserve と backup manifest の両方に効きます
+- 共有 API（`GET /share/api/v1/shares/{shareId}`）は `direction` を無視し、常に新しい写真から読みます
+
+完全削除の OpenAPI の説明を、実際の挙動に合わせました。完了した削除を再試行すると `404 ASSET_NOT_FOUND` になります。Web はこの 404 を完了として扱います。
+
+更新時は migration `0005_null_invalid_taken_at` を適用します。この migration は、保存済みの実在しない `taken_at` を NULL にし、その写真をアップロード日時の位置に並べ直します。
+
+Web の修正:
+
+- タイムラインを読み直している間に追加されたページを失わない
+- アップロード中のタイムライン再読込を 2 秒に 1 回まで間引く
+- finalize が 401 / 403 のときも、前回の予約を捨てない
+- 共有ページは、リンクが失効したときだけページ全体を無効表示にする
+- 写真の準備中に original 全体を保持する時間を短くする
+
+`pnpm backup verify --quick` は、壊れた original を `checksumVerified` に数えません。
+
 ## Deploy to Cloudflare（2026-09-27）
 
 README に Deploy to Cloudflare ボタンを置きました（[D-041](decisions.md)）。D1 と R2 の作成、migration、build と deploy、secret の保存を Cloudflare が行います。Access、bucket を限定した R2 API token、R2 CORS は、これまでどおり手で行います（[Deploy to Cloudflare で作る](operations.md#deploy-to-cloudflare-で作る)）。

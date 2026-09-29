@@ -64,14 +64,35 @@ const REFUSED_SCREEN: Record<string, string> = {
   SERVER_MISCONFIGURED: 'サーバーの設定が完了していません',
 }
 
+const LIBRARY_BUMP_MS = 2_000
+
 // How many rows the summary keeps. Running rows are never dropped (upload-list.ts).
 const DISPLAY_LIMIT = 200
 
 export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT) {
   const items = signal<UploadItem[]>([])
   const activeCount = computed(() => items.value.filter(isActiveUpload).length)
-  // Incremented whenever an asset becomes ready so views can refetch.
+  // Incremented when assets became ready so views can refetch. A refetch drops the pages below the one the
+  // reader is on, so a long selection bumps it at most once per LIBRARY_BUMP_MS, and always once after the
+  // last photo: the timeline fills in while the upload runs instead of starting over for every photo.
   const libraryVersion = signal(0)
+  let lastBump = Number.NEGATIVE_INFINITY
+  let bumpScheduled = false
+  function libraryChanged() {
+    if (bumpScheduled) return
+    const due = lastBump + LIBRARY_BUMP_MS - deps.now()
+    if (due <= 0) {
+      lastBump = deps.now()
+      libraryVersion.value++
+      return
+    }
+    bumpScheduled = true
+    void deps.wait(due).then(() => {
+      bumpScheduled = false
+      lastBump = deps.now()
+      libraryVersion.value++
+    })
+  }
   // The selected files, kept while their row can still be retried. A File is a handle, not a copy of the bytes.
   const files = new Map<string, File>()
   // Reservations of failed rows whose retry may finish them without sending the bytes again (transfer.ts).
@@ -135,7 +156,7 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
       }
       update(item.id, { state: result.result === 'duplicate' ? 'duplicate' : 'done', message: undefined })
       files.delete(item.id)
-      libraryVersion.value++
+      libraryChanged()
     } catch (err) {
       const settled = settledFailure(err)
       if (settled) {
