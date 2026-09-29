@@ -392,7 +392,7 @@ export function createApp(options: AppOptions) {
       tags: tag('assets'),
       request: { params: AssetParams },
       responses: {
-        204: { description: 'Permanently deleted (safe to retry)' },
+        204: { description: 'Permanently deleted. A retry of a delete that finished answers 404 ASSET_NOT_FOUND' },
         409: json(ErrorSchema, 'Asset is not in trash'),
         ...errorResponses,
       },

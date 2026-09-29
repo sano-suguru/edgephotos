@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { SNIFF_HEAD_BYTES, scanIsoBmffBoxes } from '../../src/contracts/image-type'
 import { LIMITS, ORIGINAL_CONTENT_TYPES } from '../../src/contracts/schemas'
-import { resumePurges } from '../../src/web/features/settings/resume-purges'
+import { purgeOnce, resumePurges } from '../../src/web/features/settings/resume-purges'
 import {
   canAutoDismissUploads,
   countUploads,
@@ -319,6 +319,21 @@ describe('resuming unfinished deletes', () => {
       }),
     ).rejects.toBe(failure)
     expect(called).toEqual(['a', 'b'])
+  })
+
+  // The viewer's "完全に削除" pressed again after the first answer was lost.
+  it('treats a repeated delete that finds nothing as done', async () => {
+    await expect(
+      purgeOnce('a', async () => {
+        throw notFound()
+      }),
+    ).resolves.toBeUndefined()
+    const failure = apiError(409, 'ASSET_NOT_IN_TRASH')
+    await expect(
+      purgeOnce('a', async () => {
+        throw failure
+      }),
+    ).rejects.toBe(failure)
   })
 })
 

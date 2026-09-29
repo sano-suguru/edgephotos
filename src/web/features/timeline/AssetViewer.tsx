@@ -19,6 +19,7 @@ import { overlayToaster, showToast, Toaster } from '../../components/ui/toast'
 import { api } from '../../lib/api/client'
 import { captureParts, formatDateTime } from '../../lib/dates'
 import { userMessage } from '../../lib/errors'
+import { purgeOnce } from '../settings/resume-purges'
 
 function formatBytes(n: number) {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
@@ -478,7 +479,7 @@ export function AssetViewer(props: {
         busy={busy.value}
         onConfirm={() =>
           run(async () => {
-            await api.purge(asset.id)
+            await purgeOnce(asset.id, (id) => api.purge(id))
             confirmingPurge.value = false
             props.onRemoved(asset, 'purge')
           })
