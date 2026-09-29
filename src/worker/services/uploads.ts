@@ -205,7 +205,11 @@ export type FinalizeOutcome = { result: 'created' | 'duplicate'; asset: AssetRow
 // Step 3. Idempotent: replays converge on the same asset. D1 and R2 are not one transaction;
 // on any D1 failure the upload stays pending and objects are left in place for a retry.
 // Who calls it does not matter: the uploader comes from the upload row, so storage cleanup keeps it too.
-export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Promise<FinalizeOutcome> {
+export function finalizeUpload(ctx: ServiceContext, uploadId: string): Promise<FinalizeOutcome> {
+  return finalizeOnce(ctx, uploadId, false)
+}
+
+async function finalizeOnce(ctx: ServiceContext, uploadId: string, retried: boolean): Promise<FinalizeOutcome> {
   const upload = await getUploadRow(ctx.db, uploadId)
   if (!upload) throw new ApiError(404, 'UPLOAD_NOT_FOUND', 'Upload not found.')
 
@@ -256,16 +260,19 @@ export async function finalizeUpload(ctx: ServiceContext, uploadId: string): Pro
     ])
   } catch (err) {
     if (!isUniqueViolation(err)) throw err
-    // A concurrent upload of the same bytes won the race.
     const winner = await getAssetBySha256(ctx.db, upload.sha256)
-    if (winner?.status !== 'ready') throw err
     // The asset holding these bytes is this upload's own (a replay committed it): not a duplicate.
-    if (winner.id === upload.asset_id) {
+    if (winner?.status === 'ready' && winner.id === upload.asset_id) {
       const fresh = await getUploadRow(ctx.db, upload.id)
       if (!fresh) throw new ApiError(404, 'UPLOAD_NOT_FOUND', 'Upload not found.')
       return settledOutcome(ctx, fresh)
     }
-    return markDuplicate(ctx, upload, winner)
+    // A concurrent upload of the same bytes won the race, or a photo with these bytes started its permanent
+    // delete after the check above. findStoredAsset finishes that delete, and then this upload starts over once.
+    const existing = await findStoredAsset(ctx, upload.sha256, upload.asset_id)
+    if (existing) return markDuplicate(ctx, upload, existing)
+    if (retried) throw err
+    return finalizeOnce(ctx, uploadId, true)
   }
 
   const fresh = await getUploadRow(ctx.db, uploadId)
