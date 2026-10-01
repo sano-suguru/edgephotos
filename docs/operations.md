@@ -735,3 +735,5 @@ pnpm wrangler d1 delete edgephotos-restore-test
 2. Dashboard の R2 で `edgephotos-restore-test` の「設定」を開き、「Empty Bucket」で object をすべて削除してから bucket を削除する。bucket は空でないと削除できない
 3. R2 の「API トークンの管理」で、drill 用の token を削除する。token は鍵なので必ず消す
 4. 作業用の `restore-copy` を削除する
+
+次の drill のために Worker・bucket・token を残す場合も、写真の複製は消します。bucket を「Empty Bucket」で空にし、D1 を削除します。次の drill では D1 を作り直し、migration を適用して deploy し直します。Worker の secret は残るので、`--secrets-file` は要りません。deploy の後、`pnpm diagnose --env restore-test` の `worker: D1 schema` が PASS することで、Worker が新しい D1 を使っていることを確かめます。restore 先が空でなければ、`pnpm backup restore` は始まりません。

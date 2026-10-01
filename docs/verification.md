@@ -1118,3 +1118,9 @@ backup ディレクトリのコピーから restore した。
 
 - 以前は drill 用の環境が `wrangler.jsonc` に無かった。そのため `pnpm diagnose` の secret・D1 migration・r2.dev・CORS の検査は production の資源を見て、drill 環境の結果のように PASS を表示した。今回の deploy では、build した `wrangler.json` を手で書き換える必要もあった。`env.restore-test` を足して解消し、上の diagnose で確かめた
 - 最初の中断の試みでは、`node` が Volta の shim だったため、SIGTERM が shim だけを止めた。子の restore は動き続け、後から始めた `--resume` と同時に同じ環境へ書き込んだ。結果は album 6 つ（restore-state に無い 3 つ）で、`--resume` の最後の verify が `album count: expected 3, got 4`・`album membership differs` で `ok: false` になった。端末の Ctrl-C は process group 全体に届くため、通常の操作では起きない。2 つの restore を同時に走らせない注意を [Restore](operations.md#10-restore) に足した。restore には同時実行を防ぐ仕組みが無い
+
+#### 後片付け
+
+- production の合成写真 15 枚は、利用者が trash へ移した。album 3 つは残っている。完全な削除は利用者が行う
+- restore-test の Worker・D1・R2 bucket・R2 API token・Access application は、次の drill のために残した（利用者の判断）。中に入っているのは合成画像だけ
+- 作業用の backup のコピー、比較用の export、合成画像は削除した。backup ディレクトリ（合成画像 15 枚）は Mac に残っている
