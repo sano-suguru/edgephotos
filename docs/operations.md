@@ -654,7 +654,7 @@ share secret が漏れた場合は、その share を revoke するか再発行�
 
 ## 14. 復旧 drill
 
-backup から実際に戻せることを、使い捨ての環境へ restore して確かめます（頻度は [Backup と export](#頻度)）。production へは export 以外の書き込みをしません。
+backup から実際に戻せることを、drill 専用の環境へ restore して確かめます（頻度は [Backup と export](#頻度)）。production へは export 以外の書き込みをしません。
 
 drill 用の環境の定義は、`wrangler.jsonc` の `env.restore-test` に常に置いてあります。D1・R2・Worker は drill の前に作ります。restore した写真の複製は、drill が終わるたびに消します（[片付ける](#5-片付ける)）。Access application は、初回だけ [Cloudflare Access](#4-cloudflare-access) の手順で `edgephotos-restore-test.<subdomain>.workers.dev` に 2 つ（private と `/share` の Bypass）作ります。秘密情報もデータも持たないので、残して次の drill で再利用できます。private の Allow には、drill を行う member の email だけを入れます。
 

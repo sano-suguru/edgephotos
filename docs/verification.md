@@ -1071,7 +1071,7 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 
 ### 復旧 drill（2026-10-01）
 
-運用の [復旧 drill](operations.md#14-復旧-drill) を、production の backup から使い捨ての `edgephotos-restore-test` へ行った。production の library は 0 枚だったため、利用者の承認を得て合成画像を production に入れてから backup した。家族の写真では行っていない。
+運用の [復旧 drill](operations.md#14-復旧-drill) を、production の backup から drill 専用の `edgephotos-restore-test` へ行った。production の library は 0 枚だったため、利用者の承認を得て合成画像を production に入れてから backup した。家族の写真では行っていない。
 
 #### 使ったデータ
 

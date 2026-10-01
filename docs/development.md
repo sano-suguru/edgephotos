@@ -230,7 +230,7 @@ Browser の差に起因する修正は、DOM に依存しない純関数へ切�
 
 ## 10. 環境分離
 
-local、remote-test、production を分けます。復旧 drill の間だけ、使い捨ての restore-test も作ります（[復旧 drill](operations.md#14-復旧-drill)）。
+local、remote-test、production を分けます。復旧 drill 用に restore-test も置きます。restore した写真の複製は、drill ごとに消します（[復旧 drill](operations.md#14-復旧-drill)）。
 
 D1、R2、Access application、署名用の credential を production と共有しません。
 
