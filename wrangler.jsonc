@@ -27,7 +27,7 @@
   "vars": {
     "R2_BUCKET_NAME": "edgephotos"
   },
-  // Deploy fails if any of these are not set on the Worker. Keep in sync with env.remote-test.
+  // Deploy fails if any of these are not set on the Worker. Keep in sync with env.remote-test and env.restore-test.
   "secrets": {
     "required": [
       "HOUSEHOLD_EMAILS",
@@ -49,6 +49,28 @@
       // Unset secrets leave the bindings undefined, so readAppConfig() still fails closed.
       "vars": {
         "R2_BUCKET_NAME": "edgephotos-remote-test"
+      },
+      // Deploy fails if any of these are not set on the Worker.
+      "secrets": {
+        "required": [
+          "HOUSEHOLD_EMAILS",
+          "APP_ORIGIN",
+          "ACCESS_TEAM_DOMAIN",
+          "ACCESS_AUD",
+          "R2_ACCOUNT_ID",
+          "R2_ACCESS_KEY_ID",
+          "R2_SECRET_ACCESS_KEY"
+        ]
+      }
+    },
+    // Disposable environment for the recovery drill (docs/operations.md §14). Created for a drill and deleted
+    // after it; declared here so the build, deploy and `pnpm diagnose --env restore-test` name its resources.
+    "restore-test": {
+      "name": "edgephotos-restore-test",
+      "d1_databases": [{ "binding": "DB", "database_name": "edgephotos-restore-test", "migrations_dir": "migrations" }],
+      "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "edgephotos-restore-test" }],
+      "vars": {
+        "R2_BUCKET_NAME": "edgephotos-restore-test"
       },
       // Deploy fails if any of these are not set on the Worker.
       "secrets": {

@@ -460,6 +460,45 @@ manifest はページごとに順に読むので、ある一瞬の完全な写�
 
 household member 以外の identity（service token 等）では API を利用できないため、CLI も member の Access token を使います。
 
+### 頻度
+
+| 作業 | 頻度 |
+| --- | --- |
+| `pnpm backup export` | 写真をまとめて取り込んだ後と、少なくとも月 1 回 |
+| `pnpm backup check` | export の後と、backup を別の媒体へ複製した後（複製した側に対して） |
+| [復旧 drill](#14-復旧-drill) | 年 1 回程度と、破壊的な migration などの大きな変更の前 |
+
+export は差分なので、取り込んだ写真の分だけ download します。check は全 original を読み直すため、size の変わらない破損にも気付けます。所要時間は [benchmarks.md](benchmarks.md#backup--restorelocalapi-経由の逐次処理) にあります。
+
+### 置き場所
+
+backup は Cloudflare の外に置きます。production の写真は R2 と D1 にあり、Cloudflare account の喪失・乗っ取り・誤操作では一度に失われます。
+
+- 1 つ目: CLI を実行する PC のディスク（例: `~/EdgePhotosBackup/edgephotos`）。repository の中には置かない
+- 2 つ目（推奨）: 外付けディスクなど、PC とも別の媒体。普段は外しておく。PC の故障・紛失・誤削除と production の喪失が重なっても、写真が残る
+
+2 つ目へは、export と check が終わってから複製し、複製した側にも check をかけます。
+
+```bash
+rsync -a ~/EdgePhotosBackup/edgephotos/ /Volumes/<disk>/EdgePhotosBackup/edgephotos/
+pnpm backup check /Volumes/<disk>/EdgePhotosBackup/edgephotos
+```
+
+`--delete` は付けません。元のディレクトリから消したファイル（check で挙がった壊れたファイルなど）が、複製からも消えるためです。
+
+backup には original（位置情報を含みうる）と member の email が平文で入ります。どちらの置き場所も暗号化したディスクにします（[backup ディレクトリ](security.md#backup-ディレクトリ)）。
+
+### 失敗に気付く
+
+EdgePhotos は backup の失敗も遅れも通知しません。export が止まっていれば、写真は production にしかなくなります。気付く手段は次の 2 つです。
+
+- CLI の終了コード: export と check は、問題があれば原因を表示して exit 1 で終わる。実行した人がその場で見る
+- メンテナンス画面の「バックアップ処理の完了日時」: export が最後に問題なく終わった日時（[意味](#バックアップ処理の完了日時最終-backup-exportの意味)）。1 か月より前なら、export が止まっているか失敗している
+
+check の結果は server に記録されません。
+
+自動実行と通知は置いていません。月 1 回の export が抜けても誰も気付かなかった、ということが実際に起きたら、導入を検討します。
+
 ## 10. Restore
 
 backup から別の環境へライブラリを戻します。
@@ -467,8 +506,10 @@ backup から別の環境へライブラリを戻します。
 ### 前提
 
 - 対象 library が空であること。空でなければ restore は拒否します
-- backup ディレクトリが書き込み可能であること。進行状況を `restore-state.json` に書きます
+- backup ディレクトリが書き込み可能であること。進行状況を `restore-state.json` に書きます。drill では backup のコピーから restore し、backup 本体には書き込みません
 - 対象環境の Access token
+
+同じ対象へ 2 つの restore を同時に走らせないでください。album が重複して作られます。restore の最後の verify は、album の数の違いとして検出します（[verification.md](verification.md#復旧-drill2026-10-01)）。
 
 ### 実行
 
@@ -613,20 +654,80 @@ share secret が漏れた場合は、その share を revoke するか再発行�
 
 ## 14. 復旧 drill
 
-年に 1 回程度、または大きな変更の前に、restore できることを確かめます。
+backup から実際に戻せることを、使い捨ての環境へ restore して確かめます（頻度は [Backup と export](#頻度)）。production へは export 以外の書き込みをしません。
 
-手順は [リソース作成とデプロイ](#2-リソース作成とデプロイ) から [Cloudflare Access](#4-cloudflare-access) までで空の環境（例: `restore-test`）を作り、[Restore](#10-restore) を実行するだけです。drill の記録は [verification.md](verification.md#restore-drilledgephotos-restore-test) にあります。
+drill 用の環境は `wrangler.jsonc` の `env.restore-test` です。drill の前に D1・R2・Worker を作り、終わったら削除します。Access application は、初回だけ [Cloudflare Access](#4-cloudflare-access) の手順で `edgephotos-restore-test.<subdomain>.workers.dev` に 2 つ（private と `/share` の Bypass）作ります。秘密情報もデータも持たないので、残して次の drill で再利用できます。private の Allow には、drill を行う member の email だけを入れます。
 
-drill で見るもの:
+### 1. backup を取り、確かめる
 
-- 事前に `pnpm backup check` が `ok: true` で終わる
-- `pnpm backup restore` が `ok: true` で終わる。途中で一度止め（Ctrl-C）、`--resume` で最後まで進むことも確かめる
-- restore 先で `pnpm storage audit --deep` の破損が 0 件
-- restore 先の timeline と album が開き、共有リンクを新しく作れる
-- 所要時間（[benchmarks.md](benchmarks.md) の見積もりと比べる）
+```bash
+EDGEPHOTOS_URL=https://photos.example.com \
+EDGEPHOTOS_ACCESS_TOKEN="$(cloudflared access token -app=https://photos.example.com)" \
+pnpm backup export ~/EdgePhotosBackup/edgephotos
+pnpm backup check ~/EdgePhotosBackup/edgephotos
+```
 
-`pnpm diagnose` は bucket を `wrangler.jsonc` から読みます。drill 用の環境を `wrangler.jsonc` に足していなければ、`r2: CORS` は production の bucket を見て FAIL になります。drill の bucket の CORS は `pnpm wrangler r2 bucket cors list <bucket>` で確かめます。
+### 2. 空の環境を作る
 
-終わったら drill 用の Worker、D1、R2 bucket、R2 API token を削除します。R2 API token は鍵なので必ず消します。作成画面の既定は「すべてのバケット」なので、対象を drill 用の bucket に絞れていたかも確認します。
+```bash
+pnpm wrangler d1 create edgephotos-restore-test
+pnpm wrangler r2 bucket create edgephotos-restore-test
+pnpm wrangler r2 bucket cors set edgephotos-restore-test --file cors.json   # origin は restore-test の URL（R2 CORS）
+pnpm wrangler d1 migrations apply edgephotos-restore-test --env restore-test --remote
+CLOUDFLARE_ENV=restore-test pnpm build
+pnpm wrangler deploy --config dist/edgephotos/wrangler.json --secrets-file <secrets.env>
+```
 
-Access application は残しても構いません。秘密情報もデータも持たず、hostname に紐づくだけなので、次の drill で同じ hostname を使えば AUD ごと再利用できます。Worker が無い間は、その hostname に誰も到達しません。
+secrets file の値（[初回の deploy で secret を渡す](#初回の-deploy-で-secret-を渡す)）:
+
+- `HOUSEHOLD_EMAILS`: drill を行う member の email（Access の Allow と同じ）
+- `APP_ORIGIN`: `https://edgephotos-restore-test.<subdomain>.workers.dev`
+- `ACCESS_TEAM_DOMAIN` と `R2_ACCOUNT_ID`: production と同じ
+- `ACCESS_AUD`: restore-test の private application の AUD
+- `R2_ACCESS_KEY_ID` と `R2_SECRET_ACCESS_KEY`: 仮の値（例: `set-after-deploy`）
+
+deploy の後、R2 の「API トークンの管理」で Account API token を作ります。権限は Object Read & Write、対象は `edgephotos-restore-test` だけです。作成画面の既定は「すべてのバケット」なので、必ず変えます。値は端末で入れます。
+
+```bash
+pnpm wrangler secret put R2_ACCESS_KEY_ID --env restore-test
+pnpm wrangler secret put R2_SECRET_ACCESS_KEY --env restore-test
+```
+
+`cloudflared access login https://edgephotos-restore-test.<subdomain>.workers.dev` で token を取り、`pnpm diagnose --env restore-test` を token 付きで実行します。library が空の間は `r2: presigned GET` が SKIP です。
+
+`--env restore-test` を付け忘れると、build・deploy・diagnose の対象は production になります。deploy の前に `dist/edgephotos/wrangler.json` の `name` が `edgephotos-restore-test` であることを確かめます。
+
+### 3. restore する
+
+backup のコピーから restore します。restore は進行状況をディレクトリに書くためです。2 つ目の媒体があれば、そこからコピーします。その媒体から戻せることも同時に確かめられます。
+
+```bash
+cp -R ~/EdgePhotosBackup/edgephotos <作業用>/restore-copy
+pnpm backup check <作業用>/restore-copy
+EDGEPHOTOS_URL=https://edgephotos-restore-test.<subdomain>.workers.dev \
+EDGEPHOTOS_ACCESS_TOKEN="$(cloudflared access token -app=https://edgephotos-restore-test.<subdomain>.workers.dev)" \
+pnpm backup restore <作業用>/restore-copy
+```
+
+途中で一度 Ctrl-C で止め、同じコマンドに `--resume` を付けて最後まで進めます。止めた時点で予約だけ済んだ upload が 1 件、`pendingUploads` に残ります（環境ごと削除するので、片付けは不要です）。
+
+### 4. 確かめる
+
+- restore の最後の verify が `ok: true`。`pnpm backup verify <作業用>/restore-copy --quick` も `ok: true`
+- `pnpm storage audit --deep` の破損が 0 件
+- メンテナンス画面の件数（写真・trash・album）が production と同じ
+- `pnpm diagnose --env restore-test` に FAIL が無い。写真があれば `r2: presigned GET` も PASS
+- Browser で timeline・trash・album が開き、共有リンクを新しく作れる。revoke すると開けなくなる
+- 所要時間を [benchmarks.md](benchmarks.md) の見積もりと比べる
+
+drill の記録は [verification.md](verification.md#復旧-drill2026-10-01) にあります。
+
+### 5. 片付ける
+
+restore 先には、production の写真の複製が入っています。終わったらすぐに削除します。
+
+1. restore-test のアプリで、写真をすべて trash へ移してから完全に削除する。album も削除する
+2. bucket に残った object（中断した upload の分）を消し、bucket を削除する（`pnpm wrangler r2 bucket delete edgephotos-restore-test`）。bucket は空でないと削除できない
+3. `pnpm wrangler delete --env restore-test` と `pnpm wrangler d1 delete edgephotos-restore-test`
+4. R2 の「API トークンの管理」で、drill 用の token を削除する。token は鍵なので必ず消す
+5. 作業用の `restore-copy` を削除する
