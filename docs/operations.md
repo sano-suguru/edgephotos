@@ -464,11 +464,11 @@ household member 以外の identity（service token 等）では API を利用�
 
 | 作業 | 頻度 |
 | --- | --- |
-| `pnpm backup export` | 写真をまとめて取り込んだ後と、少なくとも月 1 回 |
+| `pnpm backup export` | 写真をまとめて取り込んだ後と、定期的に（例: 週 1 回。少なくとも月 1 回） |
 | `pnpm backup check` | export の後と、backup を別の媒体へ複製した後（複製した側に対して） |
 | [復旧 drill](#14-復旧-drill) | 年 1 回程度と、破壊的な migration などの大きな変更の前 |
 
-export は差分なので、取り込んだ写真の分だけ download します。check は全 original を読み直すため、size の変わらない破損にも気付けます。所要時間は [benchmarks.md](benchmarks.md#backup--restorelocalapi-経由の逐次処理) にあります。
+定期的な export の間隔は、事故のときに失ってよい期間です。月 1 回なら、最大で約 1 か月分の写真が production にしか無い状態になります。export は差分なので、取り込んだ写真の分だけ download します。check は全 original を読み直すため、size の変わらない破損にも気付けます。所要時間は [benchmarks.md](benchmarks.md#backup--restorelocalapi-経由の逐次処理) にあります。
 
 ### 置き場所
 
@@ -638,7 +638,7 @@ R2 API token（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）は presigned URL �
 定期更新、または漏洩の疑いがある場合:
 
 1. Dashboard の R2 → Manage API tokens で、同じ権限（対象 bucket のみ、Object Read & Write）の新しい token を作る
-2. 漏洩の疑いがある場合は、**先に古い token を削除する**。R2 は署名を token の key で検証するため、削除後は古い key で署名した URL（未使用の upload URL、表示中の画像 URL）も通らなくなる見込みです。ただし Cloudflare の文書に明記はなく、EdgePhotos でも確かめていません。発行済み URL の期限は最大 600 秒なので、定期更新なら 3 → 4 の後に削除してよい
+2. 漏洩の疑いがある場合は、**先に古い token を削除する**。削除した token の key で署名した presigned URL は、R2 が `401` で拒否しました（[verification.md](verification.md#r2-api-token-の対象範囲と削除)）。確かめたのは削除の後に署名した URL です。削除の前に発行された URL（未使用の upload URL、表示中の画像 URL）も、R2 が同じ key で検証するため通らないと考えられますが、こちらは試していません。発行済み URL の期限は最大 600 秒なので、定期更新なら 3 → 4 の後に削除してよい
 3. `pnpm wrangler secret put R2_ACCESS_KEY_ID [--env <env>]`、同じく `R2_SECRET_ACCESS_KEY`
 4. `pnpm diagnose` で `r2: presigned GET` が PASS になることを確認する（library が空なら写真を 1 枚 upload）
 
@@ -656,7 +656,7 @@ share secret が漏れた場合は、その share を revoke するか再発行�
 
 backup から実際に戻せることを、使い捨ての環境へ restore して確かめます（頻度は [Backup と export](#頻度)）。production へは export 以外の書き込みをしません。
 
-drill 用の環境は `wrangler.jsonc` の `env.restore-test` です。drill の前に D1・R2・Worker を作り、終わったら削除します。Access application は、初回だけ [Cloudflare Access](#4-cloudflare-access) の手順で `edgephotos-restore-test.<subdomain>.workers.dev` に 2 つ（private と `/share` の Bypass）作ります。秘密情報もデータも持たないので、残して次の drill で再利用できます。private の Allow には、drill を行う member の email だけを入れます。
+drill 用の環境の定義は、`wrangler.jsonc` の `env.restore-test` に常に置いてあります。D1・R2・Worker は drill の前に作ります。restore した写真の複製は、drill が終わるたびに消します（[片付ける](#5-片付ける)）。Access application は、初回だけ [Cloudflare Access](#4-cloudflare-access) の手順で `edgephotos-restore-test.<subdomain>.workers.dev` に 2 つ（private と `/share` の Bypass）作ります。秘密情報もデータも持たないので、残して次の drill で再利用できます。private の Allow には、drill を行う member の email だけを入れます。
 
 ### 1. backup を取り、確かめる
 

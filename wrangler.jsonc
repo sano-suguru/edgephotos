@@ -63,8 +63,9 @@
         ]
       }
     },
-    // Disposable environment for the recovery drill (docs/operations.md §14). Created for a drill and deleted
-    // after it; declared here so the build, deploy and `pnpm diagnose --env restore-test` name its resources.
+    // The recovery drill's environment (docs/operations.md §14). The definition stays here so that the build,
+    // deploy and `pnpm diagnose --env restore-test` name the drill's resources, never production's. The data in
+    // those resources is disposable: the copy of the library is removed after every drill.
     "restore-test": {
       "name": "edgephotos-restore-test",
       "d1_databases": [{ "binding": "DB", "database_name": "edgephotos-restore-test", "migrations_dir": "migrations" }],

@@ -1095,7 +1095,7 @@ backup ディレクトリは CLI を実行した Mac のディスク（repositor
 `wrangler.jsonc` に `env.restore-test` を足し、`CLOUDFLARE_ENV=restore-test pnpm build` で deploy した。
 
 - 空の D1（`0001`〜`0005` を適用）、R2 bucket（r2.dev 無効、CORS は restore-test の origin のみ）。Access application は 2026-09-18 のものを再利用した
-- R2 API token は利用者が作成し、値は Claude を経由していない。対象を restore-test の bucket だけにしたかは確認していない（S3 API で他の bucket が `AccessDenied` になることも試していない）
+- R2 API token は利用者が作成し、値は Claude を経由していない。対象範囲は [下](#r2-api-token-の対象範囲と削除) で実測した
 - `pnpm diagnose --env restore-test`（token 付き、写真あり）: 20 項目すべて PASS（`r2: CORS`、`r2: presigned GET` を含む）
 
 #### restore と確認
@@ -1118,6 +1118,14 @@ backup ディレクトリのコピーから restore した。
 
 - 以前は drill 用の環境が `wrangler.jsonc` に無かった。そのため `pnpm diagnose` の secret・D1 migration・r2.dev・CORS の検査は production の資源を見て、drill 環境の結果のように PASS を表示した。今回の deploy では、build した `wrangler.json` を手で書き換える必要もあった。`env.restore-test` を足して解消し、上の diagnose で確かめた
 - 最初の中断の試みでは、`node` が Volta の shim だったため、SIGTERM が shim だけを止めた。子の restore は動き続け、後から始めた `--resume` と同時に同じ環境へ書き込んだ。結果は album 6 つ（restore-state に無い 3 つ）で、`--resume` の最後の verify が `album count: expected 3, got 4`・`album membership differs` で `ok: false` になった。端末の Ctrl-C は process group 全体に届くため、通常の操作では起きない。2 つの restore を同時に走らせない注意を [Restore](operations.md#10-restore) に足した。restore には同時実行を防ぐ仕組みが無い
+
+#### R2 API token の対象範囲と削除
+
+drill の後、利用者が drill 用の token を作り直した（最初の token の値を控えていなかったため）。値は Claude を経由していない。
+
+- 新しい token の key で、S3 API の ListObjectsV2 を 3 つの bucket へ送った（読み取りのみ。script は commit していない）。`edgephotos-restore-test` は `200`、`edgephotos` と `edgephotos-remote-test` は `403 AccessDenied`
+- 古い token を削除した直後、Worker は古い key のままだった。`pnpm diagnose --env restore-test` の `r2: presigned GET` は、Worker が古い key で署名した URL を R2 が拒否して FAIL（`401 Unauthorized`）。削除の前に発行された URL は試していない
+- 新しい値を `wrangler secret put` で入れた後、`r2: presigned GET` は PASS し、diagnose の FAIL は無くなった
 
 #### 後片付け
 
