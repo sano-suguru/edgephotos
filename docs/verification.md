@@ -1095,7 +1095,7 @@ backup ディレクトリは CLI を実行した Mac のディスク（repositor
 `wrangler.jsonc` に `env.restore-test` を足し、`CLOUDFLARE_ENV=restore-test pnpm build` で deploy した。
 
 - 空の D1（`0001`〜`0005` を適用）、R2 bucket（r2.dev 無効、CORS は restore-test の origin のみ）。Access application は 2026-09-18 のものを再利用した
-- R2 API token は利用者が作成し、値は Claude を経由していない。対象を restore-test の bucket だけにしたことは、利用者の申告による。S3 API での `AccessDenied` による確認はしていない
+- R2 API token は利用者が作成し、値は Claude を経由していない。対象を restore-test の bucket だけにしたかは確認していない（S3 API で他の bucket が `AccessDenied` になることも試していない）
 - `pnpm diagnose --env restore-test`（token 付き、写真あり）: 20 項目すべて PASS（`r2: CORS`、`r2: presigned GET` を含む）
 
 #### restore と確認

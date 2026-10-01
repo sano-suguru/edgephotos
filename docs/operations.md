@@ -709,7 +709,7 @@ EDGEPHOTOS_ACCESS_TOKEN="$(cloudflared access token -app=https://edgephotos-rest
 pnpm backup restore <作業用>/restore-copy
 ```
 
-途中で一度 Ctrl-C で止め、同じコマンドに `--resume` を付けて最後まで進めます。止めた時点で予約だけ済んだ upload が 1 件、`pendingUploads` に残ります（環境ごと削除するので、片付けは不要です）。
+途中で一度 Ctrl-C で止め、同じコマンドに `--resume` を付けて最後まで進めます。止めた時点で予約だけ済んだ upload が、`pendingUploads` に残ることがあります（環境ごと削除するので、片付けは不要です）。
 
 ### 4. 確かめる
 
@@ -726,8 +726,12 @@ drill の記録は [verification.md](verification.md#復旧-drill2026-10-01) に
 
 restore 先には、production の写真の複製が入っています。終わったらすぐに削除します。
 
-1. restore-test のアプリで、写真をすべて trash へ移してから完全に削除する。album も削除する
-2. bucket に残った object（中断した upload の分）を消し、bucket を削除する（`pnpm wrangler r2 bucket delete edgephotos-restore-test`）。bucket は空でないと削除できない
-3. `pnpm wrangler delete --env restore-test` と `pnpm wrangler d1 delete edgephotos-restore-test`
-4. R2 の「API トークンの管理」で、drill 用の token を削除する。token は鍵なので必ず消す
-5. 作業用の `restore-copy` を削除する
+```bash
+pnpm wrangler delete --env restore-test
+pnpm wrangler d1 delete edgephotos-restore-test
+```
+
+1. 上のコマンドで Worker と D1 を削除する。Worker が無くなった時点で、restore-test の URL からは何も読めない
+2. Dashboard の R2 で `edgephotos-restore-test` の「設定」を開き、「Empty Bucket」で object をすべて削除してから bucket を削除する。bucket は空でないと削除できない
+3. R2 の「API トークンの管理」で、drill 用の token を削除する。token は鍵なので必ず消す
+4. 作業用の `restore-copy` を削除する
