@@ -6,6 +6,14 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## 復旧 drill の手順（2026-10-01）
+
+`wrangler.jsonc` に drill 用の `env.restore-test` を足しました。drill 環境の build・deploy・`pnpm diagnose --env restore-test` が、production ではなく drill 環境の資源を対象にします。
+
+運用の手順に、backup の頻度、Cloudflare の外への置き場所と 2 つ目の媒体への複製、失敗に気付く方法、復旧 drill の具体的な手順を加えました（[operations.md](operations.md#9-backup-と-export)）。
+
+production の backup を restore-test へ restore し、確認しました。使ったのは合成画像で、家族の写真での確認は済んでいません（[verification.md](verification.md#復旧-drill2026-10-01)）。
+
 ## main 全体のレビューで見つかった不具合の修正（2026-09-29）
 
 API の挙動が 2 つ変わりました。

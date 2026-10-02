@@ -142,6 +142,16 @@ remote での見積もり（上の往復時間から。original の転送時間�
 - restore: API 約 30,000 × 30〜50 ms + storage PUT 30,000 × 約 100 ms 以上 ≒ 1〜1.5 時間
 - original が 1 枚 3 MB なら 10,000 件で 30 GB。回線次第で、転送時間も同じ桁になる
 
+remote での実測（2026-10-01、production → restore-test、合成画像 15 枚・40 MB。[復旧 drill](verification.md#復旧-drill2026-10-01)）:
+
+| 操作 | 時間 |
+| --- | --- |
+| `backup export`（初回） | 16 s |
+| `backup export`（2 回目、変更なし） | 1.7 s |
+| `backup check` | 0.5 s |
+| `backup verify`（original を download） | 8 s |
+| `backup restore`（続く verify を含む） | 約 25 s |
+
 ## 年月 navigation（2026-09-22）
 
 `GET /api/v1/assets/months` は、写真のある月を 1 行ずつ返します（[D-031](decisions.md)）。response は枚数ではなく月数で決まり、10,000 件・14 か月で 1 KiB です。

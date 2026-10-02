@@ -10,7 +10,7 @@
 
 ## 現在の状態
 
-2026-09-27 時点。
+2026-10-01 時点。
 
 production では、upload から share の revoke までの操作、backup と restore、desktop の Browser での表示を確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、production での migration を含む更新、uninstall です。
 
@@ -30,7 +30,7 @@ production では、upload から share の revoke までの操作、backup と 
 | [初回 deploy](#production-の作成と初回-deploy2026-09-24) | 確認済み | 2026-09-24 | — |
 | [更新（migration なし）](#deploy-と-diagnose) | 確認済み | 2026-09-25 | — |
 | [更新（migration あり）](#upload-した人の記録2026-09-24) | 一部確認 | 2026-09-24 | remote-test のみ |
-| [backup と restore](#restore-drilledgephotos-restore-test) | 確認済み | 2026-09-25 | — |
+| [backup と restore](#復旧-drill2026-10-01) | 確認済み | 2026-10-01 | 合成画像 15 枚。家族の写真では未実施 |
 | [Deploy to Cloudflare](#deploy-to-cloudflare-の-e2e2026-09-27) | 確認済み | 2026-09-27 | 使い捨ての環境 |
 | uninstall | 未確認 | — | — |
 
@@ -1068,3 +1068,67 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 同じ環境に、operations の [更新](operations.md#8-更新release-と-migration) の手順を CLI で行った。`pnpm build`、`wrangler d1 migrations apply`（`No migrations to apply!`）、`wrangler deploy --config dist/edgephotos_deploy_test/wrangler.json`（`--secrets-file` なし）が通り、secret は 7 つ残り、`pnpm diagnose` は全 PASS。この repository では `pnpm check` が通り、`pnpm diagnose --offline`（top-level と `--env remote-test`）も PASS した。
 
 確認後に R2 の object と bucket、D1、Worker、2 つの Access application を API で削除した。production と `remote-test` の資源は残っている。backup と restore を含むアンインストールの手順全体は、ここでは行っていない。
+
+### 復旧 drill（2026-10-01）
+
+運用の [復旧 drill](operations.md#14-復旧-drill) を、production の backup から drill 専用の `edgephotos-restore-test` へ行った。production の library は 0 枚だったため、利用者の承認を得て合成画像を production に入れてから backup した。家族の写真では行っていない。
+
+#### 使ったデータ
+
+PIL で描いた gradient と図形の画像で、人物・位置情報は無い。production のアプリへ Playwright（Chromium、HEIC だけ WebKit）から通常の upload 経路で入れた。CSP 違反は 0 件。
+
+- 15 枚、合計 40 MB。JPEG 13 枚（EXIF の撮影日時あり 10 枚・なし 3 枚、縦長と横長、16.7 MB の 6000×4000、日本語のファイル名 1 枚）、PNG 1 枚、HEIC 1 枚（`tests/fixtures/still.heic` に `free` box を足したもの）
+- album 3 つ: 5 枚、2 枚（前者と重なる）、空。favorite 3 枚。trash 2 枚（うち 1 枚は album に入っている）
+
+#### production の backup
+
+backup ディレクトリは CLI を実行した Mac のディスク（repository の外）。
+
+- `pnpm backup export`: 15 枚・3 album、download 15、失敗 0。`manifest.json` は `formatVersion: 3` で、`X-Amz`・`Signature`・`eyJ`・`Bearer`・`CF_Authorization`・`cf-access`・R2 の host・URL は 0 件
+- `pnpm backup check`: `ok: true`、problems 0 件
+- 変更なしの 2 回目の export: download 0。size だけで再利用した旨と、check を促す表示が出た
+- production に対する `pnpm backup verify`（original を 15 件 download）: `ok: true`。`pnpm storage audit --deep`: 不整合なし
+- メンテナンス画面の「バックアップ処理の完了日時」は export の時刻に更新された
+
+#### 環境
+
+`wrangler.jsonc` に `env.restore-test` を足し、`CLOUDFLARE_ENV=restore-test pnpm build` で deploy した。
+
+- 空の D1（`0001`〜`0005` を適用）、R2 bucket（r2.dev 無効、CORS は restore-test の origin のみ）。Access application は 2026-09-18 のものを再利用した
+- R2 API token は利用者が作成し、値は Claude を経由していない。対象範囲は [下](#r2-api-token-の対象範囲と削除) で実測した
+- `pnpm diagnose --env restore-test`（token 付き、写真あり）: 20 項目すべて PASS（`r2: CORS`、`r2: presigned GET` を含む）
+
+#### restore と確認
+
+backup ディレクトリのコピーから restore した。
+
+- restore は 15 枚・3 album で、続けて走る verify が `ok: true`（original 15 件を download して照合）。`verify --quick` も `ok: true`（15 件とも R2 の記録した checksum で照合）。`pnpm storage audit --deep` も不整合なし
+- メンテナンス画面と同じ diagnostics の件数は、写真 13・trash 2・album 3 で production と同じ
+- restore 先を export し直し、production の backup と比べた（CLI の verify とは別の script）。SHA-256 の集合、15 枚の `contentType`・`originalSize`・`filename`・`width`・`height`・`takenAt`・`isFavorite`・`createdAt`・`uploadedBy`、trash の状態、album の名前と所属（trash の写真を含む album を含む）がすべて一致した。asset ID は 15 件とも変わった（設計どおり）
+- original・thumbnail・preview の 45 ファイルは byte 単位で一致した。original は Browser で upload した元のファイルとも SHA-256 が一致した
+- Browser（Chromium）: timeline の thumbnail 13 枚、viewer の preview、trash の 2 枚、album の 4 枚（5 枚のうち 1 枚は trash）が表示された。新しい共有リンクを匿名の context で開いて 4 枚が表示され、revoke の後は「このリンクは無効か、期限切れです。」になった。CSP 違反と R2 の失敗は 0 件
+- 所要時間は [benchmarks.md](benchmarks.md#backup--restorelocalapi-経由の逐次処理) にある
+
+#### 中断と再開
+
+- restore を開始 4 秒後に SIGTERM で止めた。その時点の restore 先は写真 1 枚、予約だけ済んだ upload 1 件、album 0
+- `--resume` で再開し、14 枚を upload して完了した。verify は通常・`--quick` とも `ok: true`。予約だけの upload は `pendingUploads` 1 件として残り、storage audit も「uploads in progress 1」と数えた。破損は 0 件
+
+#### 見つかったこと
+
+- 以前は drill 用の環境が `wrangler.jsonc` に無かった。そのため `pnpm diagnose` の secret・D1 migration・r2.dev・CORS の検査は production の資源を見て、drill 環境の結果のように PASS を表示した。今回の deploy では、build した `wrangler.json` を手で書き換える必要もあった。`env.restore-test` を足して解消し、上の diagnose で確かめた
+- 最初の中断の試みでは、`node` が Volta の shim だったため、SIGTERM が shim だけを止めた。子の restore は動き続け、後から始めた `--resume` と同時に同じ環境へ書き込んだ。結果は album 6 つ（restore-state に無い 3 つ）で、`--resume` の最後の verify が `album count: expected 3, got 4`・`album membership differs` で `ok: false` になった。端末の Ctrl-C は process group 全体に届くため、通常の操作では起きない。2 つの restore を同時に走らせない注意を [Restore](operations.md#10-restore) に足した。restore には同時実行を防ぐ仕組みが無い
+
+#### R2 API token の対象範囲と削除
+
+drill の後、利用者が drill 用の token を作り直した（最初の token の値を控えていなかったため）。値は Claude を経由していない。
+
+- 新しい token の key で、S3 API の ListObjectsV2 を 3 つの bucket へ送った（読み取りのみ。script は commit していない）。`edgephotos-restore-test` は `200`、`edgephotos` と `edgephotos-remote-test` は `403 AccessDenied`
+- 古い token を削除した直後、Worker は古い key のままだった。`pnpm diagnose --env restore-test` の `r2: presigned GET` は、Worker が古い key で署名した URL を R2 が拒否して FAIL（`401 Unauthorized`）。削除の前に発行された URL は試していない
+- 新しい値を `wrangler secret put` で入れた後、`r2: presigned GET` は PASS し、diagnose の FAIL は無くなった
+
+#### 後片付け
+
+- production の合成写真 15 枚は、利用者が trash へ移した。album 3 つは残っている。完全な削除は利用者が行う
+- restore-test の Worker・D1・R2 bucket・R2 API token・Access application は、次の drill のために残した（利用者の判断）。中に入っているのは合成画像だけ
+- 作業用の backup のコピー、比較用の export、合成画像は削除した。backup ディレクトリ（合成画像 15 枚）は Mac に残っている
