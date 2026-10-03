@@ -1076,30 +1076,33 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 
 local の自動テスト:
 
-- `tests/integration/server-derivatives.test.ts`（24 件）。Images と queue を fake にし、D1 / R2 は local の binding。次の各場合で、写真を公開しない（`assets` 行が無い）、original を失わない、再送か reconcile で収束する、を確かめた
+- `tests/integration/server-derivatives.test.ts`（27 件）。Images と queue を fake にし、D1 / R2 は local の binding。次の各場合で、写真を公開しない（`assets` 行が無い）、original を失わない、再送か reconcile で収束する、を確かめた
   - D1 に `queued` を書いた後に send が失われた（Cron と finalize の polling が generation 2 で再送）
   - 同じ message の重複配達（順番でも同時でも、写真は 1 枚、render は 1 回）
   - thumbnail を書いた後、preview の前に Worker が止まった（lease 中の再配達は no-op、lease 後の再送で preview だけを作る）
   - derivative を 2 つとも R2 に書いた後、D1 の batch の前に止まった（再送で render せずに完了だけ）
   - 置き換えられた generation の message が遅れて届いた（完了の前後とも no-op）。実行中に generation を奪われた consumer は完了できない
-  - Images の一時エラー（10 秒・30 秒の backoff で再試行して成功）、retry 上限（5 回で `failed`）、consumer がいない job（reconcile の再送も試行に数え `failed`）
-  - Images の恒久エラー（9520）は即 `failed`。audit が `derivative_failed`、cleanup は 1 日後に片付ける
+  - Images の一時エラー（10 秒・30 秒の backoff で再試行して成功）、retry 上限（5 回で `failed`。cleanup が数え直して再 queue し、写真になる）
+  - queue が 10 分遅れても試行を使わず、最後の generation で写真になる。consumer がいない job は、間隔を延ばした再送 10 回の後に `failed`（`not_delivered`）
+  - Images の恒久エラー（9520）は即 `failed`。audit が `derivative_failed`。cleanup は original を残し（`unrendered`）、同じ写真が追加し直された後に重複として片付ける
+  - binding を外した後の finalize は `422 SERVER_DERIVATIVES_UNAVAILABLE`（client は Browser 経路へ戻る）
   - EXIF を含む出力は R2 に書かずに `failed`
   - 処理中の取消（queued のときと render の途中）、完了後の取消（`409`）、完全削除の後に届いた古い message（object を作り直さない）
   - 1 日以上処理中の upload を audit が期限切れと数えず、cleanup が original を消さない
-- `tests/unit/upload-batch-server.test.ts`（8 件）。client が server 経路を選ぶ条件、polling、server が作れないときの取消と Browser 経路への切り替え、HEIC の表示
+- `tests/unit/upload-batch-server.test.ts`（9 件）。client が server 経路を選ぶ条件、polling、server が作れないときの取消と Browser 経路への切り替え、Browser 経路の reservation を再試行が引き継ぐこと、HEIC の表示
 - `tests/bench/derivatives.bench.ts`。障害を注入した 200 件が収束すること（[benchmarks.md](benchmarks.md#server-側の-derivative-生成2026-10-03)）
 
 Browser E2E（`vite dev`、Playwright）:
 
 - `vite dev` は wrangler の local Images（sharp による低忠実度）と local queue で動く。Chromium で 3000x2000 の JPEG を server 経路で upload し、page の `createImageBitmap` が 0 回、width / height が 3000x2000、thumbnail 512x341、preview 2048x1365 で表示されることを確認した
 - local Images は HEIC を受け付けない（9523）。Chromium では server が `failed` にし、client が Browser 経路に切り替え、「サーバーで変換できず、このブラウザでも HEIC を処理できません」と表示して止まることを確認した
+- 独立したレビュー（別の subagent）の指摘で、queue の遅延や一時障害だけで `failed` になり cleanup が original を消す経路、binding を外した後に job が止まる経路、再試行で経路と reservation が食い違う経路を直し、それぞれに test を足した
 - 全体の初回の実行で 2 件（`trash.spec.ts:61`、`upload.spec.ts:290`）が 30 秒の timeout で失敗した。実行中に `package.json` などを編集しており、trace では original の PUT が応答なしで切れ、page が再読込されていた。編集を止めて再実行すると 2 件とも通った。編集なしで全体をもう一度実行し、80 件すべて通った
 
 未確認（remote-test で確かめること）:
 
 - Cloudflare Images の実際の JPEG 出力が allowlist（[D-012](decisions.md)）を通るか。通らなければ server 経路の upload はすべて `failed` になり、client が Browser 経路で作り直す（壊れはしないが、server 経路の利点が無くなる）
-- EXIF Orientation と HEIC の `irot` / `imir` が Images で反映されるか
+- EXIF Orientation と HEIC の `irot` / `imir` が Images で反映されるか。`info()` が向きを適用する前の幅と高さを返すなら、縦の写真で width / height が入れ替わって記録される
 - 実際の queue の配達、Cron の起動、original 保存から ready までの p50 / p95（[benchmarks.md](benchmarks.md#original-保存から-ready-までの時間未測定) の SQL）
 - `wrangler deploy` が queue を自動で作るか（作らない前提で手順に `wrangler queues create` を書いた）
 

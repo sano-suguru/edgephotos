@@ -401,7 +401,8 @@ export const STORAGE_AUDIT_ISSUE_KINDS = [
   // Upload that was never finalized and whose URLs expired. Resolved by cleanup.
   'expired_upload',
   // Upload whose original is stored but whose derivatives the server could not render (D-042). Not in the
-  // library. Cleanup abandons it like an expired upload whose objects do not pass.
+  // library. Cleanup keeps it (re-queues it when the failure was not about the photo) and settles it once the same
+  // photo has been added again.
   'derivative_failed',
   // Objects of an upload that turned out to be a duplicate (or was abandoned). Removed by cleanup.
   'duplicate_leftover',
@@ -451,6 +452,8 @@ export const StorageCleanupResultSchema = z
     failed: z.number().int(),
     // Uploads whose derivatives the server is still rendering (D-042). Left alone (re-sent if overdue).
     processing: z.number().int(),
+    // Uploads the server could not render, kept with their original until the photo is added again (D-042).
+    unrendered: z.number().int(),
     more: z.boolean(),
   })
   .openapi('StorageCleanupResult')

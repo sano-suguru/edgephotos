@@ -346,7 +346,7 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - 作り直した derivative も、allowlist 外の header segment を含むものは受け付けない（upload と同じ検査）。
 - original が壊れている写真へ作り直しの URL を発行しない。
 - 作り直しが object を削除しない。古い repair の target が、新しい repair の直した derivative を上書き・削除できない（`If-Match` で `412`）。
-- server 側で derivative を作る upload（[D-042](decisions.md)）: 両方の derivative が検査を通るまで asset を作らない。allowlist 外の segment を含む Images の出力を R2 へ書かない。重複・遅延・古い generation の message、途中で止まった consumer、取消された upload のどれでも、写真を公開せず、original を失わず、再送か reconcile で収束する。処理中の upload の original を storage cleanup が消さない（`tests/integration/server-derivatives.test.ts`）。
+- server 側で derivative を作る upload（[D-042](decisions.md)）: 両方の derivative が検査を通るまで asset を作らない。allowlist 外の segment を含む Images の出力を R2 へ書かない。重複・遅延・古い generation の message、途中で止まった consumer、取消された upload のどれでも、写真を公開せず、original を失わず、再送か reconcile で収束する。処理中の upload の original も、server が作れなかった upload の original も、storage cleanup が消さない（`tests/integration/server-derivatives.test.ts`）。
 
 上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。
 

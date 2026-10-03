@@ -11,7 +11,6 @@ import {
   type DerivativeRenderer,
   failJob,
   finishJobStatement,
-  getJob,
   holdsJob,
   MAX_ATTEMPTS,
   RenderError,
@@ -129,9 +128,10 @@ async function renderAndComplete(
     // Another upload of the same bytes became a photo between the check above and this batch.
     return settleAsDuplicate(ctx, m, upload.id)
   }
-  const job = await getJob(ctx.db, upload.id)
-  // Not done under this generation: a cancel or a newer generation won, and this run changed nothing in D1.
-  if (job?.state === 'done' && job.generation === m.generation) return { kind: 'done', result: 'created' }
+  // Created only if the upload became this asset. Otherwise a cancel or a newer generation won, and no asset was made
+  // (the job may still read `done`: a job's state means nothing once its upload is settled).
+  const settled = await getUploadRow(ctx.db, upload.id)
+  if (settled?.status === 'finalized') return { kind: 'done', result: 'created' }
   return { kind: 'noop' }
 }
 

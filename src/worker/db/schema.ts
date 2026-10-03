@@ -95,8 +95,11 @@ export const uploads = sqliteTable(
 //   queued             the original is verified; a message for `generation` is (or should be) in the queue
 //   running            a consumer holding `generation` is rendering until `lease_until`
 //   done               the asset was created (or the upload settled as a duplicate) by this job
-//   failed             will not succeed by retrying (`failure` says why); the upload stays pending until cleanup
-//   cancelled          the upload was settled without an asset (cancelled by the client or abandoned by cleanup)
+//   failed             gave up (`failure` says why). The upload stays pending and its verified original is kept:
+//                      storage cleanup re-queues a failure that is not a property of the photo, and settles the
+//                      upload only once the same bytes are a photo through another upload
+// The state means nothing once the upload is settled (finalized, a duplicate, cancelled or abandoned): consumers
+// and reconcile act only while the upload is pending.
 // `generation` is the fencing token: every write by a consumer is conditional on it, and reconcile bumps it when
 // it re-sends, so a late or duplicate message of an older generation changes nothing.
 export const derivativeJobs = sqliteTable(
@@ -105,9 +108,13 @@ export const derivativeJobs = sqliteTable(
     upload_id: text()
       .primaryKey()
       .references(() => uploads.id, { onDelete: 'cascade' }),
-    state: text({ enum: ['awaiting_original', 'queued', 'running', 'done', 'failed', 'cancelled'] }).notNull(),
+    state: text({ enum: ['awaiting_original', 'queued', 'running', 'done', 'failed'] }).notNull(),
     generation: integer().notNull().default(0),
+    // Claims by a consumer: one per try at rendering.
     attempts: integer().notNull().default(0),
+    // Re-sends by reconcile (lost message, consumer stopped). Counted apart from attempts, with a growing delay, so a
+    // slow queue does not use up the tries a photo gets.
+    resends: integer().notNull().default(0),
     // When a queued job is due (its message delay); reconcile re-sends one that is overdue by a margin.
     next_attempt_at: text(),
     // A running job whose lease has passed is treated as crashed and re-sent by reconcile.
@@ -123,7 +130,7 @@ export const derivativeJobs = sqliteTable(
     index('derivative_jobs_open').on(t.state, t.updated_at).where(sql`state IN ('queued', 'running')`),
     check(
       'derivative_jobs_state_check',
-      sql`${t.state} IN ('awaiting_original', 'queued', 'running', 'done', 'failed', 'cancelled')`,
+      sql`${t.state} IN ('awaiting_original', 'queued', 'running', 'done', 'failed')`,
     ),
   ],
 )

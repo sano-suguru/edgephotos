@@ -10,7 +10,7 @@ import { assetObjectKeys } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import { getAssetRow, purgeAsset, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
-import { getJob, newJobInsert, queueJob, reconcileJobs } from './derivatives'
+import { failureIsThePhotos, getJob, newJobInsert, queueJob, rearmJob, reconcileJobs } from './derivatives'
 
 type ReserveInput = z.infer<typeof UploadReserveSchema> | z.infer<typeof RestoreUploadReserveSchema>
 
@@ -332,15 +332,47 @@ async function finalizeServerRendered(
       failure: job?.failure ?? 'unknown',
     })
   }
+  // The bindings were removed after this upload was reserved: nothing will render it here. The client gives the
+  // upload up and takes the browser path, as for a reservation refused for the same reason.
+  if (!ctx.derivatives) {
+    throw new ApiError(422, 'SERVER_DERIVATIVES_UNAVAILABLE', 'This server does not render derivatives.', {
+      reason: 'not_configured',
+    })
+  }
   if (state !== 'awaiting_original') {
-    if (ctx.derivatives) await reconcileJobs(ctx.db, ctx.derivatives.queue, ctx.now(), upload.id)
+    await reconcileJobs(ctx.db, ctx.derivatives.queue, ctx.now(), upload.id)
     return processing
   }
   await verifyObjects(ctx, upload, false)
   const existing = await findStoredAsset(ctx, upload.sha256, upload.asset_id)
   if (existing) return markDuplicate(ctx, upload, existing)
-  await queueJob(ctx.db, ctx.derivatives?.queue ?? null, upload.id, ctx.now())
+  await queueJob(ctx.db, ctx.derivatives.queue, upload.id, ctx.now())
   return processing
+}
+
+// What storage cleanup does with a server-rendered upload whose job failed (D-042). Its original passed finalize,
+// so it is never discarded just for having failed:
+//   - 'duplicate': the same bytes are a photo now (the photo was added again): settled as its duplicate, which
+//     removes this upload's own objects
+//   - 'requeued': the failure was not about the photo (retries ran out, never delivered, the monthly limit): another
+//     round with fresh counters
+//   - 'abandon': the original itself is gone, so there is nothing left to keep; the caller settles it
+//   - 'kept': Images cannot render this photo; it waits until the photo is added again (in a browser)
+export async function resolveFailedServerUpload(
+  ctx: ServiceContext,
+  upload: UploadRow,
+  failure: string | null,
+): Promise<'duplicate' | 'requeued' | 'abandon' | 'kept'> {
+  const existing = await findStoredAsset(ctx, upload.sha256, upload.asset_id)
+  if (existing) {
+    await markDuplicate(ctx, upload, existing)
+    return 'duplicate'
+  }
+  if (failure === 'original_missing') return 'abandon'
+  if (!failureIsThePhotos(failure) && ctx.derivatives) {
+    if (await rearmJob(ctx.db, ctx.derivatives.queue, upload.id, ctx.now())) return 'requeued'
+  }
+  return 'kept'
 }
 
 // Settles a pending upload without an asset, then removes its objects (best effort; storage cleanup removes what

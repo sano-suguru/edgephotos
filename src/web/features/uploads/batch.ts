@@ -144,11 +144,14 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
       if (state === 'done') libraryChanged()
     }
     const remember = (r: UploadReservation | null) => (r ? reservations.set(item.id, r) : reservations.delete(item.id))
-    // The server is tried first when it may render this file; the browser path is the fallback.
-    const modes: RenderMode[] = !serverUnavailable && deps.serverRendering?.(file) ? ['server', 'browser'] : ['browser']
+    // The server is tried first when it may render this file; the browser path is the fallback. A retry that
+    // resumes a reservation keeps that reservation's path: one with derivative targets is the browser's.
+    const resumed = reservations.get(item.id)
+    const serverPossible = !serverUnavailable && (deps.serverRendering?.(file) ?? false)
+    const modes: RenderMode[] = serverPossible && !resumed?.targets.thumbnail ? ['server', 'browser'] : ['browser']
     let serverFailed = false
     // The server renders on this deployment, but not a file this large: the browser is the only way left.
-    const tooLargeForServer = !serverUnavailable && deps.serverRendering !== undefined && !modes.includes('server')
+    const tooLargeForServer = !serverUnavailable && deps.serverRendering !== undefined && !serverPossible
 
     // One attempt in one mode, holding a slot while the file is read and sent. Reading the file, hashing it and
     // rendering its derivatives happens once per mode, and only if this attempt finds it has bytes to send. A

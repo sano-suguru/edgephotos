@@ -5,6 +5,7 @@ import { RENDER_POLLS } from '../../src/web/features/uploads/transfer'
 import { countUploads, uploadHeadline } from '../../src/web/features/uploads/upload-list'
 import { ApiRequestError } from '../../src/web/lib/api/error'
 import { HeicNotDecodableHereError } from '../../src/web/lib/image-errors'
+import { StorageUploadError } from '../../src/web/lib/storage-put'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
 
 // The client side of server-rendered derivatives (docs/decisions.md D-042): which path a photo takes, how the page
@@ -27,6 +28,7 @@ function harness(behavior: ServerBehavior = {}, serverRendering: (f: File) => bo
   let ids = 0
   let rows = 0
   const prepared: RenderMode[] = []
+  const stored = new Set<string>()
   const deps: BatchDeps = {
     prepare: async (file, mode) => {
       prepared.push(mode)
@@ -55,11 +57,16 @@ function harness(behavior: ServerBehavior = {}, serverRendering: (f: File) => bo
     },
     put: async (target) => {
       log.push(`put ${target.url}`)
+      stored.add(target.url)
     },
     finalize: async (id) => {
       const row = pending.get(id)
       if (!row) throw new ApiRequestError(404, 'UPLOAD_NOT_FOUND', 'gone')
-      if (row.mode === 'browser') return { result: 'created', asset: { id: `asset-${id}` } } as UploadFinalizeResult
+      if (row.mode === 'browser') {
+        const missing = ['original', 'thumbnail', 'preview'].filter((v) => !stored.has(`${id}/${v}`))
+        if (missing.length > 0) throw new ApiRequestError(409, 'UPLOAD_OBJECT_MISSING', 'missing', { missing })
+        return { result: 'created', asset: { id: `asset-${id}` } } as UploadFinalizeResult
+      }
       if (row.polls++ < (behavior.pollsBeforeDone ?? 2)) return { result: 'processing', uploadId: id }
       if (behavior.outcome === 'failed') {
         throw new ApiRequestError(422, 'DERIVATIVES_FAILED', 'failed', { failure: 'images_9520' })
@@ -124,6 +131,28 @@ describe('server-rendered uploads', () => {
       'put upload-2/thumbnail',
       'put upload-2/preview',
     ])
+  })
+
+  it('a retry resumes a browser reservation the browser way, not the server way', async () => {
+    const h = harness({ outcome: 'failed' })
+    let refuse = true
+    const put = h.deps.put
+    h.deps.put = async (target, body) => {
+      // The fallback's derivative PUT is lost once.
+      if (refuse && target.url.endsWith('/thumbnail')) {
+        refuse = false
+        throw new StorageUploadError('network')
+      }
+      return put(target, body)
+    }
+    await h.batch.enqueue([file('a.jpg')])
+    expect(h.batch.items.value[0]).toMatchObject({ state: 'error', retryable: true })
+    await h.batch.retry()
+    expect(h.batch.items.value[0].state).toBe('done')
+    // The retry went straight to the browser reservation it already had and sent only what was missing.
+    expect(h.prepared).toEqual(['server', 'browser', 'browser'])
+    expect(h.log.filter((l) => l === 'put upload-2/thumbnail')).toHaveLength(1)
+    expect(h.log.filter((l) => l.startsWith('reserve'))).toEqual(['reserve server', 'reserve browser'])
   })
 
   it('says so when neither the server nor this browser can make anything of a HEIC', async () => {

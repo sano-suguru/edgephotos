@@ -244,8 +244,8 @@ reserve で `thumbnail` / `preview` を送らない upload は、server が deri
 
 - D1 の job 行が正本で、queue message は合図にすぎません。consumer の書き込みはすべて `generation` と `uploads.status = 'pending'` を条件にします
 - derivative が揃って検査を通るまで `assets` 行を作りません。処理中の写真は timeline・album・share・export に現れません
-- message が失われた job と、consumer が止まった job（lease 切れ）は、5 分ごとの Cron と finalize の polling が新しい generation で送り直します。試行は 5 回まで数え、超えたら `failed` です
-- `failed` の upload は finalize が `422 DERIVATIVES_FAILED` を返します。Web client はその upload を `DELETE /api/v1/uploads/{uploadId}` で取消し、Browser 経路で予約し直します
+- message が失われた job と、consumer が止まった job（lease 切れ）は、5 分ごとの Cron と finalize の polling が新しい generation で送り直します。consumer の試行は 5 回、再送は間隔を延ばしながら 10 回まで数え、超えたら `failed` です
+- `failed` の upload は finalize が `422 DERIVATIVES_FAILED` を返します。Web client はその upload を `DELETE /api/v1/uploads/{uploadId}` で取消し、Browser 経路で予約し直します。client がいなければ upload は original ごと残り、storage cleanup が扱います（[D-042](decisions.md)）
 - restore は backup の derivative を送るので、従来の手順のままです
 
 reserve した member を `uploads.uploaded_by` に記録し、finalize が asset を作るときに `assets.uploaded_by` へ写します。finalize を呼んだ member は見ないので、別の member や storage cleanup が finalize しても変わりません。再送や duplicate は既存 asset の値を変えません。通常の reserve は upload した人を body から受け取りません。restore は `POST /api/v1/restore/uploads` で reserve し、manifest の値を `uploadedBy` で送ります（`null` を含む）。0004 より前の asset は `NULL` です。どちらも `NULL` なら API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。

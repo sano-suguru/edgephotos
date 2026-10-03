@@ -6,7 +6,7 @@ import { toHex } from '../lib/crypto'
 import { DERIVATIVE_VERSION, objectKey } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import type { ServiceContext } from './context'
-import { deleteUnreferencedObjects, finalizeUpload } from './uploads'
+import { deleteUnreferencedObjects, finalizeUpload, getUploadRow, resolveFailedServerUpload } from './uploads'
 
 // Read-only reconciliation of D1 (assets, uploads) against R2 (docs/decisions.md D-023).
 //
@@ -226,7 +226,8 @@ type CleanupRow = { id: string; asset_id: string }
 // - pending past expiry + grace, objects missing or invalid: marked abandoned, then its own objects removed
 // - server-rendered (D-042) and still queued / running: left alone, re-sent if overdue, counted as processing.
 //   Its original passed finalize; removing it would lose a photo the server is about to add
-// - server-rendered and failed: abandoned like an upload whose objects do not pass
+// - server-rendered and failed: kept (its original passed finalize). Settled once the same bytes are a photo,
+//   re-queued when the failure was not about the photo, abandoned only if the original itself is gone
 // - duplicate / abandoned past grace: its own leftover objects removed, then the row
 // Object keys come from uploads.asset_id and are removed only while no asset row owns that id.
 export async function cleanupUploads(ctx: ServiceContext, limit: number): Promise<StorageCleanupResult> {
@@ -240,15 +241,29 @@ export async function cleanupUploads(ctx: ServiceContext, limit: number): Promis
     cleared: 0,
     failed: 0,
     processing: 0,
+    unrendered: 0,
     more: false,
   }
 
-  const pending = await ctx.db.all<CleanupRow>(
-    sql`SELECT id, asset_id FROM uploads WHERE status = 'pending' AND created_at < ${pendingBefore}
-        ORDER BY created_at, id LIMIT ${limit + 1}`,
+  const pending = await ctx.db.all<CleanupRow & { job_state: string | null; failure: string | null }>(
+    sql`SELECT u.id, u.asset_id, j.state AS job_state, j.failure FROM uploads u
+          LEFT JOIN derivative_jobs j ON j.upload_id = u.id
+        WHERE u.status = 'pending' AND u.created_at < ${pendingBefore}
+        ORDER BY u.created_at, u.id LIMIT ${limit + 1}`,
   )
   for (const row of pending.slice(0, limit)) {
     try {
+      // A server-rendered upload whose job failed still has a verified original: never discarded for that alone.
+      if (row.job_state === 'failed') {
+        const upload = await getUploadRow(ctx.db, row.id)
+        if (!upload) continue
+        const resolution = await resolveFailedServerUpload(ctx, upload, row.failure)
+        if (resolution === 'duplicate') result.cleared += (await clearSettledUpload(ctx, row)) ? 1 : 0
+        else if (resolution === 'requeued') result.processing++
+        else if (resolution === 'kept') result.unrendered++
+        else await abandon(row)
+        continue
+      }
       const outcome = await finalizeUpload(ctx, row.id)
       // Never fall through to clearing: that would delete the original the server is rendering from.
       if (outcome.result === 'processing') result.processing++
@@ -256,26 +271,27 @@ export async function cleanupUploads(ctx: ServiceContext, limit: number): Promis
       else result.cleared += (await clearSettledUpload(ctx, row)) ? 1 : 0
     } catch (err) {
       const unusable =
-        err instanceof ApiError &&
-        (err.code === 'UPLOAD_OBJECT_MISSING' ||
-          err.code === 'UPLOAD_OBJECT_INVALID' ||
-          err.code === 'DERIVATIVES_FAILED')
+        err instanceof ApiError && (err.code === 'UPLOAD_OBJECT_MISSING' || err.code === 'UPLOAD_OBJECT_INVALID')
       if (!unusable) {
         result.failed++
         continue
       }
-      try {
-        // Terminal first: once the row is no longer pending, no finalize can turn its asset id into an asset.
-        const marked = await ctx.db.run(
-          sql`UPDATE uploads SET status = 'duplicate', duplicate_of = NULL, finalized_at = ${ctx.now().toISOString()}
-              WHERE id = ${row.id} AND status = 'pending'`,
-        )
-        if (marked.meta.changes !== 1) continue
-        result.abandoned++
-        if (await clearSettledUpload(ctx, row)) result.cleared++
-      } catch {
-        result.failed++
-      }
+      await abandon(row)
+    }
+  }
+
+  async function abandon(row: CleanupRow) {
+    try {
+      // Terminal first: once the row is no longer pending, no finalize can turn its asset id into an asset.
+      const marked = await ctx.db.run(
+        sql`UPDATE uploads SET status = 'duplicate', duplicate_of = NULL, finalized_at = ${ctx.now().toISOString()}
+            WHERE id = ${row.id} AND status = 'pending'`,
+      )
+      if (marked.meta.changes !== 1) return
+      result.abandoned++
+      if (await clearSettledUpload(ctx, row)) result.cleared++
+    } catch {
+      result.failed++
     }
   }
 

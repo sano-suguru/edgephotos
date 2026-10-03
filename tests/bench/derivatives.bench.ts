@@ -242,7 +242,8 @@ describe('server-rendered derivatives (local)', () => {
           inbox.push(m)
         }
       }
-      c.advance(Math.max(LEASE_MS, RECONCILE_MARGIN_MS) + 1000)
+      // Past the lease and past the longest re-send delay, so every overdue job is due this round.
+      c.advance(Math.max(LEASE_MS, 3600 * 1000 + RECONCILE_MARGIN_MS) + 1000)
       sendFails = rand() < 0.2
       const before = Number(await env.DB.prepare(`SELECT SUM(generation) AS g FROM derivative_jobs`).first('g'))
       await runScheduledReconcile(backgroundContext(testEnv(), { now: c.now, derivatives: services }))

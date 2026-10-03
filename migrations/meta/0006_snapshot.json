@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8c53a1d1-3aac-4970-9f8c-04ad8a1176cf",
+  "id": "fc1b26c1-30b2-4aed-ba2e-17636e5a0c99",
   "prevId": "1d0cf0e7-1470-4fae-8ce5-f47a53ad10d9",
   "tables": {
     "album_assets": {
@@ -317,6 +317,14 @@
           "autoincrement": false,
           "default": 0
         },
+        "resends": {
+          "name": "resends",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
         "next_attempt_at": {
           "name": "next_attempt_at",
           "type": "text",
@@ -398,7 +406,7 @@
       "checkConstraints": {
         "derivative_jobs_state_check": {
           "name": "derivative_jobs_state_check",
-          "value": "\"derivative_jobs\".\"state\" IN ('awaiting_original', 'queued', 'running', 'done', 'failed', 'cancelled')"
+          "value": "\"derivative_jobs\".\"state\" IN ('awaiting_original', 'queued', 'running', 'done', 'failed')"
         }
       }
     },

@@ -278,14 +278,14 @@ pnpm exec vitest run --config vitest.bench.config.ts tests/bench/derivatives.ben
 
 ### upload の request（local、各 100 件）
 
-original は約 2MB の合成 JPEG。Browser 経路は 3 object、server 経路は original だけを PUT します。
+original は約 2MB の合成 JPEG。Browser 経路は 3 object、server 経路は original だけを PUT します。同じ手順を 2 回実行し、2 回目の値を載せます（括弧内は 1 回目。machine の負荷で 1.5〜2 倍ぶれた）。
 
 | 経路 | `POST /uploads` | `POST finalize` | consumer 1 件（fake Images、render 0 ms） |
 | --- | --- | --- | --- |
-| Browser（従来） | p50 5 ms / p95 8 ms | p50 13 ms / p95 20 ms（200） | — |
-| server | p50 5 ms / p95 8 ms | p50 8 ms / p95 13 ms（202） | p50 34 ms / p95 57 ms |
+| Browser（従来） | p50 3 ms / p95 5 ms（5 / 8） | p50 7 ms / p95 12 ms（13 / 20）。200 | — |
+| server | p50 3 ms / p95 4 ms（5 / 8） | p50 4 ms / p95 9 ms（8 / 13）。202 | p50 16 ms / p95 30 ms（34 / 57） |
 
-server 経路の finalize は original だけを検査して job を queue に入れるので、Browser 経路より短くなります。写真が timeline に出るまでの時間は、この後の queue の配達と Images の処理で決まります。consumer の 34 ms は Worker 側の D1 / R2 の手間（original の GET 3 回、derivative の検査と PUT、完了の batch）だけです。
+server 経路の finalize は original だけを検査して job を queue に入れるので、Browser 経路より短くなります。写真が timeline に出るまでの時間は、この後の queue の配達と Images の処理で決まります。consumer の値は Worker 側の D1 / R2 の手間（original の GET 3 回、derivative の検査と PUT、完了の batch）だけです。
 
 ### Browser の memory
 
@@ -298,19 +298,19 @@ server 経路で page が decode しないことは、e2e（`upload.spec.ts` の
 
 ### 障害を注入したときの収束（local、200 件、seed 42）
 
-queue の send の 20% を失わせ、配達の 20% を重複させ、配達順を毎回入れ替え（古い generation の message が遅れて届く）、render の 15% を一時エラーにし、完了の D1 batch の 10% で Worker を止めました（以後の D1 呼び出しがすべて失敗する）。各 round の後に時計を lease より進めて Cron の reconcile を 1 回呼びます。
+queue の send の 20% を失わせ、配達の 20% を重複させ、配達順を毎回入れ替え（古い generation の message が遅れて届く）、render の 15% を一時エラーにし、完了の D1 batch の 10% で Worker を止めました（以後の D1 呼び出しがすべて失敗する）。各 round の後に時計を lease と最長の再送間隔より進め、Cron の reconcile を 1 回呼びます。
 
 | 項目 | 結果 |
 | --- | --- |
-| 注入した障害 | send の消失 39、重複配達 53、一時エラー 67、途中停止 25 |
-| reconcile の再送 | 155 回 |
-| 収束までの round | 6 |
-| 最終状態 | `done` 185、`failed`（retry 上限）15、`queued` / `running` 0 |
+| 注入した障害 | send の消失 40、重複配達 54、一時エラー 68、途中停止 28 |
+| reconcile の再送 | 160 回 |
+| 収束までの round | 9 |
+| 最終状態 | `done` 200、`failed` 0、`queued` / `running` 0 |
 | derivative が欠けた ready の asset | 0 |
 | ready にも failed にもならず残った upload | 0 |
-| 試行回数の分布 | 1 回 103、2 回 28、3 回 28、4 回 16、5 回 15、6 回 10（6 回目は上限超過の判定だけ） |
+| consumer の試行回数の分布 | 1 回 125、2 回 60、3 回 10、4 回 4、5 回 1 |
 
-`failed` の 15 件は、上の障害率が retry 上限（5 回）を超えたものです。写真にはならず、finalize が `422 DERIVATIVES_FAILED` を返し、audit が `derivative_failed` として数えます。
+再送を consumer の試行と同じ counter で数えていた最初の実装では、同じ条件で 15 件が `failed`（`retry_exhausted`）になりました。queue が遅いだけで写真を失敗にしないよう、再送を `resends` として分けました（[D-042](decisions.md)）。
 
 ### original 保存から ready までの時間（未測定）
 

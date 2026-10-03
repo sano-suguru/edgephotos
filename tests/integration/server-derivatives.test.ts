@@ -16,8 +16,10 @@ import {
   imagesRenderer,
   LEASE_MS,
   MAX_ATTEMPTS,
+  MAX_RESENDS,
   RECONCILE_MARGIN_MS,
   RenderError,
+  resendDelaySeconds,
 } from '../../src/worker/services/derivatives'
 import {
   assetIdFromTarget,
@@ -167,7 +169,12 @@ async function readyAssets(): Promise<string[]> {
 async function job(uploadId: string) {
   return env.DB.prepare('SELECT * FROM derivative_jobs WHERE upload_id = ?')
     .bind(uploadId)
-    .first<{ state: string; generation: number; attempts: number; failure: string | null }>()
+    .first<{ state: string; generation: number; attempts: number; resends: number; failure: string | null }>()
+}
+
+async function originalOf(assetId: string) {
+  const obj = await env.BUCKET.get(`originals/${assetId}`)
+  return new Uint8Array(await (obj as R2ObjectBody).arrayBuffer())
 }
 
 async function uploadStatus(uploadId: string) {
@@ -452,19 +459,72 @@ describe('server-rendered derivatives: failure modes', () => {
     expect(await readyAssets()).toEqual([])
   })
 
-  it('a job no consumer ever takes ends as failed instead of being re-sent forever', async () => {
+  it('a job no consumer ever takes ends as failed, after re-sends that wait longer each time', async () => {
     const h = await harness()
     const { uploadId } = await startUpload(h.app)
-    for (let i = 0; i < MAX_ATTEMPTS + 2; i++) {
+    for (let resends = 0; resends < MAX_RESENDS; resends++) {
       h.queue.sent = []
-      h.clock.advance(RECONCILE_MARGIN_MS + 1000)
+      // One minute short of due: left alone.
+      h.clock.advance(resendDelaySeconds(resends) * 1000 + RECONCILE_MARGIN_MS - 60_000)
       await runScheduledReconcile(h.ctx())
+      expect(h.queue.sent).toEqual([])
+      h.clock.advance(61_000)
+      await runScheduledReconcile(h.ctx())
+      expect(h.queue.sent).toHaveLength(1)
     }
-    expect((await job(uploadId))?.state).toBe('failed')
-    expect((await job(uploadId))?.failure).toBe('retry_exhausted')
+    h.clock.advance(resendDelaySeconds(MAX_RESENDS) * 1000 + RECONCILE_MARGIN_MS + 1000)
+    await runScheduledReconcile(h.ctx())
+    expect(await job(uploadId)).toMatchObject({ state: 'failed', failure: 'not_delivered', attempts: 0 })
   })
 
-  it('a permanent Images failure fails at once; audit reports it and cleanup removes it after the grace', async () => {
+  it('a slow queue does not use up the tries: a message delivered ten minutes late still renders', async () => {
+    const h = await harness()
+    const { uploadId, assetId } = await startUpload(h.app)
+    // The Cron runs every five minutes while the queue sits on the messages.
+    for (let i = 0; i < 2; i++) {
+      h.clock.advance(5 * 60 * 1000)
+      await runScheduledReconcile(h.ctx())
+      // The page polls meanwhile.
+      expect((await call(h.app, 'POST', `/api/v1/uploads/${uploadId}/finalize`)).status).toBe(202)
+    }
+    expect(await job(uploadId)).toMatchObject({ state: 'queued', attempts: 0 })
+    // Every message arrives at last; only the newest generation does anything.
+    await h.drain()
+    expect(await readyAssets()).toEqual([assetId])
+    expect(h.renderer.calls).toMatchObject({ thumbnail: 1, preview: 1 })
+  })
+
+  it('cleanup gives a job whose retries ran out another round, and the photo is added', async () => {
+    const h = await harness()
+    const { uploadId, assetId } = await startUpload(h.app)
+    h.renderer.before = () => {
+      throw new RenderError(false, 'images_9529')
+    }
+    const m = h.queue.sent.shift() as DerivativeMessage
+    for (let i = 0; i < MAX_ATTEMPTS; i++) await processDerivativeJob(h.ctx(), m)
+    expect(await job(uploadId)).toMatchObject({ state: 'failed', failure: 'retry_exhausted' })
+    h.renderer.before = undefined
+
+    h.clock.advance(DAY + 11 * 60 * 1000)
+    const result = await callJson<StorageCleanupResult>(h.app, 'POST', '/api/v1/storage/cleanup', {
+      expect: 200,
+      body: { limit: 25 },
+    })
+    expect(result).toMatchObject({ processing: 1, abandoned: 0, cleared: 0, unrendered: 0 })
+    expect(await job(uploadId)).toMatchObject({ state: 'queued', attempts: 0, resends: 0 })
+    await h.drain()
+    expect(await readyAssets()).toEqual([assetId])
+  })
+
+  it('after the bindings are removed, finalize sends the client back to the browser path', async () => {
+    const h = await harness()
+    const { uploadId } = await startUpload(h.app)
+    const without = await makeApp({ clock: h.clock, app: { derivatives: null } })
+    const res = await callJson(without, 'POST', `/api/v1/uploads/${uploadId}/finalize`, { expect: 422 })
+    expect(res.error).toMatchObject({ code: 'SERVER_DERIVATIVES_UNAVAILABLE', details: { reason: 'not_configured' } })
+  })
+
+  it('a permanent Images failure fails at once; cleanup keeps the original until the photo is added again', async () => {
     const h = await harness()
     const { uploadId, assetId } = await startUpload(h.app)
     h.renderer.before = () => {
@@ -491,11 +551,24 @@ describe('server-rendered derivatives: failure modes', () => {
       expect: 200,
       body: { limit: 25 },
     })
-    // The same as an expired upload whose objects never passed (D-023): settled, then its objects and row removed.
-    expect(result).toMatchObject({ abandoned: 1, cleared: 1, processing: 0 })
+    // Its original passed finalize: not discarded, and not re-queued (Images cannot read this photo).
+    expect(result).toMatchObject({ abandoned: 0, cleared: 0, processing: 0, unrendered: 1 })
+    expect(await uploadStatus(uploadId)).toBe('pending')
+    expect(await present(keys(assetId).original)).toBe(true)
+
+    // The photo is added again (here: the server path succeeds this time); now the failed upload is a duplicate.
+    h.renderer.before = undefined
+    const again = await startUpload(h.app, await originalOf(assetId))
+    await h.drain()
+    expect(await readyAssets()).toEqual([again.assetId])
+    result = await callJson<StorageCleanupResult>(h.app, 'POST', '/api/v1/storage/cleanup', {
+      expect: 200,
+      body: { limit: 25 },
+    })
+    expect(result).toMatchObject({ cleared: 1, unrendered: 0 })
     expect(await uploadStatus(uploadId)).toBeUndefined()
-    expect(await job(uploadId)).toBeNull()
     for (const k of Object.values(keys(assetId))) expect(await present(k)).toBe(false)
+    for (const k of Object.values(keys(again.assetId))) expect(await present(k)).toBe(true)
   })
 
   it('a rendered JPEG carrying EXIF is refused before it reaches storage', async () => {
@@ -581,8 +654,9 @@ describe('server-rendered derivatives: audit and cleanup', () => {
     expect(await present(keys(assetId).original)).toBe(true)
     expect(await uploadStatus(uploadId)).toBe('pending')
 
+    // Cleanup's finalize re-sent it (lost again); the next re-send waits its delay.
     h.queue.failing = false
-    h.clock.advance(RECONCILE_MARGIN_MS + 1000)
+    h.clock.advance(resendDelaySeconds(1) * 1000 + RECONCILE_MARGIN_MS + 1000)
     await runScheduledReconcile(h.ctx())
     await h.drain()
     expect(await readyAssets()).toEqual([assetId])

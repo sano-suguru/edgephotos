@@ -231,10 +231,19 @@ export function finishJobStatement(db: Db, m: DerivativeMessage, now: Date) {
 
 export type ReconcileResult = { resent: number; failed: number; sendFailed: boolean }
 
+// Re-sends after the k-th re-send wait min(1 min x 2^(k-1), 1 h) before the job counts as overdue again: about
+// 5 hours over MAX_RESENDS. A queue that is merely slow, or an Images outage, is outlasted rather than turned into
+// a failure; a deployment whose consumer never runs still ends.
+export const MAX_RESENDS = 10
+export function resendDelaySeconds(resends: number): number {
+  return Math.min(60 * 2 ** Math.max(resends - 1, 0), 3600)
+}
+
 // Re-sends jobs whose message is overdue (lost send, dropped after the queue's own retries) and jobs whose
 // consumer stopped while running (lease passed). Each re-send bumps the generation in a conditional write first,
-// so the old message, if it ever arrives, changes nothing; and counts as an attempt, so a job no consumer ever
-// picks up ends as `failed` instead of being re-sent forever. Never deletes anything.
+// so the old message, if it ever arrives, changes nothing. Re-sends are counted apart from the consumer's attempts
+// (`resends`), so a slow queue does not use up the tries a photo gets; a job that is never picked up ends as
+// `failed` (`not_delivered`) after MAX_RESENDS. Never deletes anything.
 export async function reconcileJobs(
   db: Db,
   queue: DerivativeQueue,
@@ -243,29 +252,34 @@ export async function reconcileJobs(
 ): Promise<ReconcileResult> {
   const ts = now.toISOString()
   const due = new Date(now.getTime() - RECONCILE_MARGIN_MS).toISOString()
-  const filter = only ? sql` AND j.upload_id = ${only}` : sql``
-  const rows = await db.all<{ upload_id: string; generation: number; state: string; attempts: number }>(
-    sql`SELECT j.upload_id, j.generation, j.state, j.attempts FROM derivative_jobs j
-        WHERE j.state IN ('queued', 'running')
-          AND ((j.state = 'queued' AND j.next_attempt_at < ${due}) OR (j.state = 'running' AND j.lease_until < ${ts}))
-          AND EXISTS (SELECT 1 FROM uploads u WHERE u.id = j.upload_id AND u.status = 'pending')${filter}
-        ORDER BY j.updated_at LIMIT ${RECONCILE_LIMIT}`,
+  // Overdue, checked again in each UPDATE: a consumer may claim and re-queue the job between the read and the write.
+  const overdue = sql`((state = 'queued' AND next_attempt_at < ${due}) OR (state = 'running' AND lease_until < ${ts}))`
+  const filter = only ? sql` AND upload_id = ${only}` : sql``
+  const rows = await db.all<{ upload_id: string; generation: number; attempts: number; resends: number }>(
+    sql`SELECT upload_id, generation, attempts, resends FROM derivative_jobs
+        WHERE state IN ('queued', 'running') AND ${overdue}
+          AND EXISTS (SELECT 1 FROM uploads u WHERE u.id = upload_id AND u.status = 'pending')${filter}
+        ORDER BY updated_at LIMIT ${RECONCILE_LIMIT}`,
   )
   const result: ReconcileResult = { resent: 0, failed: 0, sendFailed: false }
   const messages: DerivativeMessage[] = []
   for (const row of rows) {
-    const same = sql`upload_id = ${row.upload_id} AND generation = ${row.generation} AND state = ${row.state}`
-    if (row.attempts >= MAX_ATTEMPTS) {
+    const same = sql`upload_id = ${row.upload_id} AND generation = ${row.generation} AND ${overdue}`
+    // A consumer that stopped on its last try, or a job no consumer ever took.
+    const giveUp =
+      row.attempts >= MAX_ATTEMPTS ? 'retry_exhausted' : row.resends >= MAX_RESENDS ? 'not_delivered' : null
+    if (giveUp) {
       const res = await db.run(
-        sql`UPDATE derivative_jobs SET state = 'failed', failure = 'retry_exhausted', lease_until = NULL,
+        sql`UPDATE derivative_jobs SET state = 'failed', failure = ${giveUp}, lease_until = NULL,
               updated_at = ${ts} WHERE ${same}`,
       )
-      result.failed += res.meta.changes
+      result.failed += res.meta.changes > 0 ? 1 : 0
       continue
     }
+    const wait = new Date(now.getTime() + resendDelaySeconds(row.resends + 1) * 1000).toISOString()
     const bumped = await db.all<{ generation: number }>(
-      sql`UPDATE derivative_jobs SET state = 'queued', generation = generation + 1, attempts = attempts + 1,
-            lease_until = NULL, next_attempt_at = ${ts}, updated_at = ${ts}
+      sql`UPDATE derivative_jobs SET state = 'queued', generation = generation + 1, resends = resends + 1,
+            lease_until = NULL, next_attempt_at = ${wait}, updated_at = ${ts}
           WHERE ${same} RETURNING generation`,
     )
     if (bumped.length === 1) messages.push({ uploadId: row.upload_id, generation: bumped[0].generation })
@@ -275,4 +289,26 @@ export async function reconcileJobs(
     if (!result.sendFailed) result.resent = messages.length
   }
   return result
+}
+
+// Failures that say something about the photo itself (what Images could not read, what its output was): the same
+// original fails the same way. Everything else (retry_exhausted, not_delivered, the account's monthly limit, ...)
+// may pass later, so storage cleanup gives those jobs another round.
+const PHOTO_FAILURES = new Set(['images_9412', 'images_9413', 'images_9520', 'images_9523', 'unsupported_format'])
+export function failureIsThePhotos(reason: string | null): boolean {
+  return reason !== null && (PHOTO_FAILURES.has(reason) || reason.startsWith('derivative_'))
+}
+
+// failed -> queued under a new generation with fresh counters. Only for a job whose upload is still pending.
+export async function rearmJob(db: Db, queue: DerivativeQueue, uploadId: string, now: Date): Promise<boolean> {
+  const ts = now.toISOString()
+  const rows = await db.all<{ generation: number }>(
+    sql`UPDATE derivative_jobs SET state = 'queued', generation = generation + 1, attempts = 0, resends = 0,
+          lease_until = NULL, next_attempt_at = ${ts}, updated_at = ${ts}
+        WHERE upload_id = ${uploadId} AND state = 'failed' AND ${UPLOAD_PENDING(uploadId)}
+        RETURNING generation`,
+  )
+  if (rows.length === 0) return false
+  await sendQuietly(queue, [{ uploadId, generation: rows[0].generation }])
+  return true
 }

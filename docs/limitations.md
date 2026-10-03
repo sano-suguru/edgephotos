@@ -74,7 +74,7 @@ cleanup の直後に `library: interrupted uploads` の件数がまた増える�
 
 original が 20 MB 以下の写真は、upload の後に server が thumbnail / preview を作ります（[D-042](decisions.md)）。画面を開いている間は、server が作れなかった写真を Browser で作り直すか、作れない理由を表示します。画面を閉じた後に失敗した写真は、ライブラリに現れないだけで、通知はありません。
 
-メンテナンス画面の「保存状態の点検」が `derivative_failed` として数えます。その写真をもう一度追加してください。1 日たつと「中断したアップロードを整理する」が片付けます。
+メンテナンス画面の「保存状態の点検」が `derivative_failed` として数えます。original は消さずに残します。その写真をもう一度追加すると、「中断したアップロードを整理する」が残った分を片付けます。一時的な理由で失敗したものは、整理するときにもう一度 server で作り直します。
 
 ### 20 MB を超える HEIC は、decode できる Browser でしか追加できない
 
