@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm'
+import { stripJpegMetadata } from '../../contracts/jpeg-segments'
 import { LIMITS } from '../../contracts/schemas'
 import { uploads } from '../db/schema'
 import { INSPECT_HEAD_BYTES, jpegFrameSize, scanJpegForMetadata } from '../storage/inspect'
@@ -68,8 +69,8 @@ export async function processDerivativeJob(ctx: ServiceContext, m: DerivativeMes
 
 // The same contract finalize enforces on a browser-rendered derivative (D-012), applied before the bytes reach
 // storage: a JPEG whose header holds only the allowlisted segments, within the size reserve would allow. The
-// Images binding has no metadata option and does not document what its JPEG keeps, so its output is checked, not
-// trusted. A failure is permanent: the same input renders the same way.
+// Images binding has no metadata option (its JPEG keeps the original's Exif), so its output is stripped and then
+// checked, not trusted. A failure is permanent: the same input renders the same way.
 function checkRendered(variant: (typeof VARIANTS)[number], bytes: Uint8Array) {
   if (bytes.byteLength > MAX_BYTES[variant]) throw new RenderError(true, 'derivative_too_large')
   const scan = scanJpegForMetadata(bytes.subarray(0, INSPECT_HEAD_BYTES))
@@ -100,7 +101,9 @@ async function renderAndComplete(
     const current = await inspectDerivative(ctx, upload.asset_id, variant)
     // Written by an earlier run of this job that stopped before completing.
     if (current.present && !current.rejection) continue
-    const bytes = await renderer.render(await original(), DERIVATIVE_SPECS[variant])
+    // Images keeps the original's Exif (GPS included) in its JPEG: dropped here exactly as the browser path drops
+    // what its encoder adds, then checked as finalize would.
+    const bytes = stripJpegMetadata(await renderer.render(await original(), DERIVATIVE_SPECS[variant]))
     checkRendered(variant, bytes)
     await ctx.bucket.put(keys[variant], bytes, { httpMetadata: { contentType: 'image/jpeg' } })
   }

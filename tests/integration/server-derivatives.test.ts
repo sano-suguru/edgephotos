@@ -22,6 +22,7 @@ import {
   RenderError,
   resendDelaySeconds,
 } from '../../src/worker/services/derivatives'
+import { scanJpegForMetadata } from '../../src/worker/storage/inspect'
 import {
   assetIdFromTarget,
   type Clock,
@@ -32,6 +33,7 @@ import {
   putObject,
   sha256,
   syntheticJpeg,
+  syntheticPng,
   testEnv,
 } from '../helpers'
 
@@ -630,15 +632,30 @@ describe('server-rendered derivatives: failure modes', () => {
     for (const k of Object.values(keys(again.assetId))) expect(await present(k)).toBe(true)
   })
 
-  it('a rendered JPEG carrying EXIF is refused before it reaches storage', async () => {
+  it('a rendered JPEG carrying the original EXIF (GPS) has it stripped before it reaches storage', async () => {
+    const h = await harness()
+    const { assetId } = await startUpload(h.app)
+    // What Cloudflare Images returns for a JPEG with EXIF (remote-test): the Exif APP1 with GPS is kept.
+    h.renderer.output = () => syntheticJpeg({ exif: true })
+    expect(await processDerivativeJob(h.ctx(), h.queue.sent.shift() as DerivativeMessage)).toMatchObject({
+      kind: 'done',
+    })
+    for (const k of [keys(assetId).thumbnail, keys(assetId).preview]) {
+      const stored = new Uint8Array(await ((await env.BUCKET.get(k)) as R2ObjectBody).arrayBuffer())
+      expect(scanJpegForMetadata(stored)).toEqual({ ok: true })
+      expect(new TextDecoder('latin1').decode(stored)).not.toContain('GPS')
+    }
+  })
+
+  it('a rendered output that is not a usable JPEG is refused before it reaches storage', async () => {
     const h = await harness()
     const { uploadId, assetId } = await startUpload(h.app)
-    h.renderer.output = () => syntheticJpeg({ exif: true })
+    h.renderer.output = () => syntheticPng()
     const outcome = await processDerivativeJob(h.ctx(), h.queue.sent.shift() as DerivativeMessage)
-    expect(outcome).toEqual({ kind: 'failed', reason: 'derivative_metadata_segment' })
+    expect(outcome).toEqual({ kind: 'failed', reason: 'derivative_not_jpeg' })
     expect(await present(keys(assetId).thumbnail)).toBe(false)
     expect(await readyAssets()).toEqual([])
-    expect((await job(uploadId))?.failure).toBe('derivative_metadata_segment')
+    expect((await job(uploadId))?.failure).toBe('derivative_not_jpeg')
   })
 
   it('cancelled while queued: the message changes nothing and the objects are gone', async () => {

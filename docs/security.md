@@ -187,7 +187,7 @@ share へ返す metadata は allowlist 方式とし、次を返しません。
 
 thumbnail / preview は metadata をコピーせず生成します。HEIC / HEIF の original でも同じです。Browser 経路の derivative は decode した bitmap から canvas で描き直した JPEG で、original の EXIF は写りません。
 
-server 経路（original が 20 MB 以下。[D-042](decisions.md)）では Cloudflare Images の binding が JPEG を作ります。binding の出力には metadata の指定が無く、JPEG に何を残すかは Cloudflare の文書にありません。そのため consumer は出力を R2 へ PUT する前に下の allowlist 検査に通し、通らなければその upload を `failed` にして写真にしません。完了の直前にも R2 から読み直して同じ検査をします。Images の実際の出力がこの検査を通るかは、remote-test での確認待ちです（[verification.md](verification.md)）。
+server 経路（original が 20,000,000 byte 以下。[D-042](decisions.md)）では Cloudflare Images の binding が JPEG を作ります。binding の出力には metadata の指定がありません。remote-test では、EXIF のある JPEG からの出力が、元の Exif を GPS ごと残しました（[verification.md](verification.md#server-側の-derivative-生成2026-10-03)）。そのため consumer は、Browser 経路と同じ関数で allowlist 外の segment を取り除き、下の allowlist 検査に通してから R2 へ PUT します。通らなければその upload を `failed` にして写真にしません。完了の直前にも R2 から読み直して同じ検査をします。
 
 finalize は、derivative の最初の scan（SOS）までの header segment を allowlist で検査します。
 
@@ -205,7 +205,7 @@ finalize が保証するのは、先頭 256 KiB のうち最初の scan まで�
 - EOI の後ろに付けたデータ
 - 画素そのもの
 
-canvas の encoder はこうした場所に情報を書かないため、正規の client の derivative には現れません。Images の encoder がこれらの場所に何を書くかは確かめていません。household member が細工した bytes を直接 PUT した場合は、上の場所に載せた情報が share 閲覧者へ届く derivative に残ります。
+canvas の encoder はこうした場所に情報を書かないため、正規の client の derivative には現れません。Images の encoder がこれらの場所に何を書くかは確かめていません（remote-test で確かめたのは header segment だけ）。household member が細工した bytes を直接 PUT した場合は、上の場所に載せた情報が share 閲覧者へ届く derivative に残ります。
 
 ### 画像を解析する箇所
 

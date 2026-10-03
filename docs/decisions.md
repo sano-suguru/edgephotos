@@ -1280,7 +1280,11 @@ finalize の polling も同じ関数を 1 件に対して呼びます。Cron は
 
 ### metadata の検査
 
-Images binding の出力には `metadata` の指定がなく、JPEG 出力が何を残すかは文書にありません。そのため consumer は R2 へ PUT する前に、Browser 経路と同じ `scanJpegForMetadata`（[D-012](#d-012-finalize-の保存確認は存在サイズ形式派生画像-metadataとする)）で出力を検査し、通らなければ恒久失敗（`derivative_metadata`）にします。完了の直前にも、R2 から読み直して同じ検査をします。allowlist は広げません。実際の Images 出力がこの規則を通るかは、remote-test で確かめるまで未確認です（[verification.md](verification.md)）。
+Images binding の出力には `metadata` の指定がありません。remote-test で確かめると、EXIF のある JPEG からの出力は、元の Exif の APP1 を GPS ごと残しました（Orientation は画素に適用し、tag だけを消す）。そのまま R2 に置けば、共有先に位置情報が届きます。
+
+consumer は R2 へ PUT する前に、Browser 経路と同じ `stripJpegMetadata` で allowlist 外の segment を取り除きます。そのうえで `scanJpegForMetadata`（[D-012](#d-012-finalize-の保存確認は存在サイズ形式派生画像-metadataとする)）で検査し、通らなければ恒久失敗（`derivative_*`）にします。完了の直前にも、R2 から読み直して同じ検査をします。allowlist は広げません。
+
+最初の実装は取り除かずに検査だけをしていたので、remote-test の最初の 1 枚が `derivative_metadata_segment` で失敗しました。検査が fail-closed だったため、GPS を含む derivative は書かれていません（[verification.md](verification.md#server-側の-derivative-生成2026-10-03)）。
 
 ### D-030 から変えたこと
 
@@ -1300,4 +1304,4 @@ server 生成では client が decode しないため、撮影日時の読み取
 - Workflows / Durable Objects: 1 件 2 回の変換に対して、状態を D1 の外にもう 1 つ持つことになる
 - consumer が `assets` 行を先に作り、derivative を後から埋める: 処理中の写真が timeline・share・backup に出る
 
-再検討の条件: Images の出力が allowlist に通らないと分かったとき（出力形式か allowlist のどちらを変えるかを決める）。Images の入力上限が変わったとき。Cron の再送が実際に何件起きているかを観測できるようになり、5 分の間隔が問題になったとき。
+再検討の条件: Images の出力に、取り除けない形で情報が載るようになったとき（出力形式か allowlist のどちらを変えるかを決める）。Images の入力上限が変わったとき。Cron の再送が実際に何件起きているかを観測できるようになり、5 分の間隔が問題になったとき。

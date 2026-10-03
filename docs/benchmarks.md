@@ -323,17 +323,26 @@ queue が 1 時間何も配達しない間（並列数を絞った consumer の�
 
 足した message は generation で無害ですが、queue の operation と consumer の起動を増やし、backlog を長くします。
 
-### original 保存から ready までの時間（未測定）
+### original 保存から ready までの時間（remote-test）
 
-queue の配達と Images の処理は local では再現できないため、測っていません。remote-test に deploy すれば、D1 の記録から直接出せます。
+2026-10-03、remote-test（`max_concurrency: 4`）。D1 の `queued_at`（finalize が original を検査し終えた時刻）から `completed_at`（asset を作った D1 batch）までです。
+
+| 条件 | 件数 | p50 | p95 | 最小 / 最大 |
+| --- | --- | --- | --- | --- |
+| 1 枚ずつ（queue は空） | 12 | 8.5 秒 | 13.8 秒 | 7.5 / 13.8 秒 |
+| 20 枚を同時に | 20 | 45.7 秒 | 60.3 秒 | 11.3 / 60.3 秒 |
+
+queue consumer 1 回の wall time は p50 6.8 秒、p95 10.5 秒（Workers Logs、33 回）。1 枚ずつのときの時間の大半はこの処理で、Images を 3 回（`info()`、thumbnail、preview）順に呼んでいる。20 枚のときは、並列数 4 で 5 巡する分が足される。client から見た時間（finalize の 202 から 200 まで、1 秒ごとの polling）は、1 枚ずつで 7.6〜14.2 秒、20 枚で p50 46.2 秒・p95 60.5 秒。
+
+縮める手段は 2 つ。consumer の中で Images の 3 回を並列に呼ぶこと（1 回あたり約 2〜3 秒が 1 回分になる見込み。未実装・未測定）と、`max_concurrency` を上げること。後者は Images の 9522 / 9529 との兼ね合いで決める（[operations.md](operations.md#server-側の-derivative-生成images-と-queues)）。
+
+計測の SQL:
 
 ```bash
 pnpm wrangler d1 execute DB --env remote-test --remote --command "
   SELECT (julianday(completed_at) - julianday(queued_at)) * 86400000 AS ms
   FROM derivative_jobs WHERE state = 'done' ORDER BY ms"
 ```
-
-`queued_at` は finalize が original を検査し終えた時刻、`completed_at` は asset を作った D1 batch の時刻です。行を並べて p50 / p95 を読みます。合わせて `SELECT failure, COUNT(*) FROM derivative_jobs GROUP BY failure` で一時エラーの理由と回数を見ます。
 
 ### 費用
 
