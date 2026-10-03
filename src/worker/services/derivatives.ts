@@ -149,7 +149,7 @@ export function newJobInsert(db: Db, uploadId: string, now: Date) {
 
 // awaiting_original -> queued under the next generation, once finalize has verified the original. The message is
 // sent after the D1 write commits; if the send is lost, the row is still `queued` and reconcile re-sends it.
-export async function queueJob(db: Db, queue: DerivativeQueue | null, uploadId: string, now: Date): Promise<void> {
+export async function queueJob(db: Db, queue: DerivativeQueue, uploadId: string, now: Date): Promise<void> {
   const ts = now.toISOString()
   const rows = await db.all<{ generation: number }>(
     sql`UPDATE derivative_jobs SET state = 'queued', generation = generation + 1, next_attempt_at = ${ts},
@@ -157,7 +157,7 @@ export async function queueJob(db: Db, queue: DerivativeQueue | null, uploadId: 
         WHERE upload_id = ${uploadId} AND state = 'awaiting_original' AND ${UPLOAD_PENDING(uploadId)}
         RETURNING generation`,
   )
-  if (rows.length === 0 || !queue) return
+  if (rows.length === 0) return
   await sendQuietly(queue, [{ uploadId, generation: rows[0].generation }])
 }
 

@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import { LIMITS } from '../../contracts/schemas'
 import { uploads } from '../db/schema'
-import { INSPECT_HEAD_BYTES, scanJpegForMetadata } from '../storage/inspect'
+import { INSPECT_HEAD_BYTES, jpegFrameSize, scanJpegForMetadata } from '../storage/inspect'
 import { assetObjectKeys } from '../storage/keys'
 import type { ServiceContext } from './context'
 import {
@@ -94,7 +94,7 @@ async function renderAndComplete(
     if (!obj) throw new RenderError(true, 'original_missing')
     return obj.body
   }
-  const { width, height } = await renderer.info(await original())
+  const info = await renderer.info(await original())
 
   for (const variant of VARIANTS) {
     const current = await inspectDerivative(ctx, upload.asset_id, variant)
@@ -112,6 +112,7 @@ async function renderAndComplete(
     if (stored.rejection) throw new RenderError(false, `stored_${stored.rejection.problem}`)
   }
 
+  const { width, height } = await displayedSize(ctx, keys.preview, info)
   const now = ctx.now()
   const fence = holdsJob(m)
   try {
@@ -133,6 +134,18 @@ async function renderAndComplete(
   const settled = await getUploadRow(ctx.db, upload.id)
   if (settled?.status === 'finalized') return { kind: 'done', result: 'created' }
   return { kind: 'noop' }
+}
+
+// The size to record is the size the photo is shown at, as the browser path records it (after EXIF orientation).
+// `info()` may report the stored size of a photo whose orientation turns it a quarter, so the preview Images rendered
+// (the right way up) decides which side is the long one.
+async function displayedSize(ctx: ServiceContext, previewKey: string, info: { width: number; height: number }) {
+  const obj = await ctx.bucket.get(previewKey, { range: { offset: 0, length: INSPECT_HEAD_BYTES } })
+  const frame = obj ? jpegFrameSize(new Uint8Array(await obj.arrayBuffer())) : null
+  if (!frame || frame.width === frame.height || info.width === info.height) return info
+  const portraitPreview = frame.height > frame.width
+  const portraitInfo = info.height > info.width
+  return portraitPreview === portraitInfo ? info : { width: info.height, height: info.width }
 }
 
 async function settleAsDuplicate(

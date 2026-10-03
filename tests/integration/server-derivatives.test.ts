@@ -242,6 +242,19 @@ describe('server-rendered derivatives: normal path', () => {
     expect(await timeline(h.app)).toEqual([assetId])
   })
 
+  it('records the displayed size: a portrait preview turns a landscape info() size the right way up', async () => {
+    const h = await harness()
+    // Images reports the stored 4032x3024 of a photo whose EXIF orientation turns it; its renders are portrait.
+    h.renderer.output = (variant) =>
+      variant === 'thumbnail'
+        ? syntheticJpeg({ width: 384, height: 512 })
+        : syntheticJpeg({ width: 1536, height: 2048 })
+    const { uploadId } = await startUpload(h.app)
+    await h.drain()
+    const done = await callJson(h.app, 'POST', `/api/v1/uploads/${uploadId}/finalize`, { expect: 200 })
+    expect([done.asset.width, done.asset.height]).toEqual([3024, 4032])
+  })
+
   it('a replayed finalize does not create a second job or message', async () => {
     const h = await harness()
     const { uploadId } = await startUpload(h.app)

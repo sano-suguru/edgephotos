@@ -1076,7 +1076,7 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 
 local の自動テスト:
 
-- `tests/integration/server-derivatives.test.ts`（27 件）。Images と queue を fake にし、D1 / R2 は local の binding。次の各場合で、写真を公開しない（`assets` 行が無い）、original を失わない、再送か reconcile で収束する、を確かめた
+- `tests/integration/server-derivatives.test.ts`（28 件）。Images と queue を fake にし、D1 / R2 は local の binding。次の各場合で、写真を公開しない（`assets` 行が無い）、original を失わない、再送か reconcile で収束する、を確かめた
   - D1 に `queued` を書いた後に send が失われた（Cron と finalize の polling が generation 2 で再送）
   - 同じ message の重複配達（順番でも同時でも、写真は 1 枚、render は 1 回）
   - thumbnail を書いた後、preview の前に Worker が止まった（lease 中の再配達は no-op、lease 後の再送で preview だけを作る）
@@ -1102,7 +1102,7 @@ Browser E2E（`vite dev`、Playwright）:
 未確認（remote-test で確かめること）:
 
 - Cloudflare Images の実際の JPEG 出力が allowlist（[D-012](decisions.md)）を通るか。通らなければ server 経路の upload はすべて `failed` になり、client が Browser 経路で作り直す（壊れはしないが、server 経路の利点が無くなる）
-- EXIF Orientation と HEIC の `irot` / `imir` が Images で反映されるか。`info()` が向きを適用する前の幅と高さを返すなら、縦の写真で width / height が入れ替わって記録される
+- EXIF Orientation と HEIC の `irot` / `imir` が Images の変換で反映されるか（反映されなければ thumbnail が横倒しになる）。記録する幅と高さは、`info()` の値の縦横を生成した preview の縦横に合わせるので、`info()` が向きを適用する前の値を返しても入れ替わらない（test あり）
 - 実際の queue の配達、Cron の起動、original 保存から ready までの p50 / p95（[benchmarks.md](benchmarks.md#original-保存から-ready-までの時間未測定) の SQL）
 - `wrangler deploy` が queue を自動で作るか（作らない前提で手順に `wrangler queues create` を書いた）
 

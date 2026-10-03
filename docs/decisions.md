@@ -1274,7 +1274,7 @@ Images binding の出力には `metadata` の指定がなく、JPEG 出力が何
 
 ### D-030 から変えたこと
 
-server 生成では client が decode しないため、撮影日時の読み取り（exifr）は「decode の後」ではなく「box 構造の検査の後」になります。D-030 が exifr の hang を確認した zero padding の box は、構造の検査で先に拒否されます。幅と高さは Images の `info()` から server が記録します。
+server 生成では client が decode しないため、撮影日時の読み取り（exifr）は「decode の後」ではなく「box 構造の検査の後」になります。D-030 が exifr の hang を確認した zero padding の box は、構造の検査で先に拒否されます。幅と高さは Images の `info()` から server が記録します。`info()` が向きを適用する前の値を返す場合に備え、縦横は生成した preview の frame に合わせます。
 
 ### 増えるもの
 
