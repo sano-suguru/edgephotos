@@ -5,6 +5,7 @@ CREATE TABLE `derivative_jobs` (
 	`attempts` integer DEFAULT 0 NOT NULL,
 	`resends` integer DEFAULT 0 NOT NULL,
 	`next_attempt_at` text,
+	`dispatched` integer DEFAULT 0 NOT NULL,
 	`lease_until` text,
 	`failure` text,
 	`created_at` text NOT NULL,

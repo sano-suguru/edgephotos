@@ -312,6 +312,17 @@ queue の send の 20% を失わせ、配達の 20% を重複させ、配達順�
 
 再送を consumer の試行と同じ counter で数えていた最初の実装では、同じ条件で 15 件が `failed`（`retry_exhausted`）になりました。queue が遅いだけで写真を失敗にしないよう、再送を `resends` として分けました（[D-042](decisions.md)）。
 
+### backlog の間に reconcile が足す message（local）
+
+queue が 1 時間何も配達しない間（並列数を絞った consumer の後ろに大きな import が並んだ状態）に、5 分ごとの Cron が足した message の数です。40 件の job で測りました（reconcile の 1 回あたりの上限 50 件に掛からない数）。「区別なし」は、queue が受け取った send を記録しない最初の実装を、`dispatched` を毎回 0 に戻して再現したものです。
+
+| 実装 | 最初の send | reconcile が足した message |
+| --- | --- | --- |
+| 区別なし（最初の実装） | 40 | 240（1 件あたり 6 通） |
+| 受け取った send を 30 分信頼する | 40 | 40（30 分を過ぎた後の 1 通） |
+
+足した message は generation で無害ですが、queue の operation と consumer の起動を増やし、backlog を長くします。
+
 ### original 保存から ready までの時間（未測定）
 
 queue の配達と Images の処理は local では再現できないため、測っていません。remote-test に deploy すれば、D1 の記録から直接出せます。

@@ -1217,7 +1217,7 @@ owner から「D1 と R2 をまたぐ upload を、at-least-once の Queue で�
 
 ### 対象と fallback
 
-- server 側で作るのは、original が 20 MB 以下（Images binding の入力上限）の upload だけ。client は reserve で `thumbnail` / `preview` を送らないことで server 生成を求める
+- server 側で作るのは、original が 20 MB 以下（Images binding の入力上限）の upload だけ。文書は 10^6 と 2^20 のどちらかを書いていないので、小さい方の 20,000,000 byte を上限にする。client は reserve で `thumbnail` / `preview` を送らないことで server 生成を求める
 - 20 MB を超える original は、従来の Browser 経路（D-012 / D-020）のまま。HEIC で 20 MB を超え、Browser も decode できない組合せは、reserve の前に「サーバーで変換できる上限を超え、このブラウザでも読み取れない」と明示して止める
 - Worker に `IMAGES` か `DERIVATIVE_QUEUE` の binding が無い deploy は、reserve が `422 SERVER_DERIVATIVES_UNAVAILABLE` を返し、client は Browser 経路へ戻る。Images / Queues を有効にしていない account でも upload は壊れない
 - Images が恒久的に失敗した（形式未対応・100MP 超・出力が metadata 規則に通らない・retry 上限）upload は `422 DERIVATIVES_FAILED` になる。client は手元に file があれば、その upload を取消して Browser 経路で予約し直す。Browser でも作れない場合は、その理由を表示して止める
@@ -1243,7 +1243,8 @@ consumer finish  -> done  + assets 行を ready で作成 + uploads を finalize
 ### at-least-once への備え
 
 - object key は従来どおり `derivatives/v1/{assetId}/…` で決定的。consumer は key に検査済みの derivative があれば作り直さない。thumbnail を置いた後に止まっても、次の配達は preview から続ける
-- consumer の D1 への書き込みは、すべて `generation` と `state = 'running'` と `uploads.status = 'pending'` を条件にした 1 文（[D-027](#d-027-古い操作は新しい正しい状態を取り消せないようにする)）。古い generation・重複配達・完了後の配達は claim に失敗して ack するだけ
+- consumer の D1 への書き込みは、すべて `generation` と `state = 'running'` を条件にした 1 文（[D-027](#d-027-古い操作は新しい正しい状態を取り消せないようにする)）。古い generation・重複配達・完了後の配達は claim に失敗して ack するだけ
+- 写真に関わる書き込み（claim、asset の作成、upload の確定、失敗と再 queue の記録）は、`uploads.status = 'pending'` も条件にする。完了の batch の最後で job を `done` にする文だけは、同じ batch の前の文が upload を `finalized` にした後なので、`pending` を条件にできない。この文が単独で効いても（取消が先に入った場合）、job の state は upload が終端になった後は意味を持たないので、何も起きない
 - R2 PUT は fencing できない。決定的な key に同じ規則の出力を書くだけで、完了の根拠にはしない。完了の根拠は、PUT の後に読み直した object の検査と、条件付きの D1 batch だけ
 - consumer の試行は D1 の `attempts` で数える（上限 5）。queue の `max_retries` には頼らない。上限に達したら `failed`
 - reconcile の再送は `resends` として別に数える。queue が遅いだけで試行を使い切らないためです。再送の間隔は 1 分から倍々に延ばし（上限 1 時間）、10 回（約 5 時間）で `failed`（`not_delivered`）にする
@@ -1254,12 +1255,21 @@ consumer finish  -> done  + assets 行を ready で作成 + uploads を finalize
 
 そこで Cron を 5 分ごとに 1 つ足します。範囲は再送だけです。
 
-- 対象: `queued` で `next_attempt_at` から 60 秒以上過ぎたもの、`running` で lease（5 分）が切れたもの。`uploads.status = 'pending'` に限る
+- 対象は 3 つ。`uploads.status = 'pending'` に限る
+  - send が失敗した（queue が受け取っていない）`queued`: `next_attempt_at` から 60 秒過ぎたら
+  - queue が受け取った `queued`: 30 分過ぎたら。受け取った message は少なくとも 1 回届くので、それまでは queue を信頼する。queue の retry の後に捨てられた message と、保持期間を過ぎた message だけを拾う
+  - lease（5 分）が切れた `running`
+- 「受け取った」は `dispatched` 列で持つ。send の成功の後に立てるので、その間に止まると 60 秒後に 1 通だけ重複する（generation で無害）
+- 受け取った message まで 60 秒で再送する最初の実装は、import 中の backlog に重複を足し続けた。queue が 1 時間配達しない間に、40 件の job へ reconcile が 240 通を足した（1 件あたり 6 通）。区別した後は 40 通（[benchmarks.md](benchmarks.md#server-側の-derivative-生成2026-10-03)）
 - 再送は `generation` を 1 つ上げる条件付き更新に成功した場合だけ。古い message はその時点で無効になる
 - 再送は `resends` に数え、間隔を倍々に延ばす。10 回で `failed` にするので、consumer が動かない deploy でも無限に再送しない
 - 削除は一切しない。1 回に扱う件数は 50 件まで
 
 finalize の polling も同じ関数を 1 件に対して呼びます。Cron は client がいない場合のための保険です。
+
+### consumer の並列数
+
+`max_batch_size: 1` は 1 回の起動で 1 件を処理するという意味で、同時に処理する件数は制限しません。queue は consumer を最大 250 並列まで自動で増やすので、数千枚の import では Images にその数の変換が同時に届きます。Images には processing limit と timeout のエラーがあります。そこで `max_concurrency: 4` を明示します。値は remote-test で測って決め直します。並列数を絞ると backlog ができますが、上の「受け取った message は再送しない」によって、backlog は reconcile で増えません。
 
 ### cleanup・audit・取消
 
@@ -1285,6 +1295,7 @@ server 生成では client が decode しないため、撮影日時の読み取
 
 却下した案:
 
+- 失敗を 3 種類の state に分ける（一時的・写真が原因・account の設定や上限が原因）: 月間上限（9422）や billing 設定（9432）は、条件が変わるまで再試行しても直らない。state で区別すれば cleanup が無駄に再 queue しない。今は `failure` に理由の code を残し、cleanup が写真の原因かどうかだけで分ける。無駄な再 queue は owner が cleanup を実行したときに 1 回起きるだけなので、規模に見合わないと判断した
 - Queue だけを正本にする（D1 に job を持たない）: send が失われたことを誰も知り得ない。DLQ も、送られなかった message は受け取れない
 - Workflows / Durable Objects: 1 件 2 回の変換に対して、状態を D1 の外にもう 1 つ持つことになる
 - consumer が `assets` 行を先に作り、derivative を後から埋める: 処理中の写真が timeline・share・backup に出る

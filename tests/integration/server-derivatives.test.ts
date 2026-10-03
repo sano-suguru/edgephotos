@@ -13,6 +13,7 @@ import {
   type DerivativeMessage,
   type DerivativeRenderer,
   type DerivativeServices,
+  DISPATCHED_TRUST_MS,
   imagesRenderer,
   LEASE_MS,
   MAX_ATTEMPTS,
@@ -167,9 +168,14 @@ async function readyAssets(): Promise<string[]> {
 }
 
 async function job(uploadId: string) {
-  return env.DB.prepare('SELECT * FROM derivative_jobs WHERE upload_id = ?')
-    .bind(uploadId)
-    .first<{ state: string; generation: number; attempts: number; resends: number; failure: string | null }>()
+  return env.DB.prepare('SELECT * FROM derivative_jobs WHERE upload_id = ?').bind(uploadId).first<{
+    state: string
+    generation: number
+    attempts: number
+    resends: number
+    dispatched: number
+    failure: string | null
+  }>()
 }
 
 async function originalOf(assetId: string) {
@@ -268,9 +274,14 @@ describe('server-rendered derivatives: normal path', () => {
     const h = await harness()
     const big = await callJson(h.app, 'POST', '/api/v1/uploads', {
       expect: 422,
-      body: { original: { size: 20 * 1024 * 1024 + 1, contentType: 'image/heic', sha256: 'a'.repeat(64) } },
+      body: { original: { size: 20_000_001, contentType: 'image/heic', sha256: 'a'.repeat(64) } },
     })
     expect(big.error).toMatchObject({ code: 'SERVER_DERIVATIVES_UNAVAILABLE', details: { reason: 'too_large' } })
+    // "20 MB" read as 20,000,000 bytes: the boundary itself is accepted.
+    await callJson(h.app, 'POST', '/api/v1/uploads', {
+      expect: 201,
+      body: { original: { size: 20_000_000, contentType: 'image/heic', sha256: 'd'.repeat(64) } },
+    })
 
     const unconfigured = await makeApp({ app: { derivatives: null } })
     const res = await callJson(unconfigured, 'POST', '/api/v1/uploads', {
@@ -284,7 +295,7 @@ describe('server-rendered derivatives: normal path', () => {
       expect: 400,
       body: { original: { size: 100, contentType: 'image/jpeg', sha256: 'c'.repeat(64) }, thumbnail: { size: 10 } },
     })
-    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM uploads').first('n')).toBe(0)
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM uploads').first('n')).toBe(1)
   })
 
   it('verifies the original exactly as before: a wrong byte never reaches the queue', async () => {
@@ -409,8 +420,8 @@ describe('server-rendered derivatives: failure modes', () => {
     const h = await harness()
     const { uploadId, assetId } = await startUpload(h.app)
     const stale = h.queue.sent.shift() as DerivativeMessage
-    // The first message is delayed past the margin; reconcile replaces it.
-    h.clock.advance(RECONCILE_MARGIN_MS + 1000)
+    // The first message, accepted by the queue, is delayed past the trust window; reconcile replaces it.
+    h.clock.advance(DISPATCHED_TRUST_MS + 1000)
     await runScheduledReconcile(h.ctx())
     expect(h.queue.sent).toEqual([{ uploadId, generation: 2 }])
 
@@ -477,20 +488,55 @@ describe('server-rendered derivatives: failure modes', () => {
     const { uploadId } = await startUpload(h.app)
     for (let resends = 0; resends < MAX_RESENDS; resends++) {
       h.queue.sent = []
-      // One minute short of due: left alone.
-      h.clock.advance(resendDelaySeconds(resends) * 1000 + RECONCILE_MARGIN_MS - 60_000)
+      // Each send is accepted, so each wait is the re-send delay plus the trust window. One minute short: left alone.
+      const wait = (resends === 0 ? 0 : resendDelaySeconds(resends) * 1000) + DISPATCHED_TRUST_MS
+      h.clock.advance(wait - 60_000)
       await runScheduledReconcile(h.ctx())
       expect(h.queue.sent).toEqual([])
       h.clock.advance(61_000)
       await runScheduledReconcile(h.ctx())
       expect(h.queue.sent).toHaveLength(1)
     }
-    h.clock.advance(resendDelaySeconds(MAX_RESENDS) * 1000 + RECONCILE_MARGIN_MS + 1000)
+    h.clock.advance(resendDelaySeconds(MAX_RESENDS) * 1000 + DISPATCHED_TRUST_MS + 1000)
     await runScheduledReconcile(h.ctx())
     expect(await job(uploadId)).toMatchObject({ state: 'failed', failure: 'not_delivered', attempts: 0 })
   })
 
-  it('a slow queue does not use up the tries: a message delivered ten minutes late still renders', async () => {
+  it('a backlog is not made worse: messages the queue accepted are not re-sent while they wait', async () => {
+    const h = await harness()
+    const uploads = []
+    for (let i = 0; i < 20; i++) uploads.push(await startUpload(h.app, syntheticJpeg({ padding: 500 + i })))
+    expect(h.queue.sent).toHaveLength(20)
+    // The consumer is held at a low concurrency and the queue sits on everything for 25 minutes, the Cron running
+    // every five and every page polling.
+    for (let i = 0; i < 5; i++) {
+      h.clock.advance(5 * 60 * 1000)
+      await runScheduledReconcile(h.ctx())
+      for (const u of uploads) await call(h.app, 'POST', `/api/v1/uploads/${u.uploadId}/finalize`)
+    }
+    expect(h.queue.sent).toHaveLength(20)
+    await h.drain()
+    expect(await readyAssets()).toHaveLength(20)
+  })
+
+  it('a send the queue took, whose dispatch mark was lost, is re-sent once after the short margin', async () => {
+    const h = await harness()
+    const { uploadId, assetId } = await startUpload(h.app)
+    // The Worker stopped between the send and recording it.
+    await env.DB.prepare('UPDATE derivative_jobs SET dispatched = 0 WHERE upload_id = ?').bind(uploadId).run()
+    h.clock.advance(RECONCILE_MARGIN_MS + 1000)
+    await runScheduledReconcile(h.ctx())
+    expect(h.queue.sent).toEqual([
+      { uploadId, generation: 1 },
+      { uploadId, generation: 2 },
+    ])
+    expect(await job(uploadId)).toMatchObject({ dispatched: 1, generation: 2 })
+    await h.drain()
+    expect(await readyAssets()).toEqual([assetId])
+    expect(h.renderer.calls).toMatchObject({ thumbnail: 1, preview: 1 })
+  })
+
+  it('a slow queue does not use up the tries or add messages: one delivered ten minutes late still renders', async () => {
     const h = await harness()
     const { uploadId, assetId } = await startUpload(h.app)
     // The Cron runs every five minutes while the queue sits on the messages.
@@ -500,8 +546,8 @@ describe('server-rendered derivatives: failure modes', () => {
       // The page polls meanwhile.
       expect((await call(h.app, 'POST', `/api/v1/uploads/${uploadId}/finalize`)).status).toBe(202)
     }
-    expect(await job(uploadId)).toMatchObject({ state: 'queued', attempts: 0 })
-    // Every message arrives at last; only the newest generation does anything.
+    expect(await job(uploadId)).toMatchObject({ state: 'queued', attempts: 0, resends: 0 })
+    expect(h.queue.sent).toEqual([{ uploadId, generation: 1 }])
     await h.drain()
     expect(await readyAssets()).toEqual([assetId])
     expect(h.renderer.calls).toMatchObject({ thumbnail: 1, preview: 1 })

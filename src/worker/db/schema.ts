@@ -117,6 +117,10 @@ export const derivativeJobs = sqliteTable(
     resends: integer().notNull().default(0),
     // When a queued job is due (its message delay); reconcile re-sends one that is overdue by a margin.
     next_attempt_at: text(),
+    // 1 once the queue accepted this generation's message (or holds it for a retry). A send the queue accepted is
+    // delivered at least once, so reconcile waits much longer before re-sending such a job than one whose send
+    // failed or never happened: re-sending into a backlog only adds to it.
+    dispatched: integer().notNull().default(0),
     // A running job whose lease has passed is treated as crashed and re-sent by reconcile.
     lease_until: text(),
     failure: text(),

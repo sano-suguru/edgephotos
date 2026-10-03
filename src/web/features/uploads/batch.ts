@@ -63,7 +63,7 @@ export type BatchDeps = {
 }
 
 const NOT_ADDED = 'ライブラリには追加されていません（選んだファイルはそのままです）。'
-const SERVER_LIMIT_MB = SERVER_DERIVATIVE_MAX_BYTES / (1024 * 1024)
+const SERVER_LIMIT_MB = SERVER_DERIVATIVE_MAX_BYTES / 1_000_000
 const RENDERING_LATER = 'サーバーで処理しています。終わるとライブラリに表示されます（このページを閉じても続きます）'
 
 // Answers that mean "the server will not render this one". The browser path is tried next.

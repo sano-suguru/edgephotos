@@ -8,10 +8,13 @@ import { type DerivativeJobRow, derivativeJobs } from '../db/schema'
 // D1 is the source of truth. A `derivative_jobs` row holds what should happen and what has happened; a queue
 // message `{uploadId, generation}` only says "look at that row now". The queue delivers at least once and a send
 // can be lost (the Worker stops between the D1 write and the send), so:
-//   - every write a consumer makes is conditional on the generation it was handed, the row being `running`
-//     and the upload still `pending` (D-027: a stale actor has no authority)
-//   - reconcile re-sends what is overdue under a new generation, which retires every older message
-//   - attempts are counted here, not by the queue, so a job that keeps failing ends as `failed`
+//   - every write a consumer makes is conditional on the generation it was handed and the row being `running`
+//     (D-027: a stale actor has no authority); the writes that touch the photo (claim, asset, upload, fail,
+//     re-queue) also on the upload still being `pending`. Marking the job `done` is the one exception: it ends the
+//     batch that has just settled the upload, and a job's state means nothing once its upload is settled
+//   - reconcile re-sends what is overdue under a new generation, which retires every older message. A send the
+//     queue accepted is trusted for DISPATCHED_TRUST_MS, so a backlog is not fed duplicates
+//   - attempts and re-sends are counted here, not by the queue, so a job that keeps failing ends as `failed`
 // Nothing in this file deletes an object.
 
 export type DerivativeMessage = { uploadId: string; generation: number }
@@ -45,14 +48,20 @@ export type DerivativeQueue = { send(messages: DerivativeMessage[]): Promise<voi
 
 export type DerivativeServices = { renderer: DerivativeRenderer; queue: DerivativeQueue }
 
-// Attempts count claims by a consumer and re-sends by reconcile. The sixth is refused.
+// Claims by a consumer (one per try at rendering). The sixth is refused. Re-sends by reconcile are counted apart,
+// in `resends` (MAX_RESENDS below).
 export const MAX_ATTEMPTS = 5
 // Delay before the next try after a transient failure, by the attempt that failed (1-based).
 const RETRY_DELAYS_SECONDS = [10, 30, 60, 120, 300]
 // A running job whose consumer has not finished by then is treated as crashed.
 export const LEASE_MS = 5 * 60 * 1000
-// A queued job is re-sent once it is this far past the time its message was due.
+// A queued job whose send failed (or never happened) is re-sent once it is this far past due.
 export const RECONCILE_MARGIN_MS = 60 * 1000
+// A queued job whose message the queue accepted is trusted to arrive (delivery is at least once for an accepted
+// send) and re-sent only this far past due: the message may have been dropped after the queue's own retries or
+// outlived its retention. Re-sending earlier would only add duplicates to a backlog, which a low max_concurrency
+// makes on purpose during an import.
+export const DISPATCHED_TRUST_MS = 30 * 60 * 1000
 const RECONCILE_LIMIT = 50
 
 export function retryDelaySeconds(attempts: number): number {
@@ -153,12 +162,26 @@ export async function queueJob(db: Db, queue: DerivativeQueue, uploadId: string,
   const ts = now.toISOString()
   const rows = await db.all<{ generation: number }>(
     sql`UPDATE derivative_jobs SET state = 'queued', generation = generation + 1, next_attempt_at = ${ts},
-          queued_at = ${ts}, updated_at = ${ts}
+          dispatched = 0, queued_at = ${ts}, updated_at = ${ts}
         WHERE upload_id = ${uploadId} AND state = 'awaiting_original' AND ${UPLOAD_PENDING(uploadId)}
         RETURNING generation`,
   )
   if (rows.length === 0) return
-  await sendQuietly(queue, [{ uploadId, generation: rows[0].generation }])
+  await dispatch(db, queue, [{ uploadId, generation: rows[0].generation }])
+}
+
+// Sends, then records that the queue accepted these generations. A stop between the two leaves `dispatched = 0`:
+// reconcile re-sends after the short margin, so the worst case is one duplicate message, which the generation
+// fence makes harmless.
+async function dispatch(db: Db, queue: DerivativeQueue, messages: DerivativeMessage[]): Promise<boolean> {
+  if (!(await sendQuietly(queue, messages))) return false
+  for (const m of messages) {
+    await db.run(
+      sql`UPDATE derivative_jobs SET dispatched = 1
+          WHERE upload_id = ${m.uploadId} AND generation = ${m.generation} AND state = 'queued'`,
+    )
+  }
+  return true
 }
 
 async function sendQuietly(queue: DerivativeQueue, messages: DerivativeMessage[]): Promise<boolean> {
@@ -204,7 +227,8 @@ export async function failJob(db: Db, m: DerivativeMessage, reason: string, now:
   return res.meta.changes === 1
 }
 
-// running -> queued, due after `delaySeconds`. The same generation: the queue redelivers this message.
+// running -> queued, due after `delaySeconds`. The same generation: the queue redelivers this message (the caller
+// calls message.retry), so the job counts as dispatched.
 export async function requeueJob(
   db: Db,
   m: DerivativeMessage,
@@ -213,7 +237,7 @@ export async function requeueJob(
   now: Date,
 ): Promise<boolean> {
   const res = await db.run(
-    sql`UPDATE derivative_jobs SET state = 'queued', failure = ${reason}, lease_until = NULL,
+    sql`UPDATE derivative_jobs SET state = 'queued', failure = ${reason}, lease_until = NULL, dispatched = 1,
           next_attempt_at = ${new Date(now.getTime() + delaySeconds * 1000).toISOString()},
           updated_at = ${now.toISOString()}
         WHERE ${RUNNING(m)} AND ${UPLOAD_PENDING(m.uploadId)}`,
@@ -231,16 +255,17 @@ export function finishJobStatement(db: Db, m: DerivativeMessage, now: Date) {
 
 export type ReconcileResult = { resent: number; failed: number; sendFailed: boolean }
 
-// Re-sends after the k-th re-send wait min(1 min x 2^(k-1), 1 h) before the job counts as overdue again: about
-// 5 hours over MAX_RESENDS. A queue that is merely slow, or an Images outage, is outlasted rather than turned into
-// a failure; a deployment whose consumer never runs still ends.
+// Re-sends after the k-th re-send wait min(1 min x 2^(k-1), 1 h), plus DISPATCHED_TRUST_MS when the queue accepted
+// it, before the job counts as overdue again: about 10 hours over MAX_RESENDS. A queue that is merely slow, or an
+// Images outage, is outlasted rather than turned into a failure; a deployment whose consumer never runs still ends.
 export const MAX_RESENDS = 10
 export function resendDelaySeconds(resends: number): number {
   return Math.min(60 * 2 ** Math.max(resends - 1, 0), 3600)
 }
 
-// Re-sends jobs whose message is overdue (lost send, dropped after the queue's own retries) and jobs whose
-// consumer stopped while running (lease passed). Each re-send bumps the generation in a conditional write first,
+// Re-sends jobs whose send failed (after RECONCILE_MARGIN_MS), jobs whose accepted message never led to a claim
+// (after DISPATCHED_TRUST_MS: dropped after the queue's own retries, or expired), and jobs whose consumer stopped
+// while running (lease passed). Each re-send bumps the generation in a conditional write first,
 // so the old message, if it ever arrives, changes nothing. Re-sends are counted apart from the consumer's attempts
 // (`resends`), so a slow queue does not use up the tries a photo gets; a job that is never picked up ends as
 // `failed` (`not_delivered`) after MAX_RESENDS. Never deletes anything.
@@ -252,8 +277,11 @@ export async function reconcileJobs(
 ): Promise<ReconcileResult> {
   const ts = now.toISOString()
   const due = new Date(now.getTime() - RECONCILE_MARGIN_MS).toISOString()
+  const trusted = new Date(now.getTime() - DISPATCHED_TRUST_MS).toISOString()
   // Overdue, checked again in each UPDATE: a consumer may claim and re-queue the job between the read and the write.
-  const overdue = sql`((state = 'queued' AND next_attempt_at < ${due}) OR (state = 'running' AND lease_until < ${ts}))`
+  const overdue = sql`((state = 'queued' AND dispatched = 0 AND next_attempt_at < ${due})
+    OR (state = 'queued' AND dispatched = 1 AND next_attempt_at < ${trusted})
+    OR (state = 'running' AND lease_until < ${ts}))`
   const filter = only ? sql` AND upload_id = ${only}` : sql``
   const rows = await db.all<{ upload_id: string; generation: number; attempts: number; resends: number }>(
     sql`SELECT upload_id, generation, attempts, resends FROM derivative_jobs
@@ -279,13 +307,13 @@ export async function reconcileJobs(
     const wait = new Date(now.getTime() + resendDelaySeconds(row.resends + 1) * 1000).toISOString()
     const bumped = await db.all<{ generation: number }>(
       sql`UPDATE derivative_jobs SET state = 'queued', generation = generation + 1, resends = resends + 1,
-            lease_until = NULL, next_attempt_at = ${wait}, updated_at = ${ts}
+            lease_until = NULL, next_attempt_at = ${wait}, dispatched = 0, updated_at = ${ts}
           WHERE ${same} RETURNING generation`,
     )
     if (bumped.length === 1) messages.push({ uploadId: row.upload_id, generation: bumped[0].generation })
   }
   if (messages.length > 0) {
-    result.sendFailed = !(await sendQuietly(queue, messages))
+    result.sendFailed = !(await dispatch(db, queue, messages))
     if (!result.sendFailed) result.resent = messages.length
   }
   return result
@@ -304,11 +332,11 @@ export async function rearmJob(db: Db, queue: DerivativeQueue, uploadId: string,
   const ts = now.toISOString()
   const rows = await db.all<{ generation: number }>(
     sql`UPDATE derivative_jobs SET state = 'queued', generation = generation + 1, attempts = 0, resends = 0,
-          lease_until = NULL, next_attempt_at = ${ts}, updated_at = ${ts}
+          lease_until = NULL, next_attempt_at = ${ts}, dispatched = 0, updated_at = ${ts}
         WHERE upload_id = ${uploadId} AND state = 'failed' AND ${UPLOAD_PENDING(uploadId)}
         RETURNING generation`,
   )
   if (rows.length === 0) return false
-  await sendQuietly(queue, [{ uploadId, generation: rows[0].generation }])
+  await dispatch(db, queue, [{ uploadId, generation: rows[0].generation }])
   return true
 }

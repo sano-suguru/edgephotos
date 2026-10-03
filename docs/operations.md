@@ -63,6 +63,7 @@ original が 20 MB 以下の写真は、thumbnail / preview を Worker が Cloud
 - `images`（binding `IMAGES`）。Images を account で使えるようにしておく。Free plan の上限（月 5,000 unique transformation）を超えると、超えた分の upload は Browser 経路に戻る
 - `queues`（producer `DERIVATIVE_QUEUE` と consumer）。queue は deploy の前に `wrangler queues create <名前>` で作る
 - `triggers.crons`（5 分ごと）。message が失われた job の再送だけを行い、何も削除しない
+- consumer の `max_concurrency: 4`。import 中は backlog ができ、写真が順に timeline に現れる。Images の processing limit（9522）や timeout（9529）が多ければ下げ、backlog が長すぎれば上げる。値は Workers Logs の `derivative_job` と、queue の backlog の metrics で判断する
 
 `IMAGES` か `DERIVATIVE_QUEUE` を外して deploy すると、upload はすべて Browser 経路になります。外す前に、処理中の job が無いことを確かめます（`wrangler d1 execute DB --remote --command "SELECT state, COUNT(*) FROM derivative_jobs GROUP BY state"` で `queued` / `running` が 0）。残っていると、その upload は再送されないまま `pending` に残り、1 日後の cleanup でも処理中として残ります。
 

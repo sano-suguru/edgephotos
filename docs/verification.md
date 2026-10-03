@@ -1076,14 +1076,16 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 
 local の自動テスト:
 
-- `tests/integration/server-derivatives.test.ts`（28 件）。Images と queue を fake にし、D1 / R2 は local の binding。次の各場合で、写真を公開しない（`assets` 行が無い）、original を失わない、再送か reconcile で収束する、を確かめた
+- `tests/integration/server-derivatives.test.ts`（30 件）。Images と queue を fake にし、D1 / R2 は local の binding。次の各場合で、写真を公開しない（`assets` 行が無い）、original を失わない、再送か reconcile で収束する、を確かめた
   - D1 に `queued` を書いた後に send が失われた（Cron と finalize の polling が generation 2 で再送）
   - 同じ message の重複配達（順番でも同時でも、写真は 1 枚、render は 1 回）
   - thumbnail を書いた後、preview の前に Worker が止まった（lease 中の再配達は no-op、lease 後の再送で preview だけを作る）
   - derivative を 2 つとも R2 に書いた後、D1 の batch の前に止まった（再送で render せずに完了だけ）
   - 置き換えられた generation の message が遅れて届いた（完了の前後とも no-op）。実行中に generation を奪われた consumer は完了できない
   - Images の一時エラー（10 秒・30 秒の backoff で再試行して成功）、retry 上限（5 回で `failed`。cleanup が数え直して再 queue し、写真になる）
-  - queue が 10 分遅れても試行を使わず、最後の generation で写真になる。consumer がいない job は、間隔を延ばした再送 10 回の後に `failed`（`not_delivered`）
+  - queue が 10 分遅れても試行を使わず、message も足さずに写真になる。20 件の backlog を 25 分抱えても、Cron と polling は 1 通も足さない。send の後・記録の前に止まった job は、60 秒後に 1 通だけ再送される
+  - server 経路の上限 20,000,000 byte は受け付け、1 byte 超えると `422 SERVER_DERIVATIVES_UNAVAILABLE`
+  - consumer がいない job は、間隔を延ばした再送 10 回の後に `failed`（`not_delivered`）
   - Images の恒久エラー（9520）は即 `failed`。audit が `derivative_failed`。cleanup は original を残し（`unrendered`）、同じ写真が追加し直された後に重複として片付ける
   - binding を外した後の finalize は `422 SERVER_DERIVATIVES_UNAVAILABLE`（client は Browser 経路へ戻る）
   - EXIF を含む出力は R2 に書かずに `failed`
@@ -1096,6 +1098,7 @@ Browser E2E（`vite dev`、Playwright）:
 
 - `vite dev` は wrangler の local Images（sharp による低忠実度）と local queue で動く。Chromium で 3000x2000 の JPEG を server 経路で upload し、page の `createImageBitmap` が 0 回、width / height が 3000x2000、thumbnail 512x341、preview 2048x1365 で表示されることを確認した
 - local Images は HEIC を受け付けない（9523）。Chromium では server が `failed` にし、client が Browser 経路に切り替え、「サーバーで変換できず、このブラウザでも HEIC を処理できません」と表示して止まることを確認した
+- PR #72 へのレビューで、`max_concurrency` が無いこと（最大 250 並列で Images へ届く）と、queue が受け取った send まで 60 秒で再送して backlog に重複を足すことの指摘を受け、並列数 4 と `dispatched` を入れた。20 MB の上限は 20,000,000 byte に下げた。Images の文書が 10^6 と 2^20 のどちらかを書いていないためで、実際の境界は remote-test で確かめる
 - 独立したレビュー（別の subagent）の指摘で、queue の遅延や一時障害だけで `failed` になり cleanup が original を消す経路、binding を外した後に job が止まる経路、再試行で経路と reservation が食い違う経路を直し、それぞれに test を足した
 - 全体の初回の実行で 2 件（`trash.spec.ts:61`、`upload.spec.ts:290`）が 30 秒の timeout で失敗した。実行中に `package.json` などを編集しており、trace では original の PUT が応答なしで切れ、page が再読込されていた。編集を止めて再実行すると 2 件とも通った。編集なしで全体をもう一度実行し、80 件すべて通った
 
@@ -1105,6 +1108,7 @@ Browser E2E（`vite dev`、Playwright）:
 - EXIF Orientation と HEIC の `irot` / `imir` が Images の変換で反映されるか（反映されなければ thumbnail が横倒しになる）。記録する幅と高さは、`info()` の値の縦横を生成した preview の縦横に合わせるので、`info()` が向きを適用する前の値を返しても入れ替わらない（test あり）
 - 実際の queue の配達、Cron の起動、original 保存から ready までの p50 / p95（[benchmarks.md](benchmarks.md#original-保存から-ready-までの時間未測定) の SQL）
 - `wrangler deploy` が queue を自動で作るか（作らない前提で手順に `wrangler queues create` を書いた）
+- Images の入力上限の実際の境界（20,000,000 byte と 20,971,520 byte の間）と、`max_concurrency: 4` での import の速さ
 
 ### 復旧 drill（2026-10-01）
 

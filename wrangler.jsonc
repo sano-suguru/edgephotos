@@ -26,9 +26,12 @@
   "images": { "binding": "IMAGES" },
   "queues": {
     "producers": [{ "binding": "DERIVATIVE_QUEUE", "queue": "edgephotos-derivatives" }],
-    // One message per invocation (each streams an original through Images). max_retries only has to outlast the
-    // job's own attempt limit (5, counted in D1); without a DLQ a message past it is dropped, and the Cron re-sends.
-    "consumers": [{ "queue": "edgephotos-derivatives", "max_batch_size": 1, "max_retries": 10 }]
+    // One message per invocation (each streams an original through Images), at most 4 invocations at once: without
+    // max_concurrency the queue scales consumers out (up to 250), and an import of thousands would hit Images with
+    // that many renders at a time. A backlog is expected and safe (D-042: accepted sends are trusted, not re-sent).
+    // Tune after measuring in remote-test. max_retries only has to outlast the job's own attempt limit (5, counted
+    // in D1); without a DLQ a message past it is dropped, and the Cron re-sends.
+    "consumers": [{ "queue": "edgephotos-derivatives", "max_batch_size": 1, "max_concurrency": 4, "max_retries": 10 }]
   },
   // Re-sends derivative jobs whose message was lost or whose consumer stopped (D-042). Re-send only, never deletes.
   "triggers": { "crons": ["*/5 * * * *"] },
@@ -60,9 +63,15 @@
       "images": { "binding": "IMAGES" },
       "queues": {
         "producers": [{ "binding": "DERIVATIVE_QUEUE", "queue": "edgephotos-remote-test-derivatives" }],
-        // One message per invocation (each streams an original through Images). max_retries only has to outlast the
-        // job's own attempt limit (5, counted in D1); without a DLQ a message past it is dropped, and the Cron re-sends.
-        "consumers": [{ "queue": "edgephotos-remote-test-derivatives", "max_batch_size": 1, "max_retries": 10 }]
+        // As the top-level consumer: one message per invocation, at most 4 at once.
+        "consumers": [
+          {
+            "queue": "edgephotos-remote-test-derivatives",
+            "max_batch_size": 1,
+            "max_concurrency": 4,
+            "max_retries": 10
+          }
+        ]
       },
       // Environment-specific values are Worker secrets, not vars: this repository is public and
       // HOUSEHOLD_EMAILS / ACCESS_* / R2_ACCOUNT_ID identify people and a Cloudflare account.
@@ -95,9 +104,15 @@
       "images": { "binding": "IMAGES" },
       "queues": {
         "producers": [{ "binding": "DERIVATIVE_QUEUE", "queue": "edgephotos-restore-test-derivatives" }],
-        // One message per invocation (each streams an original through Images). max_retries only has to outlast the
-        // job's own attempt limit (5, counted in D1); without a DLQ a message past it is dropped, and the Cron re-sends.
-        "consumers": [{ "queue": "edgephotos-restore-test-derivatives", "max_batch_size": 1, "max_retries": 10 }]
+        // As the top-level consumer: one message per invocation, at most 4 at once.
+        "consumers": [
+          {
+            "queue": "edgephotos-restore-test-derivatives",
+            "max_batch_size": 1,
+            "max_concurrency": 4,
+            "max_retries": 10
+          }
+        ]
       },
       "vars": {
         "R2_BUCKET_NAME": "edgephotos-restore-test"

@@ -230,7 +230,7 @@ asset ID は reserve 時に確定しているため、再送や同時実行で�
 
 ### server 側で derivative を作る upload
 
-reserve で `thumbnail` / `preview` を送らない upload は、server が derivative を作ります。対象は original が 20 MB（Images binding の入力上限）以下のものだけで、Worker に `IMAGES` と `DERIVATIVE_QUEUE` の binding が無ければ `422 SERVER_DERIVATIVES_UNAVAILABLE` を返します。Web client はそのとき従来の手順へ戻ります（[D-042](decisions.md)）。
+reserve で `thumbnail` / `preview` を送らない upload は、server が derivative を作ります。対象は original が 20,000,000 byte（Images binding の入力上限の「20 MB」を小さく読んだ値）以下のものだけで、Worker に `IMAGES` と `DERIVATIVE_QUEUE` の binding が無ければ `422 SERVER_DERIVATIVES_UNAVAILABLE` を返します。Web client はそのとき従来の手順へ戻ります（[D-042](decisions.md)）。
 
 ```text
 1. POST /api/v1/uploads（original だけを申告）  -> uploads: pending, derivative_jobs: awaiting_original
@@ -242,9 +242,9 @@ reserve で `thumbnail` / `preview` を送らない upload は、server が deri
 6. POST finalize（polling）-> 200 { result: "created" | "duplicate" }
 ```
 
-- D1 の job 行が正本で、queue message は合図にすぎません。consumer の書き込みはすべて `generation` と `uploads.status = 'pending'` を条件にします
+- D1 の job 行が正本で、queue message は合図にすぎません。consumer の書き込みはすべて `generation` を条件にし、写真に関わる書き込み（asset の作成と upload の確定）は `uploads.status = 'pending'` も条件にします
 - derivative が揃って検査を通るまで `assets` 行を作りません。処理中の写真は timeline・album・share・export に現れません
-- message が失われた job と、consumer が止まった job（lease 切れ）は、5 分ごとの Cron と finalize の polling が新しい generation で送り直します。consumer の試行は 5 回、再送は間隔を延ばしながら 10 回まで数え、超えたら `failed` です
+- send が失敗した job（60 秒後）、queue が受け取ったのに consumer に届かない job（30 分後）、consumer が止まった job（lease 切れ）は、5 分ごとの Cron と finalize の polling が新しい generation で送り直します。consumer は同時に 4 件までです。consumer の試行は 5 回、再送は間隔を延ばしながら 10 回まで数え、超えたら `failed` です
 - `failed` の upload は finalize が `422 DERIVATIVES_FAILED` を返します。Web client はその upload を `DELETE /api/v1/uploads/{uploadId}` で取消し、Browser 経路で予約し直します。client がいなければ upload は original ごと残り、storage cleanup が扱います（[D-042](decisions.md)）
 - restore は backup の derivative を送るので、従来の手順のままです
 

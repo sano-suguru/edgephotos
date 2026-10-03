@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fc1b26c1-30b2-4aed-ba2e-17636e5a0c99",
+  "id": "78c09b01-17ef-422d-b98d-22a612d1f8d8",
   "prevId": "1d0cf0e7-1470-4fae-8ce5-f47a53ad10d9",
   "tables": {
     "album_assets": {
@@ -331,6 +331,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "dispatched": {
+          "name": "dispatched",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "lease_until": {
           "name": "lease_until",

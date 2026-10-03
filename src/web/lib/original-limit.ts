@@ -3,4 +3,4 @@
 export const ORIGINAL_MAX_BYTES = 100 * 1024 * 1024
 
 // Same as LIMITS.serverDerivativeMaxBytes: up to this size the server renders the thumbnail / preview (D-042).
-export const SERVER_DERIVATIVE_MAX_BYTES = 20 * 1024 * 1024
+export const SERVER_DERIVATIVE_MAX_BYTES = 20_000_000

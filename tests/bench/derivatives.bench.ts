@@ -149,6 +149,47 @@ describe('server-rendered derivatives (local)', () => {
     report('server', fmt(server.reserve), fmt(server.finalize), fmt(server.job))
   })
 
+  it('a backlog: messages added by reconcile while the queue holds every message for an hour', async () => {
+    // 40 uploads (under reconcile's 50 per run, so the limit does not cap the count), nothing delivered for 60 minutes (a consumer held at low concurrency behind a large import), the
+    // Cron every 5 minutes. "before" emulates the first implementation, which treated every queued job alike: it
+    // forgets each accepted send (dispatched = 0) so reconcile re-sends after the short margin.
+    for (const forget of [true, false]) {
+      await reset()
+      let sent = 0
+      const services: DerivativeServices = {
+        renderer: { info: async () => ({ width: 1, height: 1 }), render: async () => syntheticJpeg() },
+        queue: {
+          send: async (m) => {
+            sent += m.length
+          },
+        },
+      }
+      const { app, clock: c } = await harness(services)
+      for (let i = 0; i < 40; i++) {
+        const o = syntheticJpeg({ padding: 64 + i })
+        const res = await call(app as never, 'POST', '/api/v1/uploads', {
+          body: { original: { size: o.byteLength, contentType: 'image/jpeg', sha256: await sha256(o) } },
+        })
+        const r = (await res.json()) as UploadReservation
+        await putObject(app as never, r.targets.original, o)
+        await call(app as never, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`)
+      }
+      const initial = sent
+      for (let minute = 5; minute <= 60; minute += 5) {
+        if (forget) await env.DB.prepare('UPDATE derivative_jobs SET dispatched = 0').run()
+        c.advance(5 * 60 * 1000)
+        await runScheduledReconcile(backgroundContext(testEnv(), { now: c.now, derivatives: services }))
+      }
+      report(
+        forget ? 'before (no dispatch record)' : 'after (dispatched trusted 30 min)',
+        'initial',
+        initial,
+        'added by reconcile in 60 min',
+        sent - initial,
+      )
+    }
+  })
+
   it('converges under injected faults: lost sends, duplicate and late deliveries, transient failures, crashes', async () => {
     await reset()
     const rand = prng(42)

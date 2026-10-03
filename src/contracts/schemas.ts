@@ -9,9 +9,10 @@ export const LIMITS = {
   originalMaxBytes: 100 * 1024 * 1024,
   thumbnailMaxBytes: 2 * 1024 * 1024,
   previewMaxBytes: 10 * 1024 * 1024,
-  // Largest original the server renders derivatives for: the Cloudflare Images binding's input limit (D-042).
-  // Larger originals keep the browser path.
-  serverDerivativeMaxBytes: 20 * 1024 * 1024,
+  // Largest original the server renders derivatives for: the Cloudflare Images binding's input limit (D-042), which
+  // the docs give as "20 MB" without saying 10^6 or 2^20. The smaller reading, so no original the server accepts
+  // is one Images refuses. Larger originals keep the browser path.
+  serverDerivativeMaxBytes: 20_000_000,
   pageMax: 200,
   albumTitleMax: 200,
   filenameMax: 255,
