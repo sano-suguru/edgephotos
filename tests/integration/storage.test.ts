@@ -336,6 +336,7 @@ describe('storage cleanup', () => {
       abandoned: 0,
       cleared: 0,
       failed: 0,
+      processing: 0,
       more: false,
     })
 

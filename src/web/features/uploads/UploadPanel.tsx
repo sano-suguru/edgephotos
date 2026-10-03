@@ -14,6 +14,8 @@ const LABELS: Record<UploadItem['state'], string> = {
   preparing: '準備中',
   uploading: '転送中',
   finalizing: '確認中',
+  rendering: 'サーバーで処理中',
+  rendering_later: 'サーバーで処理中',
   done: '完了',
   duplicate: '重複',
   error: '失敗',

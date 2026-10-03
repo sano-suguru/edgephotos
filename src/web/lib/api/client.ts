@@ -15,6 +15,7 @@ import type {
   StorageAuditPage,
   StorageCleanupResult,
   UploadFinalizeResult,
+  UploadProcessing,
   UploadReservation,
   UploadReserve,
 } from '../../../contracts/schemas'
@@ -77,7 +78,10 @@ export const api = {
   repairDerivatives: (id: string) => request<DerivativeRepair>('POST', `/api/v1/assets/${id}/derivatives/repair`),
 
   reserveUpload: (body: UploadReserve) => request<UploadReservation>('POST', '/api/v1/uploads', body),
-  finalizeUpload: (id: string) => request<UploadFinalizeResult>('POST', `/api/v1/uploads/${id}/finalize`),
+  // 202 `processing` while the server renders the derivatives (D-042); call again.
+  finalizeUpload: (id: string) =>
+    request<UploadFinalizeResult | UploadProcessing>('POST', `/api/v1/uploads/${id}/finalize`),
+  cancelUpload: (id: string) => request<void>('DELETE', `/api/v1/uploads/${id}`),
 
   listAlbums: (q: { covers?: boolean } = {}) =>
     request<{ items: AlbumListItem[] }>('GET', `/api/v1/albums${q.covers ? '?covers=true' : ''}`),

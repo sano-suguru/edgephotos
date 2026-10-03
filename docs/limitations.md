@@ -68,7 +68,17 @@ storage audit（メンテナンス画面の「保存状態の点検」、また�
 
 中断から 1 日たったものは、メンテナンス画面の「中断したアップロードを整理する」か `pnpm storage cleanup --apply` で片付けられます。定期的な自動実行はしていません（[D-023](decisions.md)）。
 
-cleanup の直後に `library: interrupted uploads` の件数がまた増える、または R2 の使用量が export manifest の `originalSize` の合計を大きく上回り、audit にも出ない差がある場合に、定期実行（Cron）を検討します。
+cleanup の直後に `library: interrupted uploads` の件数がまた増える、または R2 の使用量が export manifest の `originalSize` の合計を大きく上回り、audit にも出ない差がある場合に、cleanup を Cron で定期実行することを検討します（Cron は derivative の再送にだけ使っています。[D-042](decisions.md)）。
+
+### server での thumbnail 生成の失敗は、閉じた画面には届かない
+
+original が 20 MB 以下の写真は、upload の後に server が thumbnail / preview を作ります（[D-042](decisions.md)）。画面を開いている間は、server が作れなかった写真を Browser で作り直すか、作れない理由を表示します。画面を閉じた後に失敗した写真は、ライブラリに現れないだけで、通知はありません。
+
+メンテナンス画面の「保存状態の点検」が `derivative_failed` として数えます。その写真をもう一度追加してください。1 日たつと「中断したアップロードを整理する」が片付けます。
+
+### 20 MB を超える HEIC は、decode できる Browser でしか追加できない
+
+Cloudflare Images の binding が受け付ける入力は 20 MB までです。それを超える original は Browser 経路で derivative を作るため、HEIC を decode できない Browser（Chrome / Firefox）では追加できません。追加の前に理由を表示して止めます。
 
 ### どの写真も指さないデータは自動では消さない
 

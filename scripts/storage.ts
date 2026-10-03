@@ -19,6 +19,8 @@ const EXPLAIN: Record<StorageAuditIssue['kind'], string> = {
     'Stored before R2 recorded checksums. Not an error; `pnpm backup verify` compares these by download.',
   unfinished_delete: 'A permanent delete stopped halfway. Finish it from the Library page ("削除を再開").',
   expired_upload: 'An upload that never finished. `pnpm storage cleanup --apply` resolves it after a day.',
+  derivative_failed:
+    'The server could not render the thumbnail / preview of this upload (see the job failure in D1). Not in the library; add the photo again. `pnpm storage cleanup --apply` discards it after a day.',
   duplicate_leftover:
     'Objects of an upload that turned out to be a duplicate. `pnpm storage cleanup --apply` removes them.',
   unreferenced_objects:
@@ -61,7 +63,7 @@ async function cleanup(apply: boolean) {
     console.log('Photos in the library and objects no row refers to are never touched. Run with --apply to proceed.')
     return
   }
-  const total = { completed: 0, abandoned: 0, cleared: 0, failed: 0 }
+  const total = { completed: 0, abandoned: 0, cleared: 0, failed: 0, processing: 0 }
   for (;;) {
     const res = await client.api('/api/v1/storage/cleanup', {
       method: 'POST',
@@ -74,12 +76,15 @@ async function cleanup(apply: boolean) {
     total.abandoned += r.abandoned
     total.cleared += r.cleared
     total.failed += r.failed
+    // Reported again by every call while the server renders them (D-042), so not summed.
+    total.processing = Math.max(total.processing, r.processing)
     const progressed = r.completed.length + r.abandoned + r.cleared > 0
     if (!r.more || !progressed) break
   }
   console.log(
     `added to the library: ${total.completed}, discarded interrupted uploads: ${total.abandoned}, ` +
-      `upload records cleared: ${total.cleared}, failed (kept for the next run): ${total.failed}`,
+      `upload records cleared: ${total.cleared}, still rendering on the server (left alone): ${total.processing}, ` +
+      `failed (kept for the next run): ${total.failed}`,
   )
   if (total.failed > 0) process.exit(1)
 }

@@ -9,6 +9,9 @@ export const LIMITS = {
   originalMaxBytes: 100 * 1024 * 1024,
   thumbnailMaxBytes: 2 * 1024 * 1024,
   previewMaxBytes: 10 * 1024 * 1024,
+  // Largest original the server renders derivatives for: the Cloudflare Images binding's input limit (D-042).
+  // Larger originals keep the browser path.
+  serverDerivativeMaxBytes: 20 * 1024 * 1024,
   pageMax: 200,
   albumTitleMax: 200,
   filenameMax: 255,
@@ -130,18 +133,28 @@ const UploadMetadataSchema = z.object({
   takenAt: TakenAtSchema.optional(),
 })
 
+const UploadOriginalSchema = z.object({
+  size: z.number().int().positive().max(LIMITS.originalMaxBytes),
+  contentType: z.enum(ORIGINAL_CONTENT_TYPES),
+  sha256: Sha256Schema,
+})
+const ThumbnailSizeSchema = z.object({ size: z.number().int().positive().max(LIMITS.thumbnailMaxBytes) })
+const PreviewSizeSchema = z.object({ size: z.number().int().positive().max(LIMITS.previewMaxBytes) })
+
 const UploadObjectsSchema = z.object({
-  original: z.object({
-    size: z.number().int().positive().max(LIMITS.originalMaxBytes),
-    contentType: z.enum(ORIGINAL_CONTENT_TYPES),
-    sha256: Sha256Schema,
-  }),
-  thumbnail: z.object({ size: z.number().int().positive().max(LIMITS.thumbnailMaxBytes) }),
-  preview: z.object({ size: z.number().int().positive().max(LIMITS.previewMaxBytes) }),
+  original: UploadOriginalSchema,
+  thumbnail: ThumbnailSizeSchema,
+  preview: PreviewSizeSchema,
 })
 
 // POST /api/v1/uploads. The photo is added now, by the member making the request (D-034).
+// Without `thumbnail` and `preview` the server renders them after the original is stored (D-042): only the
+// original gets a PUT target, and finalize answers 202 until they are ready.
 export const UploadReserveSchema = UploadObjectsSchema.extend({
+  thumbnail: ThumbnailSizeSchema.optional().openapi({
+    description: 'Omit together with preview to have the server render both.',
+  }),
+  preview: PreviewSizeSchema.optional(),
   metadata: UploadMetadataSchema.extend({
     // Restore-only history. Refused rather than ignored: a restore client from before D-034 sends it here, and
     // accepting that request would record the member running the restore as the photo's uploader.
@@ -154,7 +167,12 @@ export const UploadReserveSchema = UploadObjectsSchema.extend({
       .optional()
       .openapi({ description: 'Not accepted here. A restore sends it to POST /api/v1/restore/uploads.' }),
   }).default({}),
-}).openapi('UploadReserve')
+})
+  .refine((v) => (v.thumbnail === undefined) === (v.preview === undefined), {
+    error: 'Send both thumbnail and preview, or neither (server-rendered derivatives).',
+    path: ['thumbnail'],
+  })
+  .openapi('UploadReserve')
 
 // POST /api/v1/restore/uploads: the same reservation, for restoring a backup into a library (D-034). Only here
 // does the client state when the photo was added and by whom: the values the backup recorded. Both required,
@@ -184,10 +202,11 @@ export const UploadReservationSchema = z
       status: z.literal('pending'),
       expiresAt: z.string(),
     }),
+    // thumbnail / preview are absent when the server renders them (D-042).
     targets: z.object({
       original: UploadTargetSchema,
-      thumbnail: UploadTargetSchema,
-      preview: UploadTargetSchema,
+      thumbnail: UploadTargetSchema.optional(),
+      preview: UploadTargetSchema.optional(),
     }),
   })
   .openapi('UploadReservation')
@@ -198,6 +217,16 @@ export const UploadFinalizeResultSchema = z
     asset: AssetSchema,
   })
   .openapi('UploadFinalizeResult')
+
+// 202 from finalize: the original is stored and verified, and the server is rendering the derivatives (D-042).
+// Nothing is in the library yet. Call finalize again; it answers 200 once the photo is ready, or
+// 422 DERIVATIVES_FAILED when the server cannot render it.
+export const UploadProcessingSchema = z
+  .object({
+    result: z.literal('processing'),
+    uploadId: IdSchema,
+  })
+  .openapi('UploadProcessing')
 
 // ---- Albums ----
 
@@ -371,6 +400,9 @@ export const STORAGE_AUDIT_ISSUE_KINDS = [
   'unfinished_delete',
   // Upload that was never finalized and whose URLs expired. Resolved by cleanup.
   'expired_upload',
+  // Upload whose original is stored but whose derivatives the server could not render (D-042). Not in the
+  // library. Cleanup abandons it like an expired upload whose objects do not pass.
+  'derivative_failed',
   // Objects of an upload that turned out to be a duplicate (or was abandoned). Removed by cleanup.
   'duplicate_leftover',
   // Objects no D1 row refers to. Never removed automatically: D1 may have been rolled back.
@@ -417,6 +449,8 @@ export const StorageCleanupResultSchema = z
     // Upload records whose leftover objects were removed.
     cleared: z.number().int(),
     failed: z.number().int(),
+    // Uploads whose derivatives the server is still rendering (D-042). Left alone (re-sent if overdue).
+    processing: z.number().int(),
     more: z.boolean(),
   })
   .openapi('StorageCleanupResult')
@@ -508,6 +542,7 @@ export type UploadReserve = z.input<typeof UploadReserveSchema>
 export type RestoreUploadReserve = z.input<typeof RestoreUploadReserveSchema>
 export type UploadReservation = z.infer<typeof UploadReservationSchema>
 export type UploadFinalizeResult = z.infer<typeof UploadFinalizeResultSchema>
+export type UploadProcessing = z.infer<typeof UploadProcessingSchema>
 export type Album = z.infer<typeof AlbumSchema>
 export type AlbumListItem = z.infer<typeof AlbumListItemSchema>
 export type Share = z.infer<typeof ShareSchema>

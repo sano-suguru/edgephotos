@@ -72,6 +72,8 @@ EdgePhotos 自体は無料です。Cloudflare の料金は、保存容量と利�
 
 R2 Standard の保存料金（10 GB-month / 月まで無料、超えた分は $0.015 / GB-month）と、Workers の plan 料金だけを足した概算です（2026-09 時点）。この表には、R2 の操作料金や Workers / D1 の超過料金は含みません。R2 の保存量には、写真本体に加えて表示用の derivative も含まれます。
 
+20 MB 以下の写真は、表示用の derivative を Cloudflare Images が作ります（写真 1 枚で 2 回の変換。月 5,000 回まで無料、超えた分は $0.50 / 1,000 回）。Queues は 1 枚あたり 3 operation です（Paid は月 100 万 operation まで含む）。月に追加する写真が 2,500 枚までなら Images は無料の範囲です。計算式は [測定](docs/benchmarks.md#server-側の-derivative-生成2026-10-03) にあります。
+
 Workers Free の CPU 上限は 1 request 10 ms です。現在の測定では、EdgePhotos がこの上限に安定して収まることを確認できていません。継続して使うなら Workers Paid を推奨します（[測定](docs/benchmarks.md#plan-に依存する注意)）。
 
 最新の料金は [R2](https://developers.cloudflare.com/r2/pricing/) と [Workers](https://developers.cloudflare.com/workers/platform/pricing/) の料金ページを確認してください。

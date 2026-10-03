@@ -202,3 +202,24 @@ export async function brightness(target: Locator, property: ColorProperty, over?
     [property, over] as const,
   )
 }
+
+// Sends this page's uploads the browser way (canvas derivatives), as on a deployment without the Images binding or
+// the queue (docs/decisions.md D-042). `vite dev` has both, so without this every small photo is rendered by the
+// server. The answer is the one such a deployment gives (tests/integration/server-derivatives.test.ts).
+export async function useBrowserDerivatives(page: Page) {
+  await page.route('**/api/v1/uploads', async (route) => {
+    const body = route.request().postDataJSON() as { thumbnail?: unknown } | null
+    if (route.request().method() !== 'POST' || body?.thumbnail !== undefined) return route.continue()
+    await route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'SERVER_DERIVATIVES_UNAVAILABLE',
+          message: 'This server does not render derivatives.',
+          details: { reason: 'not_configured' },
+        },
+      }),
+    })
+  })
+}

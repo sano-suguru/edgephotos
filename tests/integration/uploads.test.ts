@@ -42,7 +42,7 @@ describe('upload reservation', () => {
       takenAt: '2024-05-01T10:00:00',
     })
     expect(r.upload.status).toBe('pending')
-    const keys = (['original', 'thumbnail', 'preview'] as const).map((v) => assetIdFromTarget(r.targets[v].url))
+    const keys = (['original', 'thumbnail', 'preview'] as const).map((v) => assetIdFromTarget(r.targets[v]!.url))
     const assetId = (await env.DB.prepare('SELECT asset_id FROM uploads WHERE id = ?')
       .bind(r.upload.id)
       .first<{ asset_id: string }>())!.asset_id
@@ -61,7 +61,7 @@ describe('upload reservation', () => {
       'if-none-match': '*',
       'x-amz-checksum-sha256': hexToBase64(p.sha256),
     })
-    expect(r.targets.thumbnail.headers).toEqual({ 'content-type': 'image/jpeg', 'if-none-match': '*' })
+    expect(r.targets.thumbnail!.headers).toEqual({ 'content-type': 'image/jpeg', 'if-none-match': '*' })
     expect(await assetCount(p.sha256)).toBe(0)
   })
 
@@ -371,7 +371,7 @@ describe('upload finalize', () => {
     expect(result.result).toBe('created')
     expect(await uploadStatus(r.upload.id)).toBe('finalized')
     for (const v of ['original', 'thumbnail', 'preview'] as const) {
-      expect(await env.BUCKET.head(assetIdFromTarget(r.targets[v].url))).not.toBeNull()
+      expect(await env.BUCKET.head(assetIdFromTarget(r.targets[v]!.url))).not.toBeNull()
     }
   })
 

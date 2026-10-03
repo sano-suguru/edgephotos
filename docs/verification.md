@@ -10,7 +10,7 @@
 
 ## 現在の状態
 
-2026-10-01 時点。
+2026-10-03 時点。
 
 production では、upload から share の revoke までの操作、backup と restore、desktop の Browser での表示を確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、production での migration を含む更新、uninstall です。
 
@@ -42,6 +42,7 @@ production では、upload から share の revoke までの操作、backup と 
 | [private app の CSP](#private-app-の-csp2026-09-25) | 一部確認 | 2026-09-25 | desktop と iPhone（利用者の報告） |
 | [Workers Logs に credential が生で残らない](#workers-logs) | 確認済み | 2026-09-25 | — |
 | [derivative の作り直し](#derivative-の作り直しremote-test) | 一部確認 | 2026-09-25 | remote-test のみ |
+| [server 側の derivative 生成](#server-側の-derivative-生成2026-10-03) | 一部確認 | 2026-10-03 | local のみ。Images の実際の出力と queue の配達は未確認 |
 | [Access の login](#login-方法を-one-time-pin-にする2026-09-24) | 確認済み | 2026-09-25 | 2 人目は利用者の報告 |
 | [Access の independent MFA](#access-の-independent-mfa) | 未使用 | — | [D-038](decisions.md) |
 
@@ -1068,6 +1069,39 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 同じ環境に、operations の [更新](operations.md#8-更新release-と-migration) の手順を CLI で行った。`pnpm build`、`wrangler d1 migrations apply`（`No migrations to apply!`）、`wrangler deploy --config dist/edgephotos_deploy_test/wrangler.json`（`--secrets-file` なし）が通り、secret は 7 つ残り、`pnpm diagnose` は全 PASS。この repository では `pnpm check` が通り、`pnpm diagnose --offline`（top-level と `--env remote-test`）も PASS した。
 
 確認後に R2 の object と bucket、D1、Worker、2 つの Access application を API で削除した。production と `remote-test` の資源は残っている。backup と restore を含むアンインストールの手順全体は、ここでは行っていない。
+
+### server 側の derivative 生成（2026-10-03）
+
+[D-042](decisions.md) の実装を local で確かめました。remote-test と production には deploy していません。
+
+local の自動テスト:
+
+- `tests/integration/server-derivatives.test.ts`（24 件）。Images と queue を fake にし、D1 / R2 は local の binding。次の各場合で、写真を公開しない（`assets` 行が無い）、original を失わない、再送か reconcile で収束する、を確かめた
+  - D1 に `queued` を書いた後に send が失われた（Cron と finalize の polling が generation 2 で再送）
+  - 同じ message の重複配達（順番でも同時でも、写真は 1 枚、render は 1 回）
+  - thumbnail を書いた後、preview の前に Worker が止まった（lease 中の再配達は no-op、lease 後の再送で preview だけを作る）
+  - derivative を 2 つとも R2 に書いた後、D1 の batch の前に止まった（再送で render せずに完了だけ）
+  - 置き換えられた generation の message が遅れて届いた（完了の前後とも no-op）。実行中に generation を奪われた consumer は完了できない
+  - Images の一時エラー（10 秒・30 秒の backoff で再試行して成功）、retry 上限（5 回で `failed`）、consumer がいない job（reconcile の再送も試行に数え `failed`）
+  - Images の恒久エラー（9520）は即 `failed`。audit が `derivative_failed`、cleanup は 1 日後に片付ける
+  - EXIF を含む出力は R2 に書かずに `failed`
+  - 処理中の取消（queued のときと render の途中）、完了後の取消（`409`）、完全削除の後に届いた古い message（object を作り直さない）
+  - 1 日以上処理中の upload を audit が期限切れと数えず、cleanup が original を消さない
+- `tests/unit/upload-batch-server.test.ts`（8 件）。client が server 経路を選ぶ条件、polling、server が作れないときの取消と Browser 経路への切り替え、HEIC の表示
+- `tests/bench/derivatives.bench.ts`。障害を注入した 200 件が収束すること（[benchmarks.md](benchmarks.md#server-側の-derivative-生成2026-10-03)）
+
+Browser E2E（`vite dev`、Playwright）:
+
+- `vite dev` は wrangler の local Images（sharp による低忠実度）と local queue で動く。Chromium で 3000x2000 の JPEG を server 経路で upload し、page の `createImageBitmap` が 0 回、width / height が 3000x2000、thumbnail 512x341、preview 2048x1365 で表示されることを確認した
+- local Images は HEIC を受け付けない（9523）。Chromium では server が `failed` にし、client が Browser 経路に切り替え、「サーバーで変換できず、このブラウザでも HEIC を処理できません」と表示して止まることを確認した
+- 全体の初回の実行で 2 件（`trash.spec.ts:61`、`upload.spec.ts:290`）が 30 秒の timeout で失敗した。実行中に `package.json` などを編集しており、trace では original の PUT が応答なしで切れ、page が再読込されていた。編集を止めて再実行すると 2 件とも通った。編集なしで全体をもう一度実行し、80 件すべて通った
+
+未確認（remote-test で確かめること）:
+
+- Cloudflare Images の実際の JPEG 出力が allowlist（[D-012](decisions.md)）を通るか。通らなければ server 経路の upload はすべて `failed` になり、client が Browser 経路で作り直す（壊れはしないが、server 経路の利点が無くなる）
+- EXIF Orientation と HEIC の `irot` / `imir` が Images で反映されるか
+- 実際の queue の配達、Cron の起動、original 保存から ready までの p50 / p95（[benchmarks.md](benchmarks.md#original-保存から-ready-までの時間未測定) の SQL）
+- `wrangler deploy` が queue を自動で作るか（作らない前提で手順に `wrangler queues create` を書いた）
 
 ### 復旧 drill（2026-10-01）
 

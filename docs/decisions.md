@@ -1202,3 +1202,88 @@ Workers Builds の preview build は、既定で `wrangler preview` を実行す
 - D1 / R2 を画面の既定の名前で既存の資源に bind させる。同じ名前の資源が account にあると、画面は既存のものを既定で選ぶ。新しい環境は「新規作成」を選ぶよう手順に書く
 
 再検討の条件: ボタンが Access application、bucket を限定した R2 credential、CORS のどれかを作れるようになったとき。絞った権限の build token で Workers Builds を運用できると確かめたとき。
+
+## D-042: thumbnail / preview を Cloudflare Images と Queues で server 側に作り、D1 の job 行を正本にする
+
+**状態:** 採用（2026-10-03。[D-009](#d-009-client-specific-bff-と-background-infrastructure-を先回りして置かない) の Queues / Cron、[D-030](#d-030-heic--heif-の-original-を受け付けderivative-を作れる環境かは-probe-で決める) の「Cloudflare Images は入れない」を、この範囲で覆す）
+
+owner から「D1 と R2 をまたぐ upload を、at-least-once の Queue で壊れない非同期の derivative 生成に変える」要求が出ました。D-019 案 4 と D-030 が見送った理由は「finalize の中で呼べば遅延と失敗経路が増え、非同期化すれば Queues が要る」でした。今回はその Queues を入れる前提で、失敗経路を D1 の状態遷移で閉じます。
+
+現在の構成で足りないもの:
+
+- derivative を作れるのは decode できる Browser だけで、Chrome / Firefox では HEIC を追加できない（D-030 の制約）
+- 12MP の取り込みで Browser の memory を支配するのは decode 後の bitmap（[benchmarks.md](benchmarks.md#browser-の取り込み-memory2026-09-17)）。mobile Safari で最も危うい部分
+- upload の完了は client が derivative を作り終えるまで待つ
+
+### 対象と fallback
+
+- server 側で作るのは、original が 20 MB 以下（Images binding の入力上限）の upload だけ。client は reserve で `thumbnail` / `preview` を送らないことで server 生成を求める
+- 20 MB を超える original は、従来の Browser 経路（D-012 / D-020）のまま。HEIC で 20 MB を超え、Browser も decode できない組合せは、reserve の前に「サーバーで変換できる上限を超え、このブラウザでも読み取れない」と明示して止める
+- Worker に `IMAGES` か `DERIVATIVE_QUEUE` の binding が無い deploy は、reserve が `422 SERVER_DERIVATIVES_UNAVAILABLE` を返し、client は Browser 経路へ戻る。Images / Queues を有効にしていない account でも upload は壊れない
+- Images が恒久的に失敗した（形式未対応・100MP 超・出力が metadata 規則に通らない・retry 上限）upload は `422 DERIVATIVES_FAILED` になる。client は手元に file があれば、その upload を取消して Browser 経路で予約し直す。Browser でも作れない場合は、その理由を表示して止める
+- restore（`POST /restore/uploads`）は backup の derivative を持っているので、従来の Browser 経路のまま。manifest は変えない
+
+### 状態の正本は D1、Queue は配達だけ
+
+`derivative_jobs` 行（upload 1 件に 1 行）が desired / current state を持ちます。queue message は `{uploadId, generation}` だけで、「この行を今見よ」という合図にすぎません。
+
+```text
+reserve(server)  -> awaiting_original
+finalize         -> queued (generation+1)  -> send message（失敗しても D1 は queued のまま）
+consumer claim   -> running (lease)        -> render -> R2 PUT x2
+consumer finish  -> done  + assets 行を ready で作成 + uploads を finalized（1 つの D1 batch）
+一時失敗         -> queued (next_attempt_at = 後退した時刻) + message.retry
+恒久失敗・上限   -> failed (failure)
+```
+
+**asset 行は derivative が揃って検査を通るまで作らない。** 処理中の写真は `uploads.status = 'pending'` のままで、`assets` に行がありません。timeline・album・share・export・backup はすべて `assets.status = 'ready'` だけを読むので、中間状態はどこにも漏れません。「visible asset = 完成済み」は変えていません。`assets.status` に `processing` を足す案は、CHECK を変える table の作り直し（`album_assets` が cascade で参照する）と、すべての読み取り経路の見直しが要るため却下しました。
+
+**job の state は upload が `pending` の間だけ意味を持つ。** 取消・重複・cleanup で upload が終端になれば、job の state に関係なく consumer は何もしません。
+
+### at-least-once への備え
+
+- object key は従来どおり `derivatives/v1/{assetId}/…` で決定的。consumer は key に検査済みの derivative があれば作り直さない。thumbnail を置いた後に止まっても、次の配達は preview から続ける
+- consumer の D1 への書き込みは、すべて `generation` と `state = 'running'` と `uploads.status = 'pending'` を条件にした 1 文（[D-027](#d-027-古い操作は新しい正しい状態を取り消せないようにする)）。古い generation・重複配達・完了後の配達は claim に失敗して ack するだけ
+- R2 PUT は fencing できない。決定的な key に同じ規則の出力を書くだけで、完了の根拠にはしない。完了の根拠は、PUT の後に読み直した object の検査と、条件付きの D1 batch だけ
+- 試行回数は D1 の `attempts` で数える（上限 5）。queue の `max_retries` には頼らない。上限に達したら `failed`
+
+### reconcile と Cron
+
+「D1 に `queued` を書いた後、send の前に Worker が止まった」場合、message はどこにもありません。client が開いていれば finalize の polling が気付けますが、tab を閉じていると誰も気付きません。cleanup は手動で、しかも期限から 1 日後にしか動きません（[D-023](#d-023-d1-と-r2-の突合は-owner-が実行し自動で消すのは中断した-upload-の残りだけにする)）。D-023 の cleanup のままなら、derivative の無いこの upload を「検査に通らない」として original ごと消します。写真は「処理中」のまま見えず、最後は消えます。
+
+そこで Cron を 5 分ごとに 1 つ足します。範囲は再送だけです。
+
+- 対象: `queued` で `next_attempt_at` から 60 秒以上過ぎたもの、`running` で lease（5 分）が切れたもの。`uploads.status = 'pending'` に限る
+- 再送は `generation` を 1 つ上げる条件付き更新に成功した場合だけ。古い message はその時点で無効になる
+- 再送のたびに `attempts` を足し、上限で `failed` にする。consumer が動かない deploy でも無限に再送しない
+- 削除は一切しない。1 回に扱う件数は 50 件まで
+
+finalize の polling も同じ関数を 1 件に対して呼びます。Cron は client がいない場合のための保険です。
+
+### cleanup・audit・取消
+
+- cleanup は、server 生成の upload を Browser 経路の upload と同じ規則で扱わない。`queued` / `running` は再送の対象にして削除しない（`processing` に数える）。`failed` だけを、検査に通らない upload と同じく放棄して object を消す
+- audit は、処理中の upload を期限切れ（`expired_upload`）にしない。`failed` は `derivative_failed` として報告する
+- `DELETE /api/v1/uploads/{uploadId}` で、終わっていない upload を取消せる。行を終端（`duplicate` + `duplicate_of = NULL`）にしてから、その upload の object を消す。consumer がこの後に PUT した object は、cleanup が 1 日後に消す
+
+### metadata の検査
+
+Images binding の出力には `metadata` の指定がなく、JPEG 出力が何を残すかは文書にありません。そのため consumer は R2 へ PUT する前に、Browser 経路と同じ `scanJpegForMetadata`（[D-012](#d-012-finalize-の保存確認は存在サイズ形式派生画像-metadataとする)）で出力を検査し、通らなければ恒久失敗（`derivative_metadata`）にします。完了の直前にも、R2 から読み直して同じ検査をします。allowlist は広げません。実際の Images 出力がこの規則を通るかは、remote-test で確かめるまで未確認です（[verification.md](verification.md)）。
+
+### D-030 から変えたこと
+
+server 生成では client が decode しないため、撮影日時の読み取り（exifr）は「decode の後」ではなく「box 構造の検査の後」になります。D-030 が exifr の hang を確認した zero padding の box は、構造の検査で先に拒否されます。幅と高さは Images の `info()` から server が記録します。
+
+### 増えるもの
+
+- binding 2 つ（`IMAGES`、`DERIVATIVE_QUEUE`）と Cron 1 つ、D1 table 1 つ。queue は deploy 前に `wrangler queues create` が要る（[operations.md](operations.md)）
+- 1 枚あたり Images の unique transformation 2 回（`info()` は無料）、queue 3 operation、R2 の GET 3 回と PUT 2 回。費用の式は [benchmarks.md](benchmarks.md#server-側の-derivative-生成2026-10-03)
+- 生成の失敗が「upload の失敗」から「upload 後の非同期の失敗」になる。tab を閉じた後の失敗は、audit の `derivative_failed` でしか分からない
+
+却下した案:
+
+- Queue だけを正本にする（D1 に job を持たない）: send が失われたことを誰も知り得ない。DLQ も、送られなかった message は受け取れない
+- Workflows / Durable Objects: 1 件 2 回の変換に対して、状態を D1 の外にもう 1 つ持つことになる
+- consumer が `assets` 行を先に作り、derivative を後から埋める: 処理中の写真が timeline・share・backup に出る
+
+再検討の条件: Images の出力が allowlist に通らないと分かったとき（出力形式か allowlist のどちらを変えるかを決める）。Images の入力上限が変わったとき。Cron の再送が実際に何件起きているかを観測できるようになり、5 分の間隔が問題になったとき。

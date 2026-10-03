@@ -1,4 +1,4 @@
-import type { UploadFinalizeResult, UploadReservation } from '../../../contracts/schemas'
+import type { UploadFinalizeResult, UploadProcessing, UploadReservation } from '../../../contracts/schemas'
 import { ApiRequestError } from '../../lib/api/error'
 import { StorageUploadError } from '../../lib/storage-put'
 
@@ -17,10 +17,16 @@ import { StorageUploadError } from '../../lib/storage-put'
 
 export type Variant = 'original' | 'thumbnail' | 'preview'
 
+export type UploadTarget = UploadReservation['targets']['original']
+// What finalize answers: the photo, or 202 while the server renders its derivatives (docs/decisions.md D-042).
+export type FinalizeAnswer = UploadFinalizeResult | UploadProcessing
+// The parts to send. A server-rendered reservation has a target for the original only, and only that is read.
+export type Bodies = Partial<Record<Variant, Blob>>
+
 export type TransferDeps = {
   reserve: () => Promise<UploadReservation>
-  put: (target: UploadReservation['targets'][Variant], body: Blob) => Promise<void>
-  finalize: (uploadId: string) => Promise<UploadFinalizeResult>
+  put: (target: UploadTarget, body: Blob) => Promise<void>
+  finalize: (uploadId: string) => Promise<FinalizeAnswer>
   // Remembers the reservation in use, so a later retry can pass it back as `previous`.
   remember: (reservation: UploadReservation | null) => void
   now: () => number
@@ -39,12 +45,24 @@ const FINISHED_RESERVATION_CODES = new Set([
 // A PUT that starts this close to expiry may be refused before it completes.
 const URL_MARGIN_MS = 30_000
 
+// PUTs `variants` of a reservation. Every variant asked for must have both a target and a body.
+async function putAll(deps: TransferDeps, reservation: UploadReservation, ready: Bodies, variants: Variant[]) {
+  await Promise.all(
+    variants.map((v) => {
+      const target = reservation.targets[v]
+      const body = ready[v]
+      if (!target || !body) throw new Error(`nothing to send for ${v}`)
+      return deps.put(target, body)
+    }),
+  )
+}
+
 export async function transferPhoto(
   deps: TransferDeps,
-  bodies: () => Promise<Record<Variant, Blob>>,
+  bodies: () => Promise<Bodies>,
   previous: UploadReservation | null,
   onStage: (stage: 'uploading' | 'finalizing') => void,
-): Promise<UploadFinalizeResult> {
+): Promise<FinalizeAnswer> {
   if (previous) {
     let missing: Variant[] | null = null
     try {
@@ -66,7 +84,7 @@ export async function transferPhoto(
       try {
         const ready = await bodies()
         onStage('uploading')
-        await Promise.all(missing.map((v) => deps.put(previous.targets[v], ready[v])))
+        await putAll(deps, previous, ready, missing)
         onStage('finalizing')
         return done(deps, await finalizeWithRetry(deps, previous.upload.id))
       } catch (err) {
@@ -82,18 +100,49 @@ export async function transferPhoto(
   deps.remember(reservation)
   onStage('uploading')
   const ready = await bodies()
-  await Promise.all(VARIANTS.map((v) => deps.put(reservation.targets[v], ready[v])))
+  await putAll(
+    deps,
+    reservation,
+    ready,
+    VARIANTS.filter((v) => reservation.targets[v]),
+  )
   onStage('finalizing')
   return done(deps, await finalizeWithRetry(deps, reservation.upload.id))
 }
 
-function done(deps: TransferDeps, result: UploadFinalizeResult) {
-  deps.remember(null)
+// A photo the server is still rendering keeps its reservation: if the wait for it is cut short (the network
+// drops), a retry asks finalize again instead of sending the original a second time.
+function done(deps: TransferDeps, result: FinalizeAnswer) {
+  if (result.result !== 'processing') deps.remember(null)
   return result
 }
 
+// Waits for a server-rendered photo by asking finalize again: 1s, 2s, 4s, then every 5s, at most `maxPolls`
+// times (about ten minutes by default). Null when it is still rendering after that: the server carries on
+// without this page, and the photo appears in the library when it is done.
+export const RENDER_POLLS = 125
+
+export async function awaitRendered(
+  deps: Pick<TransferDeps, 'finalize' | 'remember' | 'wait'>,
+  uploadId: string,
+  maxPolls = RENDER_POLLS,
+): Promise<UploadFinalizeResult | null> {
+  for (let i = 0; i < maxPolls; i++) {
+    await deps.wait(Math.min(1000 * 2 ** i, 5000))
+    const answer = await finalizeWithRetry(deps, uploadId)
+    if (answer.result !== 'processing') {
+      deps.remember(null)
+      return answer
+    }
+  }
+  return null
+}
+
 // Finalize is idempotent, so transient failures are retried.
-async function finalizeWithRetry(deps: TransferDeps, uploadId: string): Promise<UploadFinalizeResult> {
+async function finalizeWithRetry(
+  deps: Pick<TransferDeps, 'finalize' | 'wait'>,
+  uploadId: string,
+): Promise<FinalizeAnswer> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await deps.finalize(uploadId)

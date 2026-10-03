@@ -268,6 +268,89 @@ bundle: probe 用の HEIC fixture を埋め込んだ分だけ `app.js` が増え
 
 判断は [D-030](decisions.md)。
 
+## server 側の derivative 生成（2026-10-03）
+
+[D-042](decisions.md) の測定です。local（workerd + Miniflare の D1 / R2）で、Images と queue は in-process の fake に差し替えました。queue の配達遅延と Cloudflare Images の処理時間は含みません。
+
+```bash
+pnpm exec vitest run --config vitest.bench.config.ts tests/bench/derivatives.bench.ts --reporter=verbose --silent=false
+```
+
+### upload の request（local、各 100 件）
+
+original は約 2MB の合成 JPEG。Browser 経路は 3 object、server 経路は original だけを PUT します。
+
+| 経路 | `POST /uploads` | `POST finalize` | consumer 1 件（fake Images、render 0 ms） |
+| --- | --- | --- | --- |
+| Browser（従来） | p50 5 ms / p95 8 ms | p50 13 ms / p95 20 ms（200） | — |
+| server | p50 5 ms / p95 8 ms | p50 8 ms / p95 13 ms（202） | p50 34 ms / p95 57 ms |
+
+server 経路の finalize は original だけを検査して job を queue に入れるので、Browser 経路より短くなります。写真が timeline に出るまでの時間は、この後の queue の配達と Images の処理で決まります。consumer の 34 ms は Worker 側の D1 / R2 の手間（original の GET 3 回、derivative の検査と PUT、完了の batch）だけです。
+
+### Browser の memory
+
+| | 1 枚処理中に Browser が持つもの |
+| --- | --- |
+| Browser 経路（従来） | original の bytes（hash 用。最大 100MB）と、decode 後の bitmap（幅 × 高さ × 4 byte）。12MP で RSS 増分 約 45〜110MB（[上の表](#browser-の取り込み-memory2026-09-17)） |
+| server 経路（20 MB 以下） | original の bytes（hash 用。最大 20MB）だけ。bitmap は作らない |
+
+server 経路で page が decode しないことは、e2e（`upload.spec.ts` の「the server renders the derivatives of a photo this page never decodes」）が `createImageBitmap` の呼び出し 0 回で確かめています。RSS の採取は今回やり直していません。採取の手順は上の「Browser の取り込み memory」と同じです。
+
+### 障害を注入したときの収束（local、200 件、seed 42）
+
+queue の send の 20% を失わせ、配達の 20% を重複させ、配達順を毎回入れ替え（古い generation の message が遅れて届く）、render の 15% を一時エラーにし、完了の D1 batch の 10% で Worker を止めました（以後の D1 呼び出しがすべて失敗する）。各 round の後に時計を lease より進めて Cron の reconcile を 1 回呼びます。
+
+| 項目 | 結果 |
+| --- | --- |
+| 注入した障害 | send の消失 39、重複配達 53、一時エラー 67、途中停止 25 |
+| reconcile の再送 | 155 回 |
+| 収束までの round | 6 |
+| 最終状態 | `done` 185、`failed`（retry 上限）15、`queued` / `running` 0 |
+| derivative が欠けた ready の asset | 0 |
+| ready にも failed にもならず残った upload | 0 |
+| 試行回数の分布 | 1 回 103、2 回 28、3 回 28、4 回 16、5 回 15、6 回 10（6 回目は上限超過の判定だけ） |
+
+`failed` の 15 件は、上の障害率が retry 上限（5 回）を超えたものです。写真にはならず、finalize が `422 DERIVATIVES_FAILED` を返し、audit が `derivative_failed` として数えます。
+
+### original 保存から ready までの時間（未測定）
+
+queue の配達と Images の処理は local では再現できないため、測っていません。remote-test に deploy すれば、D1 の記録から直接出せます。
+
+```bash
+pnpm wrangler d1 execute DB --env remote-test --remote --command "
+  SELECT (julianday(completed_at) - julianday(queued_at)) * 86400000 AS ms
+  FROM derivative_jobs WHERE state = 'done' ORDER BY ms"
+```
+
+`queued_at` は finalize が original を検査し終えた時刻、`completed_at` は asset を作った D1 batch の時刻です。行を並べて p50 / p95 を読みます。合わせて `SELECT failure, COUNT(*) FROM derivative_jobs GROUP BY failure` で一時エラーの理由と回数を見ます。
+
+### 費用
+
+2026-10 時点の料金（[Images](https://developers.cloudflare.com/images/pricing/)、[Queues](https://developers.cloudflare.com/queues/platform/pricing/)、[Workers](https://developers.cloudflare.com/workers/platform/pricing/)、[D1](https://developers.cloudflare.com/d1/platform/pricing/)、[R2](https://developers.cloudflare.com/r2/pricing/)）で、server 経路が 1 枚あたりに増やすもの:
+
+| 対象 | 1 枚あたり | 料金 |
+| --- | --- | --- |
+| Images | unique transformation 2 回（thumbnail と preview）。`info()` は無料。同じ月の同じ変換の再試行は数え直さない | 月 5,000 回まで無料、超えた分 $0.50 / 1,000 回。Free plan は 5,000 回を超えると変換が失敗し（9422）、その upload は Browser 経路に戻る |
+| Queues | 3 operation（write / read / delete）。一時エラー 1 回で read +1、reconcile の再送 1 回で +3 | Paid は月 100 万 operation まで含む、超えた分 $0.40 / 100 万。Free は 1 日 10,000 operation |
+| Workers | consumer の起動 1 回と finalize の polling 数回。Cron は 5 分ごとに月 8,640 回 | Paid は月 1,000 万 request まで含む |
+| D1 | 書き込み 約 5 行の増加（job 行の作成・queued・running・done、幅と高さ） | Paid は月 5,000 万行まで含む |
+| R2 | Class B 約 +5 回（original の GET 3 回と derivative の検査）。PUT の回数は Browser 経路と同じ | Class B は月 1,000 万回まで無料 |
+
+式（Workers Paid、月に追加する枚数を N、再試行を除く）:
+
+```text
+Images  = max(0, 2N - 5,000) × $0.50 / 1,000
+Queues  = max(0, 3N - 1,000,000) × $0.40 / 1,000,000   （Cron は queue に送らない。再送した分だけ 3 増える）
+その他  = Workers / D1 / R2 の含まれる量に対して N = 10,000 でも 1% 未満
+```
+
+| 月に追加する枚数 | Images | Queues | 合計の増加 |
+| --- | --- | --- | --- |
+| 1,000 枚 | $0（2,000 回） | $0（3,000 operation） | $0 |
+| 10,000 枚 | $7.50（20,000 回） | $0（30,000 operation） | 約 $7.50 |
+
+10,000 枚を 1 か月に取り込むのは初回の移行のような場合です。Free plan では Queues が 1 日 10,000 operation（約 3,300 枚 / 日）までです。
+
 ## 判断
 
 ### 変更したもの
@@ -299,9 +382,9 @@ bundle: probe 用の HEIC fixture を埋め込んだ分だけ `app.js` が増え
 | restore の再開 | 10,000 件で remote 1〜1.5 時間、100,000 件では 10 時間を超える見積もり。Access token の期限切れだけで最初からになる | 実装した（`--resume`、[D-024](decisions.md)） |
 | timeline の仮想スクロール | 10,000 件を手で読み込むと、WebKit で 1 回 0.8 秒、viewer を開くのに 1.3 秒。5,000 枚を末尾まで読み込むと Chromium で 15,128 node、年月から開くと 419 node（上の表） | 入れない。年月へ直接移動できるようになり、古い写真を見るために末尾まで読む必要がなくなった。実機の memory で問題が出た時点で再検討する（[D-031](decisions.md)） |
 | 年月一覧の式 index | 20,000 件で rows_read 39,000 → 19,000、13 → 3 ms（上の表） | 追加しない。現在の library では 1〜5 ms で、どちらも枚数に比例する。rows_read が運用上の問題になった時点で入れる |
-| Queue / Durable Objects / 別 Worker / cache | どの測定でも必要性が出なかった | 追加しない |
+| Queue / Durable Objects / 別 Worker / cache | どの測定でも必要性が出なかった | 追加しない。その後 Queue は、測定ではなく derivative を server で作る要求で入れた（[D-042](decisions.md)）。Durable Objects・別 Worker・cache は入れていない |
 | 大きな album の page | 50,000 枚の album で 1 ページ 147,501 行、65 ms | 今回は変更しない。非正規化とデータ移行が要る。Free の rows read 上限で問題になった時点、または体感で遅くなった時点で行う |
-| storage cleanup の定期実行 | 手動の実行で件数を 0 にでき、写真の整合性に影響しない | Cron を入れない（[D-023](decisions.md)） |
+| storage cleanup の定期実行 | 手動の実行で件数を 0 にでき、写真の整合性に影響しない | cleanup は Cron で動かさない（[D-023](decisions.md)）。Cron は derivative の再送にだけ使う（[D-042](decisions.md)） |
 | 前処理の並列数 | 今回は測っていない（[D-020](decisions.md) の測定のまま） | 2 のまま |
 | bulk endpoint | 50 枚を既存の単体 endpoint で 6 並列に呼び、server 側 24〜60 ms・request あたり 1 行（上の表） | 追加しない。減らせるのは往復だけで、部分成功の契約が新しく増える（[D-032](decisions.md)） |
 

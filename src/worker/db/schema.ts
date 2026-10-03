@@ -86,6 +86,48 @@ export const uploads = sqliteTable(
   ],
 )
 
+// Server-side derivative generation for one upload (docs/decisions.md D-042). The row is the desired and
+// current state; a queue message only says "look at this row now". It exists only for an upload that asked the
+// server to render its thumbnail / preview, from reserve on, and goes with the upload row (cleanup deletes it).
+//
+// state:
+//   awaiting_original  reserved; the original has not been verified yet
+//   queued             the original is verified; a message for `generation` is (or should be) in the queue
+//   running            a consumer holding `generation` is rendering until `lease_until`
+//   done               the asset was created (or the upload settled as a duplicate) by this job
+//   failed             will not succeed by retrying (`failure` says why); the upload stays pending until cleanup
+//   cancelled          the upload was settled without an asset (cancelled by the client or abandoned by cleanup)
+// `generation` is the fencing token: every write by a consumer is conditional on it, and reconcile bumps it when
+// it re-sends, so a late or duplicate message of an older generation changes nothing.
+export const derivativeJobs = sqliteTable(
+  'derivative_jobs',
+  {
+    upload_id: text()
+      .primaryKey()
+      .references(() => uploads.id, { onDelete: 'cascade' }),
+    state: text({ enum: ['awaiting_original', 'queued', 'running', 'done', 'failed', 'cancelled'] }).notNull(),
+    generation: integer().notNull().default(0),
+    attempts: integer().notNull().default(0),
+    // When a queued job is due (its message delay); reconcile re-sends one that is overdue by a margin.
+    next_attempt_at: text(),
+    // A running job whose lease has passed is treated as crashed and re-sent by reconcile.
+    lease_until: text(),
+    failure: text(),
+    created_at: text().notNull(),
+    // When the original was verified and the job first queued: the start of "original stored -> ready".
+    queued_at: text(),
+    completed_at: text(),
+    updated_at: text().notNull(),
+  },
+  (t) => [
+    index('derivative_jobs_open').on(t.state, t.updated_at).where(sql`state IN ('queued', 'running')`),
+    check(
+      'derivative_jobs_state_check',
+      sql`${t.state} IN ('awaiting_original', 'queued', 'running', 'done', 'failed', 'cancelled')`,
+    ),
+  ],
+)
+
 export const albums = sqliteTable('albums', {
   id: text().primaryKey(),
   title: text().notNull(),
@@ -132,3 +174,4 @@ export type UploadRow = typeof uploads.$inferSelect
 export type UploadInsert = typeof uploads.$inferInsert
 export type AlbumRow = typeof albums.$inferSelect
 export type ShareRow = typeof shares.$inferSelect
+export type DerivativeJobRow = typeof derivativeJobs.$inferSelect

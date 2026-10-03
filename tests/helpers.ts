@@ -236,7 +236,12 @@ export async function reserve(
   })
 }
 
-export async function putObject(app: App, target: UploadReservation['targets']['original'], bytes: Uint8Array) {
+export async function putObject(
+  app: App,
+  target: UploadReservation['targets']['thumbnail'],
+  bytes: Uint8Array,
+): Promise<Response> {
+  if (!target) throw new Error('no PUT target for this object')
   return app.request(target.url, { method: 'PUT', headers: target.headers, body: bytes as Uint8Array<ArrayBuffer> })
 }
 

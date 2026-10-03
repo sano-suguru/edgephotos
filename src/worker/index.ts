@@ -1,4 +1,5 @@
 import { type AppOptions, createApp } from './app'
+import { backgroundContext, handleDerivativeQueue, runScheduledReconcile } from './background'
 import type { Env } from './env'
 
 let cached: { env: Env; app: Promise<ReturnType<typeof createApp>> } | undefined
@@ -34,5 +35,12 @@ function appFor(env: Env) {
 export default {
   async fetch(request, env, ctx) {
     return (await appFor(env)).fetch(request, env, ctx)
+  },
+  // Server-rendered derivatives (docs/decisions.md D-042).
+  async queue(batch, env) {
+    await handleDerivativeQueue(batch, backgroundContext(env))
+  },
+  async scheduled(_controller, env) {
+    await runScheduledReconcile(backgroundContext(env))
   },
 } satisfies ExportedHandler<Env>
