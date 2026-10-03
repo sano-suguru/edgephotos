@@ -10,6 +10,7 @@ EdgePhotos を変更する AI エージェントと開発支援ツール向け�
 - R2 bucket を public にしない
 - upload は `reserve -> presigned PUT -> finalize` とする
 - Worker が R2 保存状態を確認する前に asset を `ready` にしない
+- derivative が揃って検査を通る前に asset 行を作らない。queue の consumer の D1 書き込みは generation を条件にする（[D-042](docs/decisions.md)）
 - finalize の再送で asset を重複作成しない
 - object key に元ファイル名、メールアドレス、撮影日、share secret を含めない
 - Web 専用の application API を作らない
@@ -69,6 +70,7 @@ client と backup manifest の互換性（[D-035](docs/decisions.md)）:
 - Hono / `@hono/zod-openapi`
 - Cloudflare D1 / private R2 / Access
 - Drizzle（D1 の schema・型・migration 生成に限定。[D-017](docs/decisions.md)）
+- Cloudflare Images / Queues / Cron（server 側の derivative 生成とその再送に限定。[D-042](docs/decisions.md)）
 - 1 Worker + Static Assets
 - HTTP/JSON + OpenAPI の API boundary
 
@@ -77,9 +79,8 @@ client と backup manifest の互換性（[D-035](docs/decisions.md)）:
 現在の要求や測定結果がないまま、次を追加しないでください。
 
 - client-specific BFF
-- Queues
+- Queues・Cron の、derivative 生成（[D-042](docs/decisions.md)）以外への利用
 - Durable Objects
-- Cron
 - multi-cloud provider abstraction
 - generic repository pattern
 - plugin framework

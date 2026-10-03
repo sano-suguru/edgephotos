@@ -67,14 +67,18 @@ type Rejection = DerivativeRepair['rejected'][number]
 // Exactly the contract finalize enforces (D-012): a plain JPEG with no EXIF/XMP (APP1) or IPTC (APP13), so a
 // repaired thumbnail can no more leak capture metadata than an uploaded one. The size limit is the one
 // reserve would have applied.
-type Inspected =
+export type Inspected =
   // Nothing at the key: a PUT may create one.
   | { present: false }
   // Something is there. `rejection` names why it is unusable; `etag` is what a replacement must still match,
   // in the quoted HTTP form (`httpEtag`), which is what an `If-Match` header requires.
   | { present: true; etag: string; rejection: Rejection | null }
 
-async function inspectDerivative(ctx: ServiceContext, assetId: string, variant: DerivativeVariant): Promise<Inspected> {
+export async function inspectDerivative(
+  ctx: ServiceContext,
+  assetId: string,
+  variant: DerivativeVariant,
+): Promise<Inspected> {
   const key = objectKey(assetId, variant)
   const head = await ctx.bucket.head(key)
   if (!head) return { present: false }

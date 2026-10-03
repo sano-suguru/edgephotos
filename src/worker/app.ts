@@ -28,6 +28,7 @@ import {
   StorageAuditPageSchema,
   StorageCleanupResultSchema,
   UploadFinalizeResultSchema,
+  UploadProcessingSchema,
   UploadReservationSchema,
   UploadReserveSchema,
 } from '../contracts/schemas'
@@ -46,6 +47,7 @@ import {
 import * as albums from './services/albums'
 import * as assets from './services/assets'
 import type { ServiceContext } from './services/context'
+import { type DerivativeServices, derivativeServicesFrom } from './services/derivatives'
 import { diagnostics, exportAlbums, exportAssetsPage, exportMembershipsPage, recordBackup } from './services/export'
 import { repairDerivatives } from './services/repair'
 import * as shares from './services/shares'
@@ -63,6 +65,8 @@ export type AppOptions = {
   localRoutes?: { prefix: string; app: Hono }
   // `vite dev` only: the nonce its client puts on the <style>/<script> tags it injects.
   devCspNonce?: string
+  // Overrides the Images + queue pair for server-rendered derivatives (tests only). Null: not configured.
+  derivatives?: DerivativeServices | null
 }
 
 type Vars = {
@@ -142,6 +146,7 @@ export function createApp(options: AppOptions) {
   const { env } = options
   const now = options.now ?? (() => new Date())
   const accessKeys = options.accessKeys ?? remoteAccessKeys
+  const derivatives = options.derivatives === undefined ? derivativeServicesFrom(env) : options.derivatives
 
   const resolveSigner = (): BlobSigner | null => {
     if (options.signer) return options.signer
@@ -189,7 +194,7 @@ export function createApp(options: AppOptions) {
     if (!signer) throw misconfigured(c, env, true)
     c.set('principal', auth.principal)
     c.set('config', config)
-    c.set('services', { db: createDb(env.DB), bucket: env.BUCKET, signer, now })
+    c.set('services', { db: createDb(env.DB), bucket: env.BUCKET, signer, now, derivatives })
     await next()
   })
 
@@ -257,15 +262,36 @@ export function createApp(options: AppOptions) {
       request: { params: z.object({ uploadId: IdSchema }) },
       responses: {
         200: json(UploadFinalizeResultSchema, 'Asset is ready (idempotent)'),
+        202: json(UploadProcessingSchema, 'Original stored; the server is rendering the derivatives. Call again.'),
         409: json(ErrorSchema, 'Objects missing'),
         410: json(ErrorSchema, 'Resulting asset was deleted'),
-        422: json(ErrorSchema, 'Objects do not match the reservation'),
+        422: json(ErrorSchema, 'Objects do not match the reservation, or the server could not render them'),
         ...errorResponses,
       },
     }),
     async (c) => {
       const outcome = await uploads.finalizeUpload(svc(c), c.req.valid('param').uploadId)
+      if (outcome.result === 'processing') return c.json(outcome, 202)
       return c.json({ result: outcome.result, asset: await assets.toAsset(svc(c), outcome.asset) }, 200)
+    },
+  )
+
+  // Gives up an upload that has not created its photo (D-042): its objects are removed, nothing else changes.
+  app.openapi(
+    createRoute({
+      method: 'delete',
+      path: '/api/v1/uploads/{uploadId}',
+      tags: tag('uploads'),
+      request: { params: z.object({ uploadId: IdSchema }) },
+      responses: {
+        204: { description: 'Cancelled (idempotent)' },
+        409: json(ErrorSchema, 'The upload already created its photo'),
+        ...errorResponses,
+      },
+    }),
+    async (c) => {
+      await uploads.cancelUpload(svc(c), c.req.valid('param').uploadId)
+      return c.body(null, 204)
     },
   )
 
@@ -751,7 +777,7 @@ export function createApp(options: AppOptions) {
   shareApp.use('*', async (c, next) => {
     const signer = resolveSigner()
     if (!signer) throw misconfigured(c, env, true)
-    c.set('services', { db: createDb(env.DB), bucket: env.BUCKET, signer, now })
+    c.set('services', { db: createDb(env.DB), bucket: env.BUCKET, signer, now, derivatives: null })
     await next()
   })
 

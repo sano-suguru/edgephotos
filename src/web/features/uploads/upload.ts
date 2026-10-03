@@ -1,5 +1,6 @@
 import { api } from '../../lib/api/client'
-import { preparePhoto } from '../../lib/image'
+import { preparePhoto, preparePhotoForServer } from '../../lib/image'
+import { SERVER_DERIVATIVE_MAX_BYTES } from '../../lib/original-limit'
 import { putSigned } from '../../lib/storage-transfer'
 import { createTaskLimiter } from '../../lib/task-limit'
 import { createUploadBatch } from './batch'
@@ -14,12 +15,14 @@ export type { UploadItem } from './batch'
 const uploadSlot = createTaskLimiter(2)
 
 const batch = createUploadBatch({
-  prepare: preparePhoto,
+  prepare: (file, mode) => (mode === 'server' ? preparePhotoForServer(file) : preparePhoto(file)),
   reserve: (file, photo) =>
     api.reserveUpload({
       original: { size: file.size, contentType: photo.contentType, sha256: photo.sha256 },
-      thumbnail: { size: photo.thumbnail.size },
-      preview: { size: photo.preview.size },
+      // Without these the server renders both (docs/decisions.md D-042).
+      ...(photo.thumbnail && photo.preview
+        ? { thumbnail: { size: photo.thumbnail.size }, preview: { size: photo.preview.size } }
+        : {}),
       metadata: {
         filename: file.name.slice(0, 255) || undefined,
         width: photo.width,
@@ -29,6 +32,9 @@ const batch = createUploadBatch({
     }),
   put: putSigned,
   finalize: api.finalizeUpload,
+  // Up to the Images binding's input limit the server renders; this page then never decodes the photo.
+  serverRendering: (file) => file.size <= SERVER_DERIVATIVE_MAX_BYTES,
+  cancel: api.cancelUpload,
   slot: uploadSlot,
   newId: () => crypto.randomUUID(),
   now: () => Date.now(),
@@ -37,16 +43,17 @@ const batch = createUploadBatch({
 
 export const uploads = batch.items
 export const activeUploads = batch.activeCount
+const transferringUploads = batch.transferringCount
 export const libraryVersion = batch.libraryVersion
 export const enqueueFiles = batch.enqueue
 export const retryUploads = batch.retry
 export const clearFinishedUploads = batch.clearFinished
 
-// Closing or reloading the tab stops every running upload, and the selected files cannot be retried
-// afterwards. Ask first.
+// Closing or reloading the tab stops every upload still sending its file, and the selected files cannot be
+// retried afterwards. Ask first. A photo the server is rendering carries on without this page.
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', (e) => {
-    if (activeUploads.peek() > 0) {
+    if (transferringUploads.peek() > 0) {
       e.preventDefault()
       // Some WebKit builds show the prompt only when returnValue is set.
       e.returnValue = ''

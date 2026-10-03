@@ -20,7 +20,7 @@ import {
   UnsupportedFileError,
 } from '../../src/web/lib/image-errors'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
-import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
+import { ORIGINAL_MAX_BYTES, SERVER_DERIVATIVE_MAX_BYTES } from '../../src/web/lib/original-limit'
 import { originalTypeOf } from '../../src/web/lib/original-type'
 import { putOutcome } from '../../src/web/lib/storage-put'
 import { SUPPORTED_TYPES } from '../../src/web/lib/supported-types'
@@ -291,6 +291,7 @@ describe('client-side size limit', () => {
   // The client refuses oversized originals before reading them; it must agree with the server contract.
   it('matches the reserve schema', () => {
     expect(ORIGINAL_MAX_BYTES).toBe(LIMITS.originalMaxBytes)
+    expect(SERVER_DERIVATIVE_MAX_BYTES).toBe(LIMITS.serverDerivativeMaxBytes)
   })
 })
 

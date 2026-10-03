@@ -86,6 +86,59 @@ export const uploads = sqliteTable(
   ],
 )
 
+// Server-side derivative generation for one upload (docs/decisions.md D-042). The row is the desired and
+// current state; a queue message only says "look at this row now". It exists only for an upload that asked the
+// server to render its thumbnail / preview, from reserve on, and goes with the upload row (cleanup deletes it).
+//
+// state:
+//   awaiting_original  reserved; the original has not been verified yet
+//   queued             the original is verified; a message for `generation` is (or should be) in the queue
+//   running            a consumer holding `generation` is rendering until `lease_until`
+//   done               the asset was created (or the upload settled as a duplicate) by this job
+//   failed             gave up (`failure` says why). The upload stays pending and its verified original is kept:
+//                      storage cleanup re-queues a failure that is not a property of the photo, and settles the
+//                      upload only once the same bytes are a photo through another upload
+// The state means nothing once the upload is settled (finalized, a duplicate, cancelled or abandoned): consumers
+// and reconcile act only while the upload is pending.
+// `generation` is the fencing token: every write by a consumer is conditional on it, and reconcile bumps it when
+// it re-sends, so a late or duplicate message of an older generation changes nothing.
+export const derivativeJobs = sqliteTable(
+  'derivative_jobs',
+  {
+    upload_id: text()
+      .primaryKey()
+      .references(() => uploads.id, { onDelete: 'cascade' }),
+    state: text({ enum: ['awaiting_original', 'queued', 'running', 'done', 'failed'] }).notNull(),
+    generation: integer().notNull().default(0),
+    // Claims by a consumer: one per try at rendering.
+    attempts: integer().notNull().default(0),
+    // Re-sends by reconcile (lost message, consumer stopped). Counted apart from attempts, with a growing delay, so a
+    // slow queue does not use up the tries a photo gets.
+    resends: integer().notNull().default(0),
+    // When a queued job is due (its message delay); reconcile re-sends one that is overdue by a margin.
+    next_attempt_at: text(),
+    // 1 once the queue accepted this generation's message (or holds it for a retry). A send the queue accepted is
+    // delivered at least once, so reconcile waits much longer before re-sending such a job than one whose send
+    // failed or never happened: re-sending into a backlog only adds to it.
+    dispatched: integer().notNull().default(0),
+    // A running job whose lease has passed is treated as crashed and re-sent by reconcile.
+    lease_until: text(),
+    failure: text(),
+    created_at: text().notNull(),
+    // When the original was verified and the job first queued: the start of "original stored -> ready".
+    queued_at: text(),
+    completed_at: text(),
+    updated_at: text().notNull(),
+  },
+  (t) => [
+    index('derivative_jobs_open').on(t.state, t.updated_at).where(sql`state IN ('queued', 'running')`),
+    check(
+      'derivative_jobs_state_check',
+      sql`${t.state} IN ('awaiting_original', 'queued', 'running', 'done', 'failed')`,
+    ),
+  ],
+)
+
 export const albums = sqliteTable('albums', {
   id: text().primaryKey(),
   title: text().notNull(),
@@ -132,3 +185,4 @@ export type UploadRow = typeof uploads.$inferSelect
 export type UploadInsert = typeof uploads.$inferInsert
 export type AlbumRow = typeof albums.$inferSelect
 export type ShareRow = typeof shares.$inferSelect
+export type DerivativeJobRow = typeof derivativeJobs.$inferSelect

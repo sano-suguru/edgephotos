@@ -165,7 +165,15 @@ function segment(marker: number, payload: Uint8Array): Uint8Array {
 // `segments` are extra header segments (marker, ASCII payload) placed after APP0. `frame: false` leaves
 // out the frame header (SOF0).
 export function syntheticJpeg(
-  opts: { exif?: boolean; seed?: number; padding?: number; segments?: [number, string][]; frame?: boolean } = {},
+  opts: {
+    exif?: boolean
+    seed?: number
+    padding?: number
+    segments?: [number, string][]
+    frame?: boolean
+    width?: number
+    height?: number
+  } = {},
 ): Uint8Array {
   const seed = opts.seed ?? ++counter
   const jfif = new Uint8Array([0x4a, 0x46, 0x49, 0x46, 0x00, 1, 1, 0, 0, 1, 0, 1, 0, 0])
@@ -176,8 +184,11 @@ export function syntheticJpeg(
   }
   for (const [marker, payload] of opts.segments ?? []) parts.push(segment(marker, new TextEncoder().encode(payload)))
   parts.push(segment(0xdb, new Uint8Array(65).fill(seed & 0xff)))
-  // SOF0: 8-bit, 16x16, one component.
-  if (opts.frame !== false) parts.push(segment(0xc0, new Uint8Array([8, 0, 16, 0, 16, 1, 1, 0x11, 0])))
+  // SOF0: 8-bit, 16x16 unless given, one component.
+  const [w, h] = [opts.width ?? 16, opts.height ?? 16]
+  if (opts.frame !== false) {
+    parts.push(segment(0xc0, new Uint8Array([8, h >> 8, h & 0xff, w >> 8, w & 0xff, 1, 1, 0x11, 0])))
+  }
   parts.push(segment(0xda, new Uint8Array([1, 1, 0, 0, 63, 0])))
   parts.push(new Uint8Array(opts.padding ?? 32).map((_, i) => (seed * 31 + i) & 0x7f))
   parts.push(new Uint8Array([0xff, 0xd9]))
@@ -236,7 +247,12 @@ export async function reserve(
   })
 }
 
-export async function putObject(app: App, target: UploadReservation['targets']['original'], bytes: Uint8Array) {
+export async function putObject(
+  app: App,
+  target: UploadReservation['targets']['thumbnail'],
+  bytes: Uint8Array,
+): Promise<Response> {
+  if (!target) throw new Error('no PUT target for this object')
   return app.request(target.url, { method: 'PUT', headers: target.headers, body: bytes as Uint8Array<ArrayBuffer> })
 }
 

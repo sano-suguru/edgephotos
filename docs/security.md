@@ -185,7 +185,9 @@ share へ返す metadata は allowlist 方式とし、次を返しません。
 - R2 object key
 - household member information
 
-thumbnail / preview は metadata をコピーせず生成します。HEIC / HEIF の original でも同じです。derivative は decode した bitmap から canvas で描き直した JPEG で、original の EXIF は写りません。
+thumbnail / preview は metadata をコピーせず生成します。HEIC / HEIF の original でも同じです。Browser 経路の derivative は decode した bitmap から canvas で描き直した JPEG で、original の EXIF は写りません。
+
+server 経路（original が 20,000,000 byte 以下。[D-042](decisions.md)）では Cloudflare Images の binding が JPEG を作ります。binding の出力には metadata の指定がありません。remote-test では、EXIF のある JPEG からの出力が、元の Exif を GPS ごと残しました（[verification.md](verification.md#server-側の-derivative-生成2026-10-03)）。そのため consumer は、Browser 経路と同じ関数で allowlist 外の segment を取り除き、下の allowlist 検査に通してから R2 へ PUT します。通らなければその upload を `failed` にして写真にしません。完了の直前にも R2 から読み直して同じ検査をします。
 
 finalize は、derivative の最初の scan（SOS）までの header segment を allowlist で検査します。
 
@@ -203,17 +205,17 @@ finalize が保証するのは、先頭 256 KiB のうち最初の scan まで�
 - EOI の後ろに付けたデータ
 - 画素そのもの
 
-canvas の encoder はこうした場所に情報を書かないため、正規の client の derivative には現れません。household member が細工した bytes を直接 PUT した場合は、上の場所に載せた情報が share 閲覧者へ届く derivative に残ります。
+canvas の encoder はこうした場所に情報を書かないため、正規の client の derivative には現れません。Images の encoder がこれらの場所に何を書くかは確かめていません（remote-test で確かめたのは header segment だけ）。household member が細工した bytes を直接 PUT した場合は、上の場所に載せた情報が share 閲覧者へ届く derivative に残ります。
 
 ### 画像を解析する箇所
 
-Worker は画像を decode しません。Worker が読むのは、形式判定のための先頭 1024 byte までと、derivative の JPEG segment だけです。
+Worker のコードは画像を decode しません。Worker が読むのは、形式判定のための先頭 1024 byte までと、derivative の JPEG segment だけです。server 経路の decode と resize は Cloudflare Images の binding が行い、Worker は original の stream を渡して JPEG を受け取るだけです。
 
 EdgePhotos が足した parser は ISO BMFF の box header を読む 1 つです。untrusted input として扱い、宣言された size を検査してから進みます（不正な size、手元の bytes を超える size、4 byte 単位でない compatible brands、1024 byte を超える `ftyp`、印字可能でない box type はすべて拒否）。box の中身は読みません。詳細は [D-030](decisions.md) にあります。
 
-metadata の読み取り（`exifr`）は、untrusted なファイルに対して最も無防備な処理です。壊れた HEIC で返ってこなくなる例を実測したため、decode に成功したファイルだけに渡します（[verification.md](verification.md)）。
+metadata の読み取り（`exifr`）は、untrusted なファイルに対して最も無防備な処理です。壊れた HEIC で返ってこなくなる例を実測したため、Browser 経路では decode に成功したファイルだけに渡します（[verification.md](verification.md)）。server 経路では Browser が decode しないので、box 構造の検査（返ってこなくなる形を拒否する）の後に渡します（[D-042](decisions.md)）。
 
-HEIC の decode は browser / OS の decoder に任せ、Worker では decode しません。そのため HEIC decoder 固有の攻撃面を server 側に足しません。browser / OS の decoder 自体の脆弱性は、EdgePhotos からは制御できません。
+HEIC の decode は、Browser 経路では browser / OS の decoder、server 経路では Cloudflare Images が行います。Worker のコードには HEIC decoder を入れません。どちらの decoder の脆弱性も EdgePhotos からは制御できません。Images へ渡るのは household member が upload した original だけです。
 
 ## 8. HTTP / Browser
 
@@ -293,6 +295,8 @@ font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; for
 - EXIF 全文
 - original filename を含む機密情報
 
+queue の message と consumer のログに載るのは、server が作った upload ID・generation・結果の名前（`images_9520` など）だけです。
+
 例外オブジェクトの自動 dump や debug log も対象です。
 
 上の規則は EdgePhotos が書くログの規則です。Cloudflare の Workers Logs（`wrangler.jsonc` の `observability`）は、これとは別に、Worker への各 request の URL・header を invocation log として Cloudflare account に保存します（[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[request metadata と header を記録する旨の changelog](https://developers.cloudflare.com/changelog/post/2025-04-07-increase-trace-events-limit/)）。share API の `Authorization`（share secret）、`Cf-Access-Jwt-Assertion`、CLI が送る `cf-access-token`（Access token）もこの header に含まれます。
@@ -342,6 +346,7 @@ key は Server が `uploads.asset_id` から作り、client や R2 の list か�
 - 作り直した derivative も、allowlist 外の header segment を含むものは受け付けない（upload と同じ検査）。
 - original が壊れている写真へ作り直しの URL を発行しない。
 - 作り直しが object を削除しない。古い repair の target が、新しい repair の直した derivative を上書き・削除できない（`If-Match` で `412`）。
+- server 側で derivative を作る upload（[D-042](decisions.md)）: 両方の derivative が検査を通るまで asset を作らない。allowlist 外の segment を含む Images の出力を R2 へ書かない。重複・遅延・古い generation の message、途中で止まった consumer、取消された upload のどれでも、写真を公開せず、original を失わず、再送か reconcile で収束する。処理中の upload の original も、server が作れなかった upload の original も、storage cleanup が消さない（`tests/integration/server-derivatives.test.ts`）。
 
 上記は `tests/integration/*.test.ts` と `tests/e2e/vertical.test.ts` で自動化しています。
 

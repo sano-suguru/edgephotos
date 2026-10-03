@@ -445,9 +445,12 @@ export async function restoreLibrary(
           uploadedBy: asset.uploadedBy,
         } satisfies RestoreUploadReserve),
       })
+      // A restore always sends the backup's derivatives, so the server always signs both (D-042 is upload only).
+      const { thumbnail: thumbnailTarget, preview: previewTarget } = reservation.targets
+      if (!thumbnailTarget || !previewTarget) throw new Error('restore reservation without derivative targets')
       await putTarget(client, reservation.targets.original, original)
-      await putTarget(client, reservation.targets.thumbnail, thumbnail)
-      await putTarget(client, reservation.targets.preview, preview)
+      await putTarget(client, thumbnailTarget, thumbnail)
+      await putTarget(client, previewTarget, preview)
       const finalized = await apiJson<UploadFinalizeResult>(
         client,
         `/api/v1/uploads/${reservation.upload.id}/finalize`,

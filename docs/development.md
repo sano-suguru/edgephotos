@@ -159,7 +159,7 @@ spec を増やすのは、Browser でしか起きない不具合を直したと�
 
 | spec | 守るもの | project |
 | --- | --- | --- |
-| `upload.spec.ts` | canvas での derivative 生成から finalize と表示まで。HEIC、URL の期限切れからの回復 | chromium, mobile-webkit |
+| `upload.spec.ts` | canvas での derivative 生成から finalize と表示まで（`useBrowserDerivatives` で Browser 経路に固定）。server 経路で page が decode しないこと。HEIC、URL の期限切れからの回復 | chromium, mobile-webkit |
 | `share.spec.ts` | 共有リンクの発行から guest の閲覧、再発行・無効化まで | chromium |
 | `keyboard.spec.ts` | Base UI の Dialog / Menu、viewer、複数選択の keyboard 操作と focus | chromium |
 | `timeline.spec.ts` | 年月 navigation と複数選択 | chromium, mobile-webkit |
@@ -221,6 +221,7 @@ pnpm check       # typecheck + lint + db:check + cli:check + test + build
 実在の人物と実際の位置情報を使いません。画像は合成で作ります。
 
 - workerd の test: `tests/helpers.ts` が合成 JPEG / PNG の byte 列（架空の EXIF GPS を含む）を組み立てる。Worker は画像を decode しないので、これで足りる
+- server 側の derivative 生成（[D-042](decisions.md)）: workerd の test では Images と queue を in-memory の fake に差し替える（`AppOptions.derivatives`、`backgroundContext`）。障害は D1 / R2 を包む Proxy で注入する（`tests/integration/server-derivatives.test.ts`）。`vite dev` と Browser E2E は wrangler の local Images（sharp による低忠実度。HEIC は非対応）と local queue を使う
 - Browser E2E: canvas で描いた JPEG
 - HEIC: Browser で作れないため、合成画像から作った小さな HEIC だけを `tests/fixtures/` に commit している。生成手順は `tests/fixtures/README.md`。壊れた HEIC や brand 違いは実行時に組み立てる
 

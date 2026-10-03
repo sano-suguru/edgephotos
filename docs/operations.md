@@ -43,6 +43,7 @@ Workers の plan 料金を足した目安の表は [README](../README.md#費用)
 ```bash
 pnpm wrangler d1 create edgephotos-remote-test
 pnpm wrangler r2 bucket create edgephotos-remote-test
+pnpm wrangler queues create edgephotos-remote-test-derivatives   # server 側の derivative 生成（D-042）
 
 pnpm wrangler d1 migrations apply edgephotos-remote-test --env remote-test --remote
 CLOUDFLARE_ENV=remote-test pnpm build
@@ -54,6 +55,17 @@ pnpm wrangler deploy --config dist/edgephotos/wrangler.json --secrets-file <secr
 `wrangler.jsonc` に `database_id` を書かなくても deploy できます。wrangler が `database_name` で既存 D1 を解決します。
 
 R2 bucket は public access（r2.dev / custom domain）を有効にしません。
+
+### server 側の derivative 生成（Images と Queues）
+
+original が 20 MB 以下の写真は、thumbnail / preview を Worker が Cloudflare Images の binding で作ります（[D-042](decisions.md)）。`wrangler.jsonc` は環境ごとに次を宣言しています。
+
+- `images`（binding `IMAGES`）。Images を account で使えるようにしておく。Free plan の上限（月 5,000 unique transformation）を超えると、超えた分の upload は Browser 経路に戻る
+- `queues`（producer `DERIVATIVE_QUEUE` と consumer）。queue は deploy の前に `wrangler queues create <名前>` で作る
+- `triggers.crons`（5 分ごと）。message が失われた job の再送だけを行い、何も削除しない
+- consumer の `max_concurrency: 4`。import 中は backlog ができ、写真が順に timeline に現れる。Images の processing limit（9522）や timeout（9529）が多ければ下げ、backlog が長すぎれば上げる。値は Workers Logs の `derivative_job` と、queue の backlog の metrics で判断する
+
+`IMAGES` か `DERIVATIVE_QUEUE` を外して deploy すると、upload はすべて Browser 経路になります。外す前に、処理中の job が無いことを確かめます（`wrangler d1 execute DB --remote --command "SELECT state, COUNT(*) FROM derivative_jobs GROUP BY state"` で `queued` / `running` が 0）。残っていると、その upload は再送されないまま `pending` に残り、1 日後の cleanup でも処理中として残ります。
 
 初回の deploy は、deploy の成功で終わりにしません。[セットアップの確認](#7-セットアップの確認) の `pnpm diagnose` と、Browser での写真 1 枚の upload までを一続きの作業として行います。
 
@@ -622,12 +634,15 @@ EDGEPHOTOS_URL=... EDGEPHOTOS_ACCESS_TOKEN=... pnpm storage cleanup --apply
 | `original_checksum_unrecorded`（`--deep`） | D-018 より前の original で、R2 に SHA-256 の記録が無い | `pnpm backup verify` が download して照合する |
 | `unfinished_delete` | 完全削除が途中で止まった | 管理画面の「削除を再開」 |
 | `expired_upload` | finalize されずに期限を過ぎた upload（写真ではない） | 1 日たったら `cleanup --apply`。3 object が揃っていれば写真として登録され、それ以外は object と行を削除する |
+| `derivative_failed` | server が thumbnail / preview を作れなかった upload（写真ではない。original は残している。[D-042](decisions.md)） | 理由は `derivative_jobs.failure`。1 日たった後の `cleanup --apply` は、写真の性質でない失敗（`retry_exhausted`・`not_delivered` など）なら再 queue する。それ以外は写真をもう一度追加する（Web は server が失敗した写真を Browser 経路で作る）と、次の cleanup が重複として片付ける |
 | `duplicate_leftover` | 重複と判定された upload の残り object | `cleanup --apply` が削除する |
 | `unreferenced_objects` | どの D1 行も指さない object | 自動では削除しない。D1 を time travel で戻したあとなら、その期間に upload した写真の object の可能性がある。`originals/{id}` を R2 の Dashboard から取り出して upload し直すか、不要と判断できたら Dashboard で削除する |
 | `unexpected_key` | EdgePhotos の layout 外の key | EdgePhotos は触れない。書き込んだものを調べる |
 | `audit_incomplete` | 1 つの ID の下に layout 外の key が数千個あり、その ID の thumbnail / preview を確認しきれなかった | 問題なしとは扱わない（`audit` は exit 1、verify も失敗）。layout 外の key を取り除いてから再実行する |
 
-cleanup が触れないもの: 写真（`assets` 行のある ID の object）、止まった削除、どの行も指さない object、期限から 1 日以内の upload。
+cleanup が触れないもの: 写真（`assets` 行のある ID の object）、止まった削除、どの行も指さない object、期限から 1 日以内の upload、server が derivative を作っている途中の upload（結果の `processing`）、server が作れなかった upload の original（結果の `unrendered`）。
+
+server 側の derivative 生成の状態は D1 の `derivative_jobs` にあります。Workers Logs では `derivative_job`（1 件の結果）と `derivative_reconcile`（Cron の再送）を見ます。どちらも upload ID と結果の名前だけを出します。
 
 期限切れの件数が増え続ける場合は、取り込み中の画面ロックや回線断が多いことを疑います（[roadmap.md](roadmap.md) の Post-merge verification）。
 

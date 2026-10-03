@@ -10,7 +10,7 @@
 
 ## 現在の状態
 
-2026-10-01 時点。
+2026-10-03 時点。
 
 production では、upload から share の revoke までの操作、backup と restore、desktop の Browser での表示を確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、production での migration を含む更新、uninstall です。
 
@@ -42,6 +42,7 @@ production では、upload から share の revoke までの操作、backup と 
 | [private app の CSP](#private-app-の-csp2026-09-25) | 一部確認 | 2026-09-25 | desktop と iPhone（利用者の報告） |
 | [Workers Logs に credential が生で残らない](#workers-logs) | 確認済み | 2026-09-25 | — |
 | [derivative の作り直し](#derivative-の作り直しremote-test) | 一部確認 | 2026-09-25 | remote-test のみ |
+| [server 側の derivative 生成](#server-側の-derivative-生成2026-10-03) | 一部確認 | 2026-10-03 | remote-test。iPhone の HEIC と production は未確認 |
 | [Access の login](#login-方法を-one-time-pin-にする2026-09-24) | 確認済み | 2026-09-25 | 2 人目は利用者の報告 |
 | [Access の independent MFA](#access-の-independent-mfa) | 未使用 | — | [D-038](decisions.md) |
 
@@ -1068,6 +1069,77 @@ local の dev を Playwright（Chromium 1280px と iPhone 13）で開き、「�
 同じ環境に、operations の [更新](operations.md#8-更新release-と-migration) の手順を CLI で行った。`pnpm build`、`wrangler d1 migrations apply`（`No migrations to apply!`）、`wrangler deploy --config dist/edgephotos_deploy_test/wrangler.json`（`--secrets-file` なし）が通り、secret は 7 つ残り、`pnpm diagnose` は全 PASS。この repository では `pnpm check` が通り、`pnpm diagnose --offline`（top-level と `--env remote-test`）も PASS した。
 
 確認後に R2 の object と bucket、D1、Worker、2 つの Access application を API で削除した。production と `remote-test` の資源は残っている。backup と restore を含むアンインストールの手順全体は、ここでは行っていない。
+
+### server 側の derivative 生成（2026-10-03）
+
+[D-042](decisions.md) の実装を local と remote-test で確かめました。production には deploy していません。
+
+local の自動テスト:
+
+- `tests/integration/server-derivatives.test.ts`（30 件）。Images と queue を fake にし、D1 / R2 は local の binding。次の各場合で、写真を公開しない（`assets` 行が無い）、original を失わない、再送か reconcile で収束する、を確かめた
+  - D1 に `queued` を書いた後に send が失われた（Cron と finalize の polling が generation 2 で再送）
+  - 同じ message の重複配達（順番でも同時でも、写真は 1 枚、render は 1 回）
+  - thumbnail を書いた後、preview の前に Worker が止まった（lease 中の再配達は no-op、lease 後の再送で preview だけを作る）
+  - derivative を 2 つとも R2 に書いた後、D1 の batch の前に止まった（再送で render せずに完了だけ）
+  - 置き換えられた generation の message が遅れて届いた（完了の前後とも no-op）。実行中に generation を奪われた consumer は完了できない
+  - Images の一時エラー（10 秒・30 秒の backoff で再試行して成功）、retry 上限（5 回で `failed`。cleanup が数え直して再 queue し、写真になる）
+  - queue が 10 分遅れても試行を使わず、message も足さずに写真になる。20 件の backlog を 25 分抱えても、Cron と polling は 1 通も足さない。send の後・記録の前に止まった job は、60 秒後に 1 通だけ再送される
+  - server 経路の上限 20,000,000 byte は受け付け、1 byte 超えると `422 SERVER_DERIVATIVES_UNAVAILABLE`
+  - consumer がいない job は、間隔を延ばした再送 10 回の後に `failed`（`not_delivered`）
+  - Images の恒久エラー（9520）は即 `failed`。audit が `derivative_failed`。cleanup は original を残し（`unrendered`）、同じ写真が追加し直された後に重複として片付ける
+  - binding を外した後の finalize は `422 SERVER_DERIVATIVES_UNAVAILABLE`（client は Browser 経路へ戻る）
+  - EXIF を含む出力は R2 に書かずに `failed`
+  - 処理中の取消（queued のときと render の途中）、完了後の取消（`409`）、完全削除の後に届いた古い message（object を作り直さない）
+  - 1 日以上処理中の upload を audit が期限切れと数えず、cleanup が original を消さない
+- `tests/unit/upload-batch-server.test.ts`（9 件）。client が server 経路を選ぶ条件、polling、server が作れないときの取消と Browser 経路への切り替え、Browser 経路の reservation を再試行が引き継ぐこと、HEIC の表示
+- `tests/bench/derivatives.bench.ts`。障害を注入した 200 件が収束すること（[benchmarks.md](benchmarks.md#server-側の-derivative-生成2026-10-03)）
+
+Browser E2E（`vite dev`、Playwright）:
+
+- `vite dev` は wrangler の local Images（sharp による低忠実度）と local queue で動く。Chromium で 3000x2000 の JPEG を server 経路で upload し、page の `createImageBitmap` が 0 回、width / height が 3000x2000、thumbnail 512x341、preview 2048x1365 で表示されることを確認した
+- local Images は HEIC を受け付けない（9523）。Chromium では server が `failed` にし、client が Browser 経路に切り替え、「サーバーで変換できず、このブラウザでも HEIC を処理できません」と表示して止まることを確認した
+- PR #72 へのレビューで、`max_concurrency` が無いこと（最大 250 並列で Images へ届く）と、queue が受け取った send まで 60 秒で再送して backlog に重複を足すことの指摘を受け、並列数 4 と `dispatched` を入れた。20 MB の上限は 20,000,000 byte に下げた。Images の文書が 10^6 と 2^20 のどちらかを書いていないためで、実際の境界は remote-test で確かめる
+- 独立したレビュー（別の subagent）の指摘で、queue の遅延や一時障害だけで `failed` になり cleanup が original を消す経路、binding を外した後に job が止まる経路、再試行で経路と reservation が食い違う経路を直し、それぞれに test を足した
+- 全体の初回の実行で 2 件（`trash.spec.ts:61`、`upload.spec.ts:290`）が 30 秒の timeout で失敗した。実行中に `package.json` などを編集しており、trace では original の PUT が応答なしで切れ、page が再読込されていた。編集を止めて再実行すると 2 件とも通った。編集なしで全体をもう一度実行し、80 件すべて通った
+
+remote-test（2026-10-03）:
+
+queue `edgephotos-remote-test-derivatives` を作り、migration `0006` を適用して deploy した。適用前の D1 bookmark は `00000062-00000002-000050f9-54b49c329d7cc4b926a0b63fb6cb3a79`。`pnpm diagnose --env remote-test` は失敗なしで、`worker: D1 schema` は `0006_server_derivative_jobs.sql`。画像はすべて合成で、GPS は架空の座標（0.0001 度）を入れた。
+
+最初の 1 枚（EXIF 付きの JPEG）は `derivative_metadata_segment` で `failed` になった。Images binding を remote で呼ぶ使い捨ての Worker（`wrangler dev`、deploy していない）で、出力を確かめた。
+
+- EXIF のある JPEG を入れると、出力は Exif の APP1 をそのまま残す（371 byte。Make・Model・DateTimeOriginal・GPSLatitude / GPSLongitude を含む）。PNG と HEIC からの出力には APP1 が無い
+- EXIF Orientation は画素に適用され、Orientation tag だけが消える。1〜8 のすべてで、Browser（sharp の auto-orient）と同じ向きになった
+- 最初、Images は向きを適用しないと判断しかけた。原因は fixture で、sharp の `withExif` は Orientation を書いていなかった。tag を `withMetadata` で入れて確かめ直した
+
+allowlist の検査が PUT の前に止めたので、GPS を含む derivative は R2 に書かれていない。consumer は、Images の出力から allowlist 外の segment を取り除いてから検査するようにした。取り除く関数は Browser 経路と同じ `stripJpegMetadata` で、`contracts/jpeg-segments.ts` へ移した。修正後に deploy し、次を server 経路で upload した。
+
+| original | 結果 | 記録した幅と高さ | thumbnail / preview | 左上の色（期待） |
+| --- | --- | --- | --- | --- |
+| JPEG 4000x3000、Orientation 1、GPS | 写真 | 4000x3000 | 512x384 / 2048x1536 | 赤（赤） |
+| 同、Orientation 6 | 写真 | 3000x4000 | 384x512 / 1536x2048 | 青（青） |
+| 同、Orientation 8 | 写真 | 3000x4000 | 384x512 / 1536x2048 | 緑（緑） |
+| 同、Orientation 2（左右反転） | 写真 | 4000x3000 | 512x384 / 2048x1536 | 緑（緑） |
+| 同、Orientation 5（反転して縦） | 写真 | 3000x4000 | 384x512 / 1536x2048 | 赤（赤） |
+| PNG 1200x800、左 1/4 が透明 | 写真 | 1200x800 | 512x341 / 1200x800 | 白（白で塗る） |
+| WebP 1600x1200 | 写真 | 1600x1200 | 512x384 / 1600x1200 | 赤（赤） |
+| HEIC（sips）4000x3000 | 写真 | 4000x3000 | 512x384 / 2048x1536 | 赤（赤） |
+| HEIC（sips、Orientation 6 の JPEG から） | 写真 | 3000x4000 | 384x512 / 1536x2048 | 青（青） |
+| JPEG 48MP（8000x6000） | 写真 | 8000x6000 | 512x384 / 2048x1536 | 赤（赤） |
+| JPEG 19,999,000 byte | 写真 | 3050x2288 | 512x384 / 2048x1536 | — |
+| JPEG 20,000,000 byte（上限ちょうど） | 写真 | 3050x2288 | 512x384 / 2048x1536 | — |
+
+どの thumbnail / preview も、scan までの segment は `e0 db c2 c4 da`（JFIF・DQT・progressive の SOF・DHT・SOS）だけだった。
+
+- queue と Cron: 20 枚を同時に upload し、20 枚とも写真になった。どの job も試行 1 回・再送 0 回・generation 1。Cron は約 5 分ごとに起動した（Workers Logs で 36 回、wall p50 170 ms）
+- 時間（[benchmarks.md](benchmarks.md#original-保存から-ready-までの時間remote-test)）
+- `pnpm storage audit --deep` は 332 枚・997 object を見て、`derivative_failed` 1 件だけを報告した。修正前に失敗した最初の upload で、original は残っている
+
+まだ確認していないこと:
+
+- iPhone の HEIC。`irot` / `imir` で向きを持つ実機の HEIC は合成できなかった。sips は向きを画素に焼き込み、tag も `irot` も残さない
+- Images の入力上限の境界（20,000,001〜20,971,520 byte）。server が 20,000,000 byte を超える original を受け付けないので、app からは届かない
+- `wrangler deploy` が queue を自動で作るか。今回は先に作った
 
 ### 復旧 drill（2026-10-01）
 

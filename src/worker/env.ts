@@ -1,4 +1,5 @@
 import { MEMBER_EMAIL_RE } from '../contracts/schemas'
+import type { DerivativeMessage } from './services/derivatives'
 
 export interface Env {
   DB: D1Database
@@ -12,6 +13,9 @@ export interface Env {
   R2_BUCKET_NAME?: string
   R2_ACCESS_KEY_ID?: string
   R2_SECRET_ACCESS_KEY?: string
+  // Server-rendered derivatives (D-042). Without both, uploads keep the browser path.
+  IMAGES?: ImagesBinding
+  DERIVATIVE_QUEUE?: Queue<DerivativeMessage>
   // Local development only (injected by the Vite dev server, ignored in production builds).
   DEV_ACCESS_JWKS?: string
   DEV_BLOB_SIGNING_KEY?: string

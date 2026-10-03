@@ -47,7 +47,7 @@ Client の責務:
 - 画像形式・画素数等の事前確認
 - EXIF から必要な metadata を抽出
 - original の SHA-256 計算
-- thumbnail / preview 生成
+- thumbnail / preview 生成（original が 20 MB を超えるとき、または server が作れないとき。[D-042](decisions.md)）
 - presigned URL を使った R2 直接 PUT / GET
 - UI state と upload progress の管理
 
@@ -73,8 +73,9 @@ Worker が担当するのは次の範囲です。
 - presigned URL 発行
 - share capability の検証
 - export / operational endpoints
+- original が 20 MB 以下の upload の thumbnail / preview の生成（queue の consumer が Cloudflare Images の binding を呼ぶ。[D-042](decisions.md)）
 
-画像の decode / resize / 動画変換は通常処理として Worker に載せません。
+Worker のコード自身は画像を decode しません。resize と JPEG への encode は Images の binding に任せます。動画変換は載せません。
 
 ### D1
 
@@ -88,6 +89,7 @@ D1 は状態と索引を保持します。
 - album_assets
 - shares
 - settings
+- derivative_jobs（server 側で derivative を作る upload の状態。[D-042](decisions.md)）
 
 写真 binary、R2 credential、Access token、share secret 平文は保存しません。
 
@@ -226,6 +228,26 @@ D1 への asset 作成と upload 状態更新は、1 つの D1 batch（transacti
 
 asset ID は reserve 時に確定しているため、再送や同時実行でも同じ asset へ収束します。同じ SHA-256 の asset が既にあれば `result: "duplicate"` として既存 asset を返します（[D-014](decisions.md)）。ただし完全削除が途中で止まった asset（`purging`）は重複とみなさず、reserve と finalize がその削除を完了させてから進みます。
 
+### server 側で derivative を作る upload
+
+reserve で `thumbnail` / `preview` を送らない upload は、server が derivative を作ります。対象は original が 20,000,000 byte（Images binding の入力上限の「20 MB」を小さく読んだ値）以下のものだけで、Worker に `IMAGES` と `DERIVATIVE_QUEUE` の binding が無ければ `422 SERVER_DERIVATIVES_UNAVAILABLE` を返します。Web client はそのとき従来の手順へ戻ります（[D-042](decisions.md)）。
+
+```text
+1. POST /api/v1/uploads（original だけを申告）  -> uploads: pending, derivative_jobs: awaiting_original
+2. Client PUTs original to R2
+3. POST finalize: original を上と同じ規則で検査 -> derivative_jobs: queued, queue へ {uploadId, generation}
+   -> 202 { result: "processing" }
+4. consumer: claim（running）-> Images で thumbnail / preview -> 検査 -> R2 PUT
+5. consumer: 1 つの D1 batch で asset を ready で作成、upload を finalized、job を done
+6. POST finalize（polling）-> 200 { result: "created" | "duplicate" }
+```
+
+- D1 の job 行が正本で、queue message は合図にすぎません。consumer の書き込みはすべて `generation` を条件にし、写真に関わる書き込み（asset の作成と upload の確定）は `uploads.status = 'pending'` も条件にします
+- derivative が揃って検査を通るまで `assets` 行を作りません。処理中の写真は timeline・album・share・export に現れません
+- send が失敗した job（60 秒後）、queue が受け取ったのに consumer に届かない job（30 分後）、consumer が止まった job（lease 切れ）は、5 分ごとの Cron と finalize の polling が新しい generation で送り直します。consumer は同時に 4 件までです。consumer の試行は 5 回、再送は間隔を延ばしながら 10 回まで数え、超えたら `failed` です
+- `failed` の upload は finalize が `422 DERIVATIVES_FAILED` を返します。Web client はその upload を `DELETE /api/v1/uploads/{uploadId}` で取消し、Browser 経路で予約し直します。client がいなければ upload は original ごと残り、storage cleanup が扱います（[D-042](decisions.md)）
+- restore は backup の derivative を送るので、従来の手順のままです
+
 reserve した member を `uploads.uploaded_by` に記録し、finalize が asset を作るときに `assets.uploaded_by` へ写します。finalize を呼んだ member は見ないので、別の member や storage cleanup が finalize しても変わりません。再送や duplicate は既存 asset の値を変えません。通常の reserve は upload した人を body から受け取りません。restore は `POST /api/v1/restore/uploads` で reserve し、manifest の値を `uploadedBy` で送ります（`null` を含む）。0004 より前の asset は `NULL` です。どちらも `NULL` なら API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。
 
 presigned PUT は `Content-Type` と `If-None-Match: *` を署名し、保存済み object の上書きを R2 側で拒否させます（[D-013](decisions.md)）。
@@ -249,6 +271,7 @@ restore の reserve（`POST /api/v1/restore/uploads`）の `metadata.createdAt`�
 - D1 障害時に R2 object を即削除しない
 - asset 行が使っている ID の key は、cleanup でも重複処理でも削除しない（削除するのは完全削除だけ）
 - D1 と R2 を 1 transaction として扱わない
+- derivative が揃って検査を通るまで asset 行を作らない（server 側で作る場合も同じ）
 
 ## 6. 保存する画像の契約
 
@@ -285,6 +308,8 @@ Web 版が保存する original は「Browser から受け取った byte 列」�
 - 実在しない日時（13 月、2 月 30 日、24 時）と ±14:00 を超える offset は、API が受け付けません。Client は、日時が実在しなければ `takenAt` を付けず、offset だけが範囲外なら offset を外します
 
 年月 navigation（[D-031](decisions.md)）の月は、`takenAt` があればその先頭の digits、無ければ `createdAt`（UTC）です。`takenAt` のある写真は、grid の見出しと必ず同じ月になります。`takenAt` の無い写真だけは、navigation が UTC の月、見出しが閲覧端末の timezone の月なので、月境界の数時間だけ違う月に見えることがあります。並び順の fallback 自体は変えていません。
+
+thumbnail と preview は、Browser（canvas）と server（Images binding）のどちらで作っても同じ規則です。長辺と quality は同じ値を使い、finalize と consumer は同じ検査（[D-012](decisions.md)）を通します。consumer は Images の出力を R2 へ PUT する前に検査し、通らなければその upload を `failed` にします。
 
 ### thumbnail
 

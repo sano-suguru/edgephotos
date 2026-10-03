@@ -1,12 +1,13 @@
 import { computed, signal } from '@preact/signals'
-import type { UploadReservation } from '../../../contracts/schemas'
+import type { UploadFinalizeResult, UploadReservation } from '../../../contracts/schemas'
 import { ApiRequestError } from '../../lib/api/error'
 import { userMessage } from '../../lib/errors'
-import { FileTooLargeError, UnsupportedFileError } from '../../lib/image-errors'
+import { FileTooLargeError, HeicNotDecodableHereError, UnsupportedFileError } from '../../lib/image-errors'
+import { SERVER_DERIVATIVE_MAX_BYTES } from '../../lib/original-limit'
 import { StorageUploadError } from '../../lib/storage-put'
 import type { SupportedType } from '../../lib/supported-types'
-import { type TransferDeps, transferPhoto } from './transfer'
-import { isActiveUpload, mergeUploadList, type UploadState } from './upload-list'
+import { awaitRendered, type Bodies, type TransferDeps, transferPhoto } from './transfer'
+import { isActiveUpload, isTransferring, mergeUploadList, type UploadState } from './upload-list'
 import { unstorableOriginalMessage, unsupportedFileMessage } from './upload-message'
 
 // What happens to a selection of photos: which are still running, what each one ended as, and which rows a
@@ -29,22 +30,30 @@ export type UploadItem = {
 }
 
 // What preparing one photo gives the batch: what reserve records and what the PUTs send. `file` itself
-// carries the original, so nothing here holds a second copy of those bytes.
+// carries the original, so nothing here holds a second copy of those bytes. For a server-rendered upload
+// (docs/decisions.md D-042) the file is not decoded: no dimensions and no derivatives.
 export type PreparedUpload = {
   contentType: SupportedType
   sha256: string
-  width: number
-  height: number
+  width?: number
+  height?: number
   takenAt?: string
-  thumbnail: Blob
-  preview: Blob
+  thumbnail?: Blob
+  preview?: Blob
 }
 
+// 'server': the server renders the derivatives; 'browser': this page decodes the file and renders them.
+export type RenderMode = 'server' | 'browser'
+
 export type BatchDeps = {
-  prepare: (file: File) => Promise<PreparedUpload>
+  prepare: (file: File, mode: RenderMode) => Promise<PreparedUpload>
   reserve: (file: File, photo: PreparedUpload) => Promise<UploadReservation>
   put: TransferDeps['put']
   finalize: TransferDeps['finalize']
+  // Whether to ask the server to render this file's derivatives. Absent: always the browser.
+  serverRendering?: (file: File) => boolean
+  // Gives up an upload that did not become a photo, so its original does not wait a day for storage cleanup.
+  cancel?: (uploadId: string) => Promise<void>
   // One slot per photo in flight. Shared with everything else that decodes images, so a second selection
   // queues behind the first instead of putting more bitmaps in memory at once (docs/decisions.md D-020).
   slot: <T>(task: () => Promise<T>) => Promise<T>
@@ -54,6 +63,16 @@ export type BatchDeps = {
 }
 
 const NOT_ADDED = 'ライブラリには追加されていません（選んだファイルはそのままです）。'
+const SERVER_LIMIT_MB = SERVER_DERIVATIVE_MAX_BYTES / 1_000_000
+const RENDERING_LATER = 'サーバーで処理しています。終わるとライブラリに表示されます（このページを閉じても続きます）'
+
+// Answers that mean "the server will not render this one". The browser path is tried next.
+function serverDeclined(err: unknown): err is ApiRequestError {
+  return (
+    err instanceof ApiRequestError &&
+    (err.code === 'SERVER_DERIVATIVES_UNAVAILABLE' || err.code === 'DERIVATIVES_FAILED')
+  )
+}
 
 // The server refused this screen, not this photo: an identity outside the household, an origin that is not
 // the configured one, a deployment whose settings are incomplete. None of it depends on the file, and none
@@ -72,6 +91,10 @@ const DISPLAY_LIMIT = 200
 export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT) {
   const items = signal<UploadItem[]>([])
   const activeCount = computed(() => items.value.filter(isActiveUpload).length)
+  // Rows whose bytes are still on their way. Closing the page stops these; a photo the server is rendering is not.
+  const transferringCount = computed(() => items.value.filter(isTransferring).length)
+  // Set when this deployment answers that it does not render derivatives at all: no further photo asks.
+  let serverUnavailable = false
   // Incremented when assets became ready so views can refetch. A refetch drops the pages below the one the
   // reader is on, so a long selection bumps it at most once per LIBRARY_BUMP_MS, and always once after the
   // last photo: the timeline fills in while the upload runs instead of starting over for every photo.
@@ -115,50 +138,92 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
       stage = next
       update(item.id, { state: next })
     }
-    // Reading the file, hashing it and rendering its derivatives happens once, and only if this attempt
-    // finds it has bytes to send. A retry of a photo the server already registered asks the server first
-    // and never gets here, so a file that would no longer decode cannot turn a stored photo into a failure.
-    let photo: PreparedUpload | null = null
-    const prepared = async () => {
-      if (!photo) {
-        setStage('preparing')
-        photo = await deps.prepare(file)
-      }
-      return photo
-    }
-    try {
-      const transferDeps: TransferDeps = {
-        reserve: async () => deps.reserve(file, await prepared()),
-        put: deps.put,
-        finalize: deps.finalize,
-        remember: (r) => (r ? reservations.set(item.id, r) : reservations.delete(item.id)),
-        now: deps.now,
-        wait: deps.wait,
-      }
-      const bodies = async () => {
-        const ready = await prepared()
-        return { original: file, thumbnail: ready.thumbnail, preview: ready.preview }
-      }
-      let result: Awaited<ReturnType<typeof transferPhoto>>
-      try {
-        result = await transferPhoto(transferDeps, bodies, reservations.get(item.id) ?? null, setStage)
-      } catch (err) {
-        // The library already holds these bytes: a normal outcome, and nothing left to retry.
-        if (err instanceof ApiRequestError && err.code === 'DUPLICATE_ASSET') {
-          update(item.id, {
-            state: 'duplicate',
-            message: err.details?.trashed ? 'ゴミ箱に同じ写真があります' : '登録済み',
-          })
-          files.delete(item.id)
-          return
-        }
-        throw err
-      }
-      update(item.id, { state: result.result === 'duplicate' ? 'duplicate' : 'done', message: undefined })
+    const finished = (state: 'done' | 'duplicate', message?: string) => {
+      update(item.id, { state, message })
       files.delete(item.id)
-      libraryChanged()
+      if (state === 'done') libraryChanged()
+    }
+    const remember = (r: UploadReservation | null) => (r ? reservations.set(item.id, r) : reservations.delete(item.id))
+    // The server is tried first when it may render this file; the browser path is the fallback. A retry that
+    // resumes a reservation keeps that reservation's path: one with derivative targets is the browser's.
+    const resumed = reservations.get(item.id)
+    const serverPossible = !serverUnavailable && (deps.serverRendering?.(file) ?? false)
+    const modes: RenderMode[] = serverPossible && !resumed?.targets.thumbnail ? ['server', 'browser'] : ['browser']
+    let serverFailed = false
+    // The server renders on this deployment, but not a file this large: the browser is the only way left.
+    const tooLargeForServer = !serverUnavailable && deps.serverRendering !== undefined && !serverPossible
+
+    // One attempt in one mode, holding a slot while the file is read and sent. Reading the file, hashing it and
+    // rendering its derivatives happens once per mode, and only if this attempt finds it has bytes to send. A
+    // retry of a photo the server already registered asks the server first and never gets here, so a file that
+    // would no longer decode cannot turn a stored photo into a failure.
+    const attempt = (mode: RenderMode) =>
+      deps.slot(() => {
+        let photo: PreparedUpload | null = null
+        const prepared = async () => {
+          if (!photo) {
+            setStage('preparing')
+            photo = await deps.prepare(file, mode)
+          }
+          return photo
+        }
+        const transferDeps: TransferDeps = {
+          reserve: async () => deps.reserve(file, await prepared()),
+          put: deps.put,
+          finalize: deps.finalize,
+          remember,
+          now: deps.now,
+          wait: deps.wait,
+        }
+        const bodies = async (): Promise<Bodies> => {
+          const ready = await prepared()
+          return { original: file, thumbnail: ready.thumbnail, preview: ready.preview }
+        }
+        return transferPhoto(transferDeps, bodies, reservations.get(item.id) ?? null, setStage)
+      })
+
+    try {
+      let result: UploadFinalizeResult | null = null
+      for (const mode of modes) {
+        try {
+          const answer = await attempt(mode)
+          if (answer.result !== 'processing') {
+            result = answer
+            break
+          }
+          // Out of the slot: waiting for the server holds no file in memory, so the next photo may start.
+          setStage('rendering')
+          const rendered = await awaitRendered({ finalize: deps.finalize, remember, wait: deps.wait }, answer.uploadId)
+          if (!rendered) {
+            update(item.id, { state: 'rendering_later', message: RENDERING_LATER })
+            files.delete(item.id)
+            reservations.delete(item.id)
+            return
+          }
+          result = rendered
+          break
+        } catch (err) {
+          if (mode !== 'server' || !serverDeclined(err)) throw err
+          // The server will not render this one: give its upload up now (its original would otherwise wait a
+          // day for storage cleanup) and send the photo again the browser way.
+          if (err.code === 'SERVER_DERIVATIVES_UNAVAILABLE' && err.details?.reason === 'not_configured') {
+            serverUnavailable = true
+          }
+          if (err.code === 'DERIVATIVES_FAILED') serverFailed = true
+          const abandoned = reservations.get(item.id)
+          reservations.delete(item.id)
+          if (abandoned && deps.cancel) await deps.cancel(abandoned.upload.id).catch(() => {})
+        }
+      }
+      if (!result) throw new Error('no render mode left')
+      finished(result.result === 'duplicate' ? 'duplicate' : 'done')
     } catch (err) {
-      const settled = settledFailure(err)
+      // The library already holds these bytes: a normal outcome, and nothing left to retry.
+      if (err instanceof ApiRequestError && err.code === 'DUPLICATE_ASSET') {
+        finished('duplicate', err.details?.trashed ? 'ゴミ箱に同じ写真があります' : '登録済み')
+        return
+      }
+      const settled = settledFailure(err, serverFailed, tooLargeForServer)
       if (settled) {
         // Nothing another attempt can change, so the file is released with the row left as it is.
         files.delete(item.id)
@@ -176,7 +241,8 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
     for (const [i, file] of list.entries()) files.set(added[i].id, file)
     items.value = mergeUploadList(items.value, added, displayLimit)
     forgetDropped()
-    await Promise.all(list.map((file, i) => deps.slot(() => runOne(added[i], file))))
+    // runOne takes a slot itself, only while it reads and sends the file.
+    await Promise.all(list.map((file, i) => runOne(added[i], file)))
   }
 
   // Only the rows that failed and can be tried again. A photo already stored, or already the library's, is
@@ -184,7 +250,7 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
   async function retry() {
     const failed = items.value.filter((u) => u.state === 'error' && u.retryable && files.has(u.id))
     for (const u of failed) update(u.id, { state: 'queued', message: undefined, retryable: undefined })
-    await Promise.all(failed.map((u) => deps.slot(() => runOne(u, files.get(u.id) as File))))
+    await Promise.all(failed.map((u) => runOne(u, files.get(u.id) as File)))
   }
 
   function clearFinished() {
@@ -192,11 +258,16 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
     forgetDropped()
   }
 
-  return { items, activeCount, libraryVersion, enqueue, retry, clearFinished }
+  return { items, activeCount, transferringCount, libraryVersion, enqueue, retry, clearFinished }
 }
 
-// The message for a failure no retry of the same file can get past, or null when one may.
-function settledFailure(err: unknown): string | null {
+// The message for a failure no retry of the same file can get past, or null when one may. `serverFailed`: the
+// server already tried this photo and could not render it, so a browser that cannot either is the end of it.
+function settledFailure(err: unknown, serverFailed: boolean, tooLargeForServer: boolean): string | null {
+  if (err instanceof HeicNotDecodableHereError && (serverFailed || tooLargeForServer)) {
+    const server = serverFailed ? 'サーバーで変換できず' : `${SERVER_LIMIT_MB}MB を超える HEIC はサーバーで変換できず`
+    return `${server}、このブラウザでも HEIC を処理できません。Safari で開くか、JPEG などに書き出してから選んでください。${NOT_ADDED}`
+  }
   if (err instanceof FileTooLargeError || err instanceof UnsupportedFileError) return unsupportedFileMessage(err)
   if (err instanceof ApiRequestError) {
     const refused = REFUSED_SCREEN[err.code]

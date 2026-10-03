@@ -6,6 +6,16 @@
 
 経緯と根拠は [decisions.md](decisions.md)、確認した内容は [verification.md](verification.md)、測定値は [benchmarks.md](benchmarks.md) にあります。これからの作業は [roadmap.md](roadmap.md) にあります。
 
+## server 側の derivative 生成（2026-10-03）
+
+original が 20 MB 以下の写真は、thumbnail / preview を Worker が Cloudflare Images の binding で作るようになりました。queue で非同期に処理し、D1 の `derivative_jobs` 行が状態の正本です。Browser は original を送るだけで decode しません。20 MB を超える写真、server が作れなかった写真、Images と queue を bind していない deploy は、従来の Browser 経路で作ります（[D-042](decisions.md)）。
+
+API: `POST /api/v1/uploads` は `thumbnail` / `preview` を省略できるようになりました。そのとき finalize は処理中の間 `202 { result: "processing" }` を返し、作れなければ `422 DERIVATIVES_FAILED` です。`DELETE /api/v1/uploads/{uploadId}` を足しました。storage audit に `derivative_failed`、cleanup の結果に `processing` と `unrendered` が増えました。server が作れなかった upload の original は cleanup でも消しません。
+
+更新時に要る作業: migration `0006_server_derivative_jobs` の適用、queue の作成（`wrangler queues create`）、account で Images を使えるようにすること（[operations.md](operations.md#server-側の-derivative-生成images-と-queues)）。
+
+remote-test と production では未確認です。Images の実際の出力が derivative の検査を通るか、original 保存から ready までの時間は、deploy 後に確かめます（[verification.md](verification.md#server-側の-derivative-生成2026-10-03)）。
+
 ## 復旧 drill の手順（2026-10-01）
 
 `wrangler.jsonc` に drill 用の `env.restore-test` を足しました。drill 環境の build・deploy・`pnpm diagnose --env restore-test` が、production ではなく drill 環境の資源を対象にします。
