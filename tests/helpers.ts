@@ -213,6 +213,29 @@ function fixtureBytes(base64: string): Uint8Array {
 export const heicFixture = () => fixtureBytes(env.TEST_HEIC_STILL)
 export const heicProbeFixture = () => fixtureBytes(env.TEST_HEIC_PROBE)
 
+// A HEIC whose boxes are well formed (the sniff and the structure check accept it) and whose property container
+// holds the given item properties: `imir` (a mirror) and/or `irot`. Not decodable; for the checks that read box
+// headers only. `metaAfterData` puts the image data first, as some writers do.
+export function syntheticHeif(opts: { mirror?: boolean; rotate?: boolean; metaAfterData?: boolean } = {}): Uint8Array {
+  const box = (type: string, ...payload: Uint8Array[]) => {
+    const body = concat(...payload)
+    const size = 8 + body.byteLength
+    return concat(
+      new Uint8Array([size >>> 24, (size >>> 16) & 0xff, (size >>> 8) & 0xff, size & 0xff]),
+      new TextEncoder().encode(type),
+      body,
+    )
+  }
+  const ascii = (s: string) => new TextEncoder().encode(s)
+  const ftyp = box('ftyp', ascii('heic'), new Uint8Array(4), ascii('mif1heic'))
+  const props: Uint8Array[] = [box('ispe', new Uint8Array(4), new Uint8Array([0, 0, 0, 64, 0, 0, 0, 32]))]
+  if (opts.rotate) props.push(box('irot', new Uint8Array([1])))
+  if (opts.mirror) props.push(box('imir', new Uint8Array([0])))
+  const meta = box('meta', new Uint8Array(4), box('iprp', box('ipco', ...props)))
+  const mdat = box('mdat', new Uint8Array(64).fill(0x5a))
+  return opts.metaAfterData ? concat(ftyp, mdat, meta) : concat(ftyp, meta, mdat)
+}
+
 export async function sha256(bytes: Uint8Array): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('')

@@ -1286,6 +1286,22 @@ consumer は R2 へ PUT する前に、Browser 経路と同じ `stripJpegMetadat
 
 最初の実装は取り除かずに検査だけをしていたので、remote-test の最初の 1 枚が `derivative_metadata_segment` で失敗しました。検査が fail-closed だったため、GPS を含む derivative は書かれていません（[verification.md](verification.md#server-側の-derivative-生成2026-10-03)）。
 
+### 鏡像（`imir`）を持つ HEIF は Browser 経路で作る
+
+remote-test で iPhone と同じ構造の HEIC（512x512 タイルの grid、primary item の `irot`）を試しました。Images は `irot` を適用し、`irot` と EXIF Orientation を併記したもの（iPhone の背面カメラの縦持ち型）も二重に回しません。一方で `imir`（鏡像）は無視しました。`imir` を持つ HEIC を server で作ると、thumbnail と preview が写真アプリの表示と鏡写しになります（[verification.md](verification.md#server-側の-derivative-生成2026-10-03)）。
+
+そこで、property container に `imir` を持つ HEIF は server 経路に乗せません。
+
+- client は reserve の前に気付き、Browser 経路で作る。iPhone の Safari は ImageIO で正しく描く
+- server も finalize で original の先頭を読み、`imir` があれば job を queue に入れずに `failed`（`heic_mirror`）にする。Web 以外の client にも同じ規則が効く
+- HEIC を decode できない Browser（Chrome / Firefox）では、`imir` を持つ HEIC を追加できない。理由を表示して止める
+- 判定は box header だけを読む（meta → iprp → ipco）。中身は読まない。読み切れないときは鏡像ありとみなす。誤って Browser 経路に回しても、失うのは server 経路の利点だけ
+
+却下した案は 2 つです。
+
+- server で `flip` を補う案は、Images が将来 `imir` を適用するようになると、二重に反転して黙って壊れる
+- 対処しない案は、実機の front camera の写真が `imir` を持つかが未確認で、持てば鏡写しの thumbnail を黙って公開する
+
 ### D-030 から変えたこと
 
 server 生成では client が decode しないため、撮影日時の読み取り（exifr）は「decode の後」ではなく「box 構造の検査の後」になります。D-030 が exifr の hang を確認した zero padding の box は、構造の検査で先に拒否されます。幅と高さは Images の `info()` から server が記録します。`info()` が向きを適用する前の値を返す場合に備え、縦横は生成した preview の frame に合わせます。

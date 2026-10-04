@@ -4,7 +4,7 @@ import { type BatchDeps, createUploadBatch, type RenderMode } from '../../src/we
 import { RENDER_POLLS } from '../../src/web/features/uploads/transfer'
 import { countUploads, uploadHeadline } from '../../src/web/features/uploads/upload-list'
 import { ApiRequestError } from '../../src/web/lib/api/error'
-import { HeicNotDecodableHereError } from '../../src/web/lib/image-errors'
+import { HeicNotDecodableHereError, NeedsBrowserRenderingError } from '../../src/web/lib/image-errors'
 import { StorageUploadError } from '../../src/web/lib/storage-put'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
 
@@ -32,8 +32,10 @@ function harness(behavior: ServerBehavior = {}, serverRendering: (f: File) => bo
   const deps: BatchDeps = {
     prepare: async (file, mode) => {
       prepared.push(mode)
-      if (mode === 'browser' && file.name.endsWith('.heic'))
+      if (mode === 'server' && file.name.includes('mirror')) throw new NeedsBrowserRenderingError('heic_mirror')
+      if (mode === 'browser' && file.name.endsWith('.heic') && !file.name.includes('decodes')) {
         throw new HeicNotDecodableHereError('no HEVC here', 'image/heic')
+      }
       const base = { contentType: 'image/jpeg' as const, sha256: await file.text() }
       return mode === 'server'
         ? base
@@ -162,6 +164,36 @@ describe('server-rendered uploads', () => {
     expect(row.state).toBe('error')
     expect(row.retryable).toBe(false)
     expect(row.message).toMatch(/サーバーで変換できず、このブラウザでも HEIC を処理できません/)
+  })
+
+  it('a HEIC with a mirror goes the browser way without reserving on the server', async () => {
+    const h = harness()
+    await h.batch.enqueue([file('selfie-mirror-decodes.heic')])
+    expect(h.batch.items.value[0].state).toBe('done')
+    expect(h.prepared).toEqual(['server', 'browser'])
+    expect(h.log.filter((l) => l.startsWith('reserve'))).toEqual(['reserve browser'])
+  })
+
+  it('says why when a mirrored HEIC meets a browser that cannot decode HEIC', async () => {
+    const h = harness()
+    await h.batch.enqueue([file('selfie-mirror.heic')])
+    expect(h.batch.items.value[0]).toMatchObject({ state: 'error', retryable: false })
+    expect(h.batch.items.value[0].message).toMatch(/鏡像の向きを持つ HEIC はサーバーで変換できず/)
+  })
+
+  it('a mirror the server finds at finalize also sends the photo the browser way', async () => {
+    const h = harness({ outcome: 'failed' })
+    const finalize = h.deps.finalize
+    h.deps.finalize = async (id) => {
+      const answer = await finalize(id).catch((e) => {
+        throw e instanceof ApiRequestError && e.code === 'DERIVATIVES_FAILED'
+          ? new ApiRequestError(422, 'DERIVATIVES_FAILED', 'failed', { failure: 'heic_mirror' })
+          : e
+      })
+      return answer
+    }
+    await h.batch.enqueue([file('other.heic')])
+    expect(h.batch.items.value[0].message).toMatch(/鏡像の向きを持つ HEIC/)
   })
 
   it('names the size limit when a HEIC is too large for the server and this browser cannot decode it', async () => {

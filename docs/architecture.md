@@ -247,6 +247,7 @@ reserve で `thumbnail` / `preview` を送らない upload は、server が deri
 - send が失敗した job（60 秒後）、queue が受け取ったのに consumer に届かない job（30 分後）、consumer が止まった job（lease 切れ）は、5 分ごとの Cron と finalize の polling が新しい generation で送り直します。consumer は同時に 4 件までです。consumer の試行は 5 回、再送は間隔を延ばしながら 10 回まで数え、超えたら `failed` です
 - `failed` の upload は finalize が `422 DERIVATIVES_FAILED` を返します。Web client はその upload を `DELETE /api/v1/uploads/{uploadId}` で取消し、Browser 経路で予約し直します。client がいなければ upload は original ごと残り、storage cleanup が扱います（[D-042](decisions.md)）
 - restore は backup の derivative を送るので、従来の手順のままです
+- 鏡像（`imir`）を持つ HEIF は、client が reserve の前に、server が finalize で検出し、Browser 経路で作ります（Images が鏡像を無視するため）
 
 reserve した member を `uploads.uploaded_by` に記録し、finalize が asset を作るときに `assets.uploaded_by` へ写します。finalize を呼んだ member は見ないので、別の member や storage cleanup が finalize しても変わりません。再送や duplicate は既存 asset の値を変えません。通常の reserve は upload した人を body から受け取りません。restore は `POST /api/v1/restore/uploads` で reserve し、manifest の値を `uploadedBy` で送ります（`null` を含む）。0004 より前の asset は `NULL` です。どちらも `NULL` なら API は `uploadedBy: null`、viewer は「記録なし」と表示します（[D-034](decisions.md)）。
 

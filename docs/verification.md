@@ -1135,9 +1135,32 @@ allowlist の検査が PUT の前に止めたので、GPS を含む derivative �
 - 時間（[benchmarks.md](benchmarks.md#original-保存から-ready-までの時間remote-test)）
 - `pnpm storage audit --deep` は 332 枚・997 object を見て、`derivative_failed` 1 件だけを報告した。修正前に失敗した最初の upload で、original は残っている
 
+iPhone 形式の HEIC（2026-10-04）:
+
+sips の HEIC は iPhone と同じ構造だった（512x512 タイル 48 枚の grid、primary item の `irot`）。上の表の「Orientation 6 の JPEG から作った HEIC」は、画素を横のまま `irot` 3 と EXIF Orientation 6 を併記していた。iPhone の背面カメラの縦持ちと同じ形になる。最初に「sips は向きを画素に焼き込む」と書いたのは誤りだった（sips -g は表示の向きの幅と高さを返す）。
+
+この HEIC の `irot` の角度を書き換え、`imir` を足した 6 種を作った。macOS の ImageIO（iPhone と同じ decoder）の表示を正解として、server 経路の出力と比べた。
+
+| 向きの情報 | Images の出力 | ImageIO |
+| --- | --- | --- |
+| `irot` 90° | 一致 | 縦 |
+| `irot` 180° | 一致 | 横・上下逆 |
+| `irot` 270° + EXIF 6 | 一致。二重に回さない（上の表の HEIC と同じ byte 列） | 縦 |
+| `imir`（axis 0） | 不一致。鏡像を無視 | 上下反転（EXIF 4 相当） |
+| `irot` 90° + `imir`（axis 1） | 不一致。回転だけ | EXIF 7 相当 |
+| `irot` 270° + `imir`（axis 0）+ EXIF 5 | 不一致。回転だけ | EXIF 7 相当 |
+
+ImageIO は `imir` の axis 0 を上下反転として扱った。HEIF の仕様の読み方（左右反転）とは逆になっている。
+
+`imir` を持つ HEIF は server 経路に乗せないようにした（[D-042](decisions.md)）。deploy して確かめた結果は次のとおり。
+
+- `imir` を足した HEIC 2 種は、finalize が `422 DERIVATIVES_FAILED`（`heic_mirror`）を返し、queue に入らなかった
+- 左右反転（EXIF Orientation 2）の JPEG を sips で HEIC にしたものも `heic_mirror` になった。Apple の encoder 自身が、鏡像を `imir`（axis 1）として書いていた。Apple の写真形式は鏡像を実際に `imir` で表す
+- `imir` の無い HEIC（`irot` 90°、48MP）は、従来どおり server で作られた。向きは ImageIO と一致した
+
 まだ確認していないこと:
 
-- iPhone の HEIC。`irot` / `imir` で向きを持つ実機の HEIC は合成できなかった。sips は向きを画素に焼き込み、tag も `irot` も残さない
+- 実機の iPhone が front camera の写真に `imir` を書くか。iOS Safari の写真ピッカーが HEIC をそのまま渡すか。HDR の gain map や深度マップを持つ実機の HEIC を Images が扱えるか
 - Images の入力上限の境界（20,000,001〜20,971,520 byte）。server が 20,000,000 byte を超える original を受け付けないので、app からは届かない
 - `wrangler deploy` が queue を自動で作るか。今回は先に作った
 

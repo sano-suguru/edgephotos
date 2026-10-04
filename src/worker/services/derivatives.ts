@@ -156,6 +156,14 @@ export function newJobInsert(db: Db, uploadId: string, now: Date) {
     .values({ upload_id: uploadId, state: 'awaiting_original', created_at: ts, updated_at: ts })
 }
 
+// awaiting_original -> failed, for an original finalize verified but the server will not render. Never queued.
+export async function failAwaitingJob(db: Db, uploadId: string, reason: string, now: Date): Promise<void> {
+  await db.run(
+    sql`UPDATE derivative_jobs SET state = 'failed', failure = ${reason}, updated_at = ${now.toISOString()}
+        WHERE upload_id = ${uploadId} AND state = 'awaiting_original' AND ${UPLOAD_PENDING(uploadId)}`,
+  )
+}
+
 // awaiting_original -> queued under the next generation, once finalize has verified the original. The message is
 // sent after the D1 write commits; if the send is lost, the row is still `queued` and reconcile re-sends it.
 export async function queueJob(db: Db, queue: DerivativeQueue, uploadId: string, now: Date): Promise<void> {
@@ -322,7 +330,15 @@ export async function reconcileJobs(
 // Failures that say something about the photo itself (what Images could not read, what its output was): the same
 // original fails the same way. Everything else (retry_exhausted, not_delivered, the account's monthly limit, ...)
 // may pass later, so storage cleanup gives those jobs another round.
-const PHOTO_FAILURES = new Set(['images_9412', 'images_9413', 'images_9520', 'images_9523', 'unsupported_format'])
+const PHOTO_FAILURES = new Set([
+  'images_9412',
+  'images_9413',
+  'images_9520',
+  'images_9523',
+  'unsupported_format',
+  // A HEIF with a mirror property: Images would not apply it (finalize refuses it before queueing).
+  'heic_mirror',
+])
 export function failureIsThePhotos(reason: string | null): boolean {
   return reason !== null && (PHOTO_FAILURES.has(reason) || reason.startsWith('derivative_'))
 }

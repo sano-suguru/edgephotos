@@ -32,6 +32,7 @@ import {
   makeApp,
   putObject,
   sha256,
+  syntheticHeif,
   syntheticJpeg,
   syntheticPng,
   testEnv,
@@ -645,6 +646,32 @@ describe('server-rendered derivatives: failure modes', () => {
       expect(scanJpegForMetadata(stored)).toEqual({ ok: true })
       expect(new TextDecoder('latin1').decode(stored)).not.toContain('GPS')
     }
+  })
+
+  it('a HEIC that declares a mirror is refused at finalize, before anything is queued, and kept', async () => {
+    const h = await harness()
+    const original = syntheticHeif({ mirror: true, rotate: true })
+    const r = await reserveServer(h.app, original, 'image/heic')
+    await putObject(h.app, r.targets.original, original)
+    const res = await callJson(h.app, 'POST', `/api/v1/uploads/${r.upload.id}/finalize`, { expect: 422 })
+    expect(res.error).toMatchObject({ code: 'DERIVATIVES_FAILED', details: { failure: 'heic_mirror' } })
+    // Images is never asked: it would apply the rotation and drop the mirror.
+    expect(h.queue.sent).toEqual([])
+    expect(await job(r.upload.id)).toMatchObject({ state: 'failed', failure: 'heic_mirror', generation: 0 })
+    // Not a failure that another round fixes: cleanup keeps the original for the photo to be added again.
+    h.clock.advance(DAY + 11 * 60 * 1000)
+    const result = await callJson<StorageCleanupResult>(h.app, 'POST', '/api/v1/storage/cleanup', {
+      expect: 200,
+      body: { limit: 25 },
+    })
+    expect(result).toMatchObject({ unrendered: 1, processing: 0, abandoned: 0 })
+
+    // The same kind of file without a mirror is queued as usual.
+    const plain = syntheticHeif({ rotate: true })
+    const p = await reserveServer(h.app, plain, 'image/heic')
+    await putObject(h.app, p.targets.original, plain)
+    expect((await call(h.app, 'POST', `/api/v1/uploads/${p.upload.id}/finalize`)).status).toBe(202)
+    expect(h.queue.sent).toEqual([{ uploadId: p.upload.id, generation: 1 }])
   })
 
   it('a rendered output that is not a usable JPEG is refused before it reaches storage', async () => {

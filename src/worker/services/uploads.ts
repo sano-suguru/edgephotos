@@ -5,12 +5,26 @@ import type { Db } from '../db'
 import { type AssetRow, assets, type UploadRow, uploads } from '../db/schema'
 import { ApiError } from '../http/errors'
 import { toHex } from '../lib/crypto'
-import { INSPECT_HEAD_BYTES, scanIsoBmffBoxes, scanJpegForMetadata, sniffImageType } from '../storage/inspect'
+import {
+  INSPECT_HEAD_BYTES,
+  scanHeifMirror,
+  scanIsoBmffBoxes,
+  scanJpegForMetadata,
+  sniffImageType,
+} from '../storage/inspect'
 import { assetObjectKeys } from '../storage/keys'
 import { UPLOAD_URL_TTL_SECONDS } from '../storage/signer'
 import { getAssetRow, purgeAsset, sortAtFor } from './assets'
 import type { ServiceContext } from './context'
-import { failureIsThePhotos, getJob, newJobInsert, queueJob, rearmJob, reconcileJobs } from './derivatives'
+import {
+  failAwaitingJob,
+  failureIsThePhotos,
+  getJob,
+  newJobInsert,
+  queueJob,
+  rearmJob,
+  reconcileJobs,
+} from './derivatives'
 
 type ReserveInput = z.infer<typeof UploadReserveSchema> | z.infer<typeof RestoreUploadReserveSchema>
 
@@ -346,6 +360,18 @@ async function finalizeServerRendered(
   await verifyObjects(ctx, upload, false)
   const existing = await findStoredAsset(ctx, upload.sha256, upload.asset_id)
   if (existing) return markDuplicate(ctx, upload, existing)
+  // Cloudflare Images ignores a HEIF mirror (`imir`) while it applies the rotation, so the result would show
+  // mirrored compared with the Photos app (remote-test, docs/verification.md). Such a photo takes the browser path:
+  // the job fails before anything is queued, and the client gives this upload up and reserves again.
+  if (isIsoBmff(upload.original_content_type)) {
+    const head = await readHead(ctx.bucket, assetObjectKeys(upload.asset_id).original, upload.original_size)
+    if (!head || scanHeifMirror(head, upload.original_size) !== 'none') {
+      await failAwaitingJob(ctx.db, upload.id, 'heic_mirror', ctx.now())
+      throw new ApiError(422, 'DERIVATIVES_FAILED', 'The server could not render this photo.', {
+        failure: 'heic_mirror',
+      })
+    }
+  }
   await queueJob(ctx.db, ctx.derivatives.queue, upload.id, ctx.now())
   return processing
 }

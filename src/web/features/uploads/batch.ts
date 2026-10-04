@@ -2,7 +2,12 @@ import { computed, signal } from '@preact/signals'
 import type { UploadFinalizeResult, UploadReservation } from '../../../contracts/schemas'
 import { ApiRequestError } from '../../lib/api/error'
 import { userMessage } from '../../lib/errors'
-import { FileTooLargeError, HeicNotDecodableHereError, UnsupportedFileError } from '../../lib/image-errors'
+import {
+  FileTooLargeError,
+  HeicNotDecodableHereError,
+  NeedsBrowserRenderingError,
+  UnsupportedFileError,
+} from '../../lib/image-errors'
 import { SERVER_DERIVATIVE_MAX_BYTES } from '../../lib/original-limit'
 import { StorageUploadError } from '../../lib/storage-put'
 import type { SupportedType } from '../../lib/supported-types'
@@ -67,10 +72,11 @@ const SERVER_LIMIT_MB = SERVER_DERIVATIVE_MAX_BYTES / 1_000_000
 const RENDERING_LATER = 'サーバーで処理しています。終わるとライブラリに表示されます（このページを閉じても続きます）'
 
 // Answers that mean "the server will not render this one". The browser path is tried next.
-function serverDeclined(err: unknown): err is ApiRequestError {
+function serverDeclined(err: unknown): err is ApiRequestError | NeedsBrowserRenderingError {
   return (
-    err instanceof ApiRequestError &&
-    (err.code === 'SERVER_DERIVATIVES_UNAVAILABLE' || err.code === 'DERIVATIVES_FAILED')
+    err instanceof NeedsBrowserRenderingError ||
+    (err instanceof ApiRequestError &&
+      (err.code === 'SERVER_DERIVATIVES_UNAVAILABLE' || err.code === 'DERIVATIVES_FAILED'))
   )
 }
 
@@ -150,6 +156,8 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
     const serverPossible = !serverUnavailable && (deps.serverRendering?.(file) ?? false)
     const modes: RenderMode[] = serverPossible && !resumed?.targets.thumbnail ? ['server', 'browser'] : ['browser']
     let serverFailed = false
+    // A HEIF whose mirror the server would not apply (D-042): only a browser that decodes it can add it.
+    let mirrored = false
     // The server renders on this deployment, but not a file this large: the browser is the only way left.
     const tooLargeForServer = !serverUnavailable && deps.serverRendering !== undefined && !serverPossible
 
@@ -206,10 +214,11 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
           if (mode !== 'server' || !serverDeclined(err)) throw err
           // The server will not render this one: give its upload up now (its original would otherwise wait a
           // day for storage cleanup) and send the photo again the browser way.
-          if (err.code === 'SERVER_DERIVATIVES_UNAVAILABLE' && err.details?.reason === 'not_configured') {
+          if (err instanceof NeedsBrowserRenderingError || err.details?.failure === 'heic_mirror') {
+            mirrored = true
+          } else if (err.code === 'SERVER_DERIVATIVES_UNAVAILABLE' && err.details?.reason === 'not_configured') {
             serverUnavailable = true
-          }
-          if (err.code === 'DERIVATIVES_FAILED') serverFailed = true
+          } else if (err.code === 'DERIVATIVES_FAILED') serverFailed = true
           const abandoned = reservations.get(item.id)
           reservations.delete(item.id)
           if (abandoned && deps.cancel) await deps.cancel(abandoned.upload.id).catch(() => {})
@@ -223,7 +232,7 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
         finished('duplicate', err.details?.trashed ? 'ゴミ箱に同じ写真があります' : '登録済み')
         return
       }
-      const settled = settledFailure(err, serverFailed, tooLargeForServer)
+      const settled = settledFailure(err, serverFailed, tooLargeForServer, mirrored)
       if (settled) {
         // Nothing another attempt can change, so the file is released with the row left as it is.
         files.delete(item.id)
@@ -263,9 +272,18 @@ export function createUploadBatch(deps: BatchDeps, displayLimit = DISPLAY_LIMIT)
 
 // The message for a failure no retry of the same file can get past, or null when one may. `serverFailed`: the
 // server already tried this photo and could not render it, so a browser that cannot either is the end of it.
-function settledFailure(err: unknown, serverFailed: boolean, tooLargeForServer: boolean): string | null {
-  if (err instanceof HeicNotDecodableHereError && (serverFailed || tooLargeForServer)) {
-    const server = serverFailed ? 'サーバーで変換できず' : `${SERVER_LIMIT_MB}MB を超える HEIC はサーバーで変換できず`
+function settledFailure(
+  err: unknown,
+  serverFailed: boolean,
+  tooLargeForServer: boolean,
+  mirrored: boolean,
+): string | null {
+  if (err instanceof HeicNotDecodableHereError && (serverFailed || tooLargeForServer || mirrored)) {
+    const server = mirrored
+      ? '鏡像の向きを持つ HEIC はサーバーで変換できず'
+      : serverFailed
+        ? 'サーバーで変換できず'
+        : `${SERVER_LIMIT_MB}MB を超える HEIC はサーバーで変換できず`
     return `${server}、このブラウザでも HEIC を処理できません。Safari で開くか、JPEG などに書き出してから選んでください。${NOT_ADDED}`
   }
   if (err instanceof FileTooLargeError || err instanceof UnsupportedFileError) return unsupportedFileMessage(err)

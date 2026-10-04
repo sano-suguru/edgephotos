@@ -80,6 +80,10 @@ original が 20 MB 以下の写真は、upload の後に server が thumbnail / 
 
 Cloudflare Images の binding が受け付ける入力は 20 MB までです。それを超える original は Browser 経路で derivative を作るため、HEIC を decode できない Browser（Chrome / Firefox）では追加できません。追加の前に理由を表示して止めます。
 
+### 鏡像の向きを持つ HEIC は、decode できる Browser でしか追加できない
+
+HEIC の中で鏡像（`imir`）として向きを持つ写真は、Cloudflare Images が鏡像を無視するため、server で thumbnail を作りません（[D-042](decisions.md)）。iPhone の Safari では Browser が作ります。Chrome / Firefox では追加の前に理由を表示して止めます。
+
 ### どの写真も指さないデータは自動では消さない
 
 D1 を time travel で過去の状態へ戻した後などに、どの写真にも結び付かないデータが R2 に残ります。time travel の後なら、戻した期間に upload した写真のデータの可能性があります。audit は `unreferenced_objects` として報告するだけで、削除しません。
