@@ -42,7 +42,7 @@ production では、upload から share の revoke までの操作、backup と 
 | [private app の CSP](#private-app-の-csp2026-09-25) | 一部確認 | 2026-09-25 | desktop と iPhone（利用者の報告） |
 | [Workers Logs に credential が生で残らない](#workers-logs) | 確認済み | 2026-09-25 | — |
 | [derivative の作り直し](#derivative-の作り直しremote-test) | 一部確認 | 2026-09-25 | remote-test のみ |
-| [server 側の derivative 生成](#server-側の-derivative-生成2026-10-03) | 一部確認 | 2026-10-03 | remote-test。iPhone の HEIC と production は未確認 |
+| [server 側の derivative 生成](#server-側の-derivative-生成2026-10-03) | 一部確認 | 2026-10-05 | remote-test と iPhone 17e の実写真（JPEG）。実機の HEIC と production は未確認 |
 | [Access の login](#login-方法を-one-time-pin-にする2026-09-24) | 確認済み | 2026-09-25 | 2 人目は利用者の報告 |
 | [Access の independent MFA](#access-の-independent-mfa) | 未使用 | — | [D-038](decisions.md) |
 
@@ -1157,6 +1157,24 @@ ImageIO は `imir` の axis 0 を上下反転として扱った。HEIF の仕様
 - `imir` を足した HEIC 2 種は、finalize が `422 DERIVATIVES_FAILED`（`heic_mirror`）を返し、queue に入らなかった
 - 左右反転（EXIF Orientation 2）の JPEG を sips で HEIC にしたものも `heic_mirror` になった。Apple の encoder 自身が、鏡像を `imir`（axis 1）として書いていた。Apple の写真形式は鏡像を実際に `imir` で表す
 - `imir` の無い HEIC（`irot` 90°、48MP）は、従来どおり server で作られた。向きは ImageIO と一致した
+
+iPhone 17e の実写真（2026-10-05）:
+
+利用者が iPhone 17e（iOS 26.6.2）の Safari から、写真ライブラリの 2 枚を upload した。original は保存せず、header だけをメモリ上で読んだ。
+
+| 項目 | 1 枚目 | 2 枚目 |
+| --- | --- | --- |
+| 届いた形式 | JPEG 7.9 MB | JPEG 5.0 MB |
+| original | 5712x4284、EXIF Orientation 6、APP0・APP1・APP2 x3・APP10 | 同じ |
+| 経路と時間 | server、保存から ready まで 12.1 秒 | server、10.5 秒（試行 1・再送 0） |
+| 記録した幅と高さ | 4284x5712 | 4284x5712 |
+| thumbnail / preview | 384x512 / 1536x2048、header は JFIF・DQT・SOF・DHT だけ | 同じ |
+| 撮影日時 | 2026-10（EXIF どおり） | 2026-09（EXIF どおり） |
+
+- 2 枚とも JPEG で届き、Software が iOS の版だった。端末上で書き出されたファイルで、Safari の写真ピッカーが HEIC を JPEG に変換したとみられる（ピッカーの「オプション」は既定のまま）
+- original の GPS は無かった。位置情報がオフだったのか、ピッカーが除いたのかは分からない
+- Apple 固有の segment（APP2 の ICC / MPF、APP10）は、derivative にどれも残っていない
+- 利用者は 2 枚目が 9 月に表示されることを確かめた。最初に私が 1 枚目を 9 月の写真と取り違え、日付の食い違いを疑ったが、食い違いは無かった
 
 まだ確認していないこと:
 
