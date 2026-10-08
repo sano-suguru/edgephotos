@@ -1,6 +1,6 @@
 // Byte-level checks run at finalize. The Worker never decodes or re-encodes images.
 
-export { type ContentType, scanIsoBmffBoxes, sniffImageType } from '../../contracts/image-type'
+export { type ContentType, scanHeifMirror, scanIsoBmffBoxes, sniffImageType } from '../../contracts/image-type'
 
 import { sniffImageType } from '../../contracts/image-type'
 import { isAllowedJpegHeaderSegment, isStartOfFrame } from '../../contracts/jpeg-segments'
@@ -42,3 +42,19 @@ export function scanJpegForMetadata(head: Uint8Array): JpegMetadataScan {
 }
 
 export const INSPECT_HEAD_BYTES = 256 * 1024
+
+// The frame size a JPEG header declares (its first SOFn), or null. Read from a derivative that already passed
+// scanJpegForMetadata, so the walk can stop at the frame header.
+export function jpegFrameSize(head: Uint8Array): { width: number; height: number } | null {
+  let offset = 2
+  while (offset + 9 <= head.length && head[offset] === 0xff) {
+    const marker = head[offset + 1]
+    const length = (head[offset + 2] << 8) | head[offset + 3]
+    if (isStartOfFrame(marker)) {
+      return { height: (head[offset + 5] << 8) | head[offset + 6], width: (head[offset + 7] << 8) | head[offset + 8] }
+    }
+    if (marker === 0xda || length < 2) return null
+    offset += 2 + length
+  }
+  return null
+}

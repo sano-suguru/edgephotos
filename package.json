@@ -65,6 +65,12 @@
       "BUCKET": {
         "description": "写真を置く private R2 bucket。名前を変えたら `R2_BUCKET_NAME` も同じ名前にします（違うと deploy が止まります）。public access は有効にしません。"
       },
+      "IMAGES": {
+        "description": "Cloudflare Images の binding。20 MB 以下の写真の thumbnail / preview を Worker が作るのに使います（account で Images を有効にしておきます）。"
+      },
+      "DERIVATIVE_QUEUE": {
+        "description": "thumbnail / preview の生成 job を配る queue。名前は自由です。"
+      },
       "R2_BUCKET_NAME": {
         "description": "`BUCKET` と同じ bucket 名。"
       },

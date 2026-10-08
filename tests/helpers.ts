@@ -165,7 +165,15 @@ function segment(marker: number, payload: Uint8Array): Uint8Array {
 // `segments` are extra header segments (marker, ASCII payload) placed after APP0. `frame: false` leaves
 // out the frame header (SOF0).
 export function syntheticJpeg(
-  opts: { exif?: boolean; seed?: number; padding?: number; segments?: [number, string][]; frame?: boolean } = {},
+  opts: {
+    exif?: boolean
+    seed?: number
+    padding?: number
+    segments?: [number, string][]
+    frame?: boolean
+    width?: number
+    height?: number
+  } = {},
 ): Uint8Array {
   const seed = opts.seed ?? ++counter
   const jfif = new Uint8Array([0x4a, 0x46, 0x49, 0x46, 0x00, 1, 1, 0, 0, 1, 0, 1, 0, 0])
@@ -176,8 +184,11 @@ export function syntheticJpeg(
   }
   for (const [marker, payload] of opts.segments ?? []) parts.push(segment(marker, new TextEncoder().encode(payload)))
   parts.push(segment(0xdb, new Uint8Array(65).fill(seed & 0xff)))
-  // SOF0: 8-bit, 16x16, one component.
-  if (opts.frame !== false) parts.push(segment(0xc0, new Uint8Array([8, 0, 16, 0, 16, 1, 1, 0x11, 0])))
+  // SOF0: 8-bit, 16x16 unless given, one component.
+  const [w, h] = [opts.width ?? 16, opts.height ?? 16]
+  if (opts.frame !== false) {
+    parts.push(segment(0xc0, new Uint8Array([8, h >> 8, h & 0xff, w >> 8, w & 0xff, 1, 1, 0x11, 0])))
+  }
   parts.push(segment(0xda, new Uint8Array([1, 1, 0, 0, 63, 0])))
   parts.push(new Uint8Array(opts.padding ?? 32).map((_, i) => (seed * 31 + i) & 0x7f))
   parts.push(new Uint8Array([0xff, 0xd9]))
@@ -201,6 +212,29 @@ function fixtureBytes(base64: string): Uint8Array {
 // decodable file: the sniff must accept the brand layout a real encoder writes, not one we invented.
 export const heicFixture = () => fixtureBytes(env.TEST_HEIC_STILL)
 export const heicProbeFixture = () => fixtureBytes(env.TEST_HEIC_PROBE)
+
+// A HEIC whose boxes are well formed (the sniff and the structure check accept it) and whose property container
+// holds the given item properties: `imir` (a mirror) and/or `irot`. Not decodable; for the checks that read box
+// headers only. `metaAfterData` puts the image data first, as some writers do.
+export function syntheticHeif(opts: { mirror?: boolean; rotate?: boolean; metaAfterData?: boolean } = {}): Uint8Array {
+  const box = (type: string, ...payload: Uint8Array[]) => {
+    const body = concat(...payload)
+    const size = 8 + body.byteLength
+    return concat(
+      new Uint8Array([size >>> 24, (size >>> 16) & 0xff, (size >>> 8) & 0xff, size & 0xff]),
+      new TextEncoder().encode(type),
+      body,
+    )
+  }
+  const ascii = (s: string) => new TextEncoder().encode(s)
+  const ftyp = box('ftyp', ascii('heic'), new Uint8Array(4), ascii('mif1heic'))
+  const props: Uint8Array[] = [box('ispe', new Uint8Array(4), new Uint8Array([0, 0, 0, 64, 0, 0, 0, 32]))]
+  if (opts.rotate) props.push(box('irot', new Uint8Array([1])))
+  if (opts.mirror) props.push(box('imir', new Uint8Array([0])))
+  const meta = box('meta', new Uint8Array(4), box('iprp', box('ipco', ...props)))
+  const mdat = box('mdat', new Uint8Array(64).fill(0x5a))
+  return opts.metaAfterData ? concat(ftyp, mdat, meta) : concat(ftyp, meta, mdat)
+}
 
 export async function sha256(bytes: Uint8Array): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)
@@ -236,7 +270,12 @@ export async function reserve(
   })
 }
 
-export async function putObject(app: App, target: UploadReservation['targets']['original'], bytes: Uint8Array) {
+export async function putObject(
+  app: App,
+  target: UploadReservation['targets']['thumbnail'],
+  bytes: Uint8Array,
+): Promise<Response> {
+  if (!target) throw new Error('no PUT target for this object')
   return app.request(target.url, { method: 'PUT', headers: target.headers, body: bytes as Uint8Array<ArrayBuffer> })
 }
 

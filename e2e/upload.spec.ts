@@ -13,6 +13,7 @@ import {
   uploadPanel,
   uploadPhoto,
   uploadRow,
+  useBrowserDerivatives,
   withExifDate,
 } from './fixtures'
 
@@ -32,6 +33,7 @@ test('records the capture time from the EXIF of a JPEG', async ({ page }) => {
 })
 
 test('uploads a photo with browser-made derivatives, and takes HEIC where it can decode it', async ({ page }) => {
+  await useBrowserDerivatives(page)
   await openApp(page)
   // The same question the app asks: some engines decode HEIC on one platform and not on another.
   const heicDecodes = await canDecodeHeic(page)
@@ -129,6 +131,42 @@ test('uploads a photo with browser-made derivatives, and takes HEIC where it can
 
   await page.reload()
   await expectImageLoaded(tile(page, name).locator('img'))
+})
+
+// `vite dev` runs the Images binding in its local, low-fidelity mode (sharp; no HEIC), so this checks the protocol
+// and the size rules, not Cloudflare's encoder. What production Images writes is checked in remote-test
+// (docs/verification.md).
+test('the server renders the derivatives of a photo this page never decodes', async ({ page }) => {
+  await openApp(page)
+  const decodes: number[] = []
+  await page.exposeBinding('__decoded', () => decodes.push(1))
+  await page.addInitScript(() => {
+    const original = window.createImageBitmap
+    window.createImageBitmap = ((...args: Parameters<typeof createImageBitmap>) => {
+      ;(window as unknown as { __decoded: () => void }).__decoded()
+      return original(...args)
+    }) as typeof createImageBitmap
+  })
+  await page.reload()
+  const name = `${uniqueName('server')}.jpg`
+  const buffer = await makeJpeg(page, 3000, 2000)
+  decodes.length = 0
+  const rows = await uploadFiles(page, [{ name, mimeType: 'image/jpeg', buffer }])
+  expect(rows.get(name)).toContain('完了')
+  expect(decodes).toEqual([])
+
+  const stored = await page.evaluate(async (filename) => {
+    const res = await fetch('/api/v1/assets?limit=200')
+    return (await res.json()).items.find((i: { filename: string }) => i.filename === filename)
+  }, name)
+  // Dimensions come from the renderer, not from this page.
+  expect([stored.width, stored.height]).toEqual([3000, 2000])
+  const thumbnail = tile(page, name).locator('img')
+  await expectImageLoaded(thumbnail)
+  expect(await naturalSize(thumbnail)).toEqual({ width: 512, height: 341 })
+  await tile(page, name).click()
+  const viewer = page.getByRole('dialog', { name })
+  await expect.poll(() => naturalSize(viewer.locator('img'))).toEqual({ width: 2048, height: 1365 })
 })
 
 test('a clean upload summary clears itself, but not while another upload runs or after a failure', async ({ page }) => {

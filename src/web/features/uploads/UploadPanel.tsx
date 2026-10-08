@@ -14,6 +14,8 @@ const LABELS: Record<UploadItem['state'], string> = {
   preparing: '準備中',
   uploading: '転送中',
   finalizing: '確認中',
+  rendering: 'サーバーで処理中',
+  rendering_later: 'サーバーで処理中',
   done: '完了',
   duplicate: '重複',
   error: '失敗',
@@ -62,7 +64,7 @@ export function UploadList() {
       ...countUploads(list),
       retryable: list.filter((u) => u.state === 'error' && u.retryable).length,
       // The file currently being worked on. No byte counts are available, so the bar counts photos.
-      current: list.find((u) => u.state === 'preparing' || u.state === 'uploading' || u.state === 'finalizing'),
+      current: list.find((u) => ['preparing', 'uploading', 'finalizing', 'rendering'].includes(u.state)),
     }
   })
   const autoDismiss = useComputed(() => canAutoDismissUploads(uploads.value))

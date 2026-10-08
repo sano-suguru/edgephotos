@@ -129,3 +129,54 @@ function isPrintableBoxType(bytes: Uint8Array, at: number): boolean {
 function readU32(bytes: Uint8Array, at: number): number {
   return ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) >>> 0
 }
+
+export type HeifMirrorScan = 'mirror' | 'none' | 'unverified'
+
+// Whether a HEIF declares a mirror (an `imir` item property) for any item. Cloudflare Images ignores `imir` while it
+// applies `irot`, so such a photo rendered on the server would show mirrored compared with the Photos app; one that
+// declares it takes the browser path (docs/decisions.md D-042). Any `imir` in the property container counts, used
+// by the primary item or not: a false positive only costs the browser path. Reads box headers only, never contents:
+// meta (a full box) -> iprp -> ipco. 'unverified' when those boxes do not fit in `head`; callers treat it as 'mirror'.
+// `totalSize` is the whole file's: top-level boxes after meta (the image data) may end far past `head`.
+export function scanHeifMirror(head: Uint8Array, totalSize: number): HeifMirrorScan {
+  const meta = findChild(head, 0, totalSize, 'meta')
+  if (meta === null) return 'none'
+  if (meta === 'unverified') return 'unverified'
+  // A full box: version and flags before its children.
+  const iprp = findChild(head, meta.body + 4, meta.end, 'iprp')
+  if (iprp === null) return 'none'
+  if (iprp === 'unverified') return 'unverified'
+  const ipco = findChild(head, iprp.body, iprp.end, 'ipco')
+  if (ipco === null) return 'none'
+  if (ipco === 'unverified') return 'unverified'
+  const imir = findChild(head, ipco.body, ipco.end, 'imir')
+  if (imir === 'unverified') return 'unverified'
+  return imir === null ? 'none' : 'mirror'
+}
+
+type BoxSpan = { body: number; end: number }
+
+// The first child box of `type` between `start` and `end`, or null if there is none. 'unverified' when a box
+// header, or the box found, runs past the bytes in hand; a declared size that cannot be right ends the walk the
+// same way rather than being trusted.
+function findChild(bytes: Uint8Array, start: number, end: number, type: string): BoxSpan | null | 'unverified' {
+  let offset = start
+  while (offset < end) {
+    if (offset + BOX_HEADER_BYTES > bytes.length) return 'unverified'
+    let size = readU32(bytes, offset)
+    let header = BOX_HEADER_BYTES
+    if (size === 1) {
+      if (offset + LARGE_BOX_HEADER_BYTES > bytes.length) return 'unverified'
+      size = readU32(bytes, offset + 8) * 0x1_0000_0000 + readU32(bytes, offset + 12)
+      header = LARGE_BOX_HEADER_BYTES
+    } else if (size === 0) {
+      size = end - offset
+    }
+    if (size < header || offset + size > end) return 'unverified'
+    if (ascii(bytes, offset + 4, offset + 8) === type) {
+      return offset + size > bytes.length ? 'unverified' : { body: offset + header, end: offset + size }
+    }
+    offset += size
+  }
+  return null
+}

@@ -1,10 +1,28 @@
 // Pure helper (no DOM) so it can be unit-tested outside the browser.
 
-export type UploadState = 'queued' | 'preparing' | 'uploading' | 'finalizing' | 'done' | 'duplicate' | 'error'
+// 'rendering': the original is stored and the server is rendering its derivatives while this page waits.
+// 'rendering_later': the page stopped waiting; the server finishes without it (docs/decisions.md D-042).
+export type UploadState =
+  | 'queued'
+  | 'preparing'
+  | 'uploading'
+  | 'finalizing'
+  | 'rendering'
+  | 'rendering_later'
+  | 'done'
+  | 'duplicate'
+  | 'error'
 export type UploadListItem = { id: string; state: UploadState }
 
 export function isActiveUpload(item: UploadListItem): boolean {
-  return item.state !== 'done' && item.state !== 'duplicate' && item.state !== 'error'
+  return (
+    item.state !== 'done' && item.state !== 'duplicate' && item.state !== 'error' && item.state !== 'rendering_later'
+  )
+}
+
+// Still reading or sending the file: closing the page would stop it. A photo the server is rendering would not.
+export function isTransferring(item: UploadListItem): boolean {
+  return isActiveUpload(item) && item.state !== 'rendering'
 }
 
 // A batch where every photo was added needs no further attention, so its summary can clear itself.
@@ -21,7 +39,14 @@ export function mergeUploadList<T extends UploadListItem>(previous: T[], added: 
   return [...added, ...previous.filter((u) => isActiveUpload(u) || room-- > 0)]
 }
 
-export type UploadCounts = { total: number; active: number; done: number; duplicate: number; failed: number }
+export type UploadCounts = {
+  total: number
+  active: number
+  done: number
+  duplicate: number
+  failed: number
+  renderingLater: number
+}
 
 export function countUploads(items: UploadListItem[]): UploadCounts {
   const count = (state: UploadState) => items.filter((u) => u.state === state).length
@@ -31,6 +56,7 @@ export function countUploads(items: UploadListItem[]): UploadCounts {
     done: count('done'),
     duplicate: count('duplicate'),
     failed: count('error'),
+    renderingLater: count('rendering_later'),
   }
 }
 
@@ -43,6 +69,7 @@ export function uploadHeadline(c: UploadCounts): string {
     [c.done, `${c.done} 枚を追加しました`, `${c.done} 枚を追加`],
     [c.duplicate, `${c.duplicate} 枚はすでに登録済みでした`, `${c.duplicate} 枚は登録済み`],
     [c.failed, `${c.failed} 枚を追加できませんでした`, `${c.failed} 枚は追加できませんでした`],
+    [c.renderingLater, `${c.renderingLater} 枚はサーバーで処理中です`, `${c.renderingLater} 枚はサーバーで処理中`],
   ]
   const said = parts.filter(([n]) => n > 0).map(([, first, rest], i) => (i === 0 ? first : rest))
   return said.length > 0 ? said.join('、') : `${c.total} 枚`

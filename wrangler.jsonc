@@ -21,6 +21,20 @@
   },
   "d1_databases": [{ "binding": "DB", "database_name": "edgephotos", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "edgephotos" }],
+  // Server-rendered thumbnails / previews (docs/decisions.md D-042). Create the queue before the first deploy:
+  // `wrangler queues create edgephotos-derivatives`. Without these bindings uploads keep the browser path.
+  "images": { "binding": "IMAGES" },
+  "queues": {
+    "producers": [{ "binding": "DERIVATIVE_QUEUE", "queue": "edgephotos-derivatives" }],
+    // One message per invocation (each streams an original through Images), at most 4 invocations at once: without
+    // max_concurrency the queue scales consumers out (up to 250), and an import of thousands would hit Images with
+    // that many renders at a time. A backlog is expected and safe (D-042: accepted sends are trusted, not re-sent).
+    // Tune after measuring in remote-test. max_retries only has to outlast the job's own attempt limit (5, counted
+    // in D1); without a DLQ a message past it is dropped, and the Cron re-sends.
+    "consumers": [{ "queue": "edgephotos-derivatives", "max_batch_size": 1, "max_concurrency": 4, "max_retries": 10 }]
+  },
+  // Re-sends derivative jobs whose message was lost or whose consumer stopped (D-042). Re-send only, never deletes.
+  "triggers": { "crons": ["*/5 * * * *"] },
   // Environment-specific values are Worker secrets, never vars: a var with the same name would be
   // uploaded as a plain-text binding and collide with the secret (docs/operations.md §3). Unset secrets
   // leave the bindings undefined, so readAppConfig() fails closed. `pnpm dev` injects local-only values.
@@ -44,6 +58,21 @@
       "name": "edgephotos-remote-test",
       "d1_databases": [{ "binding": "DB", "database_name": "edgephotos-remote-test", "migrations_dir": "migrations" }],
       "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "edgephotos-remote-test" }],
+      // Server-rendered thumbnails / previews (docs/decisions.md D-042). Create the queue before the first deploy:
+      // `wrangler queues create edgephotos-remote-test-derivatives`. Without these bindings uploads keep the browser path.
+      "images": { "binding": "IMAGES" },
+      "queues": {
+        "producers": [{ "binding": "DERIVATIVE_QUEUE", "queue": "edgephotos-remote-test-derivatives" }],
+        // As the top-level consumer: one message per invocation, at most 4 at once.
+        "consumers": [
+          {
+            "queue": "edgephotos-remote-test-derivatives",
+            "max_batch_size": 1,
+            "max_concurrency": 4,
+            "max_retries": 10
+          }
+        ]
+      },
       // Environment-specific values are Worker secrets, not vars: this repository is public and
       // HOUSEHOLD_EMAILS / ACCESS_* / R2_ACCOUNT_ID identify people and a Cloudflare account.
       // Unset secrets leave the bindings undefined, so readAppConfig() still fails closed.
@@ -70,6 +99,21 @@
       "name": "edgephotos-restore-test",
       "d1_databases": [{ "binding": "DB", "database_name": "edgephotos-restore-test", "migrations_dir": "migrations" }],
       "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "edgephotos-restore-test" }],
+      // Server-rendered thumbnails / previews (docs/decisions.md D-042). Create the queue before the first deploy:
+      // `wrangler queues create edgephotos-restore-test-derivatives`. Without these bindings uploads keep the browser path.
+      "images": { "binding": "IMAGES" },
+      "queues": {
+        "producers": [{ "binding": "DERIVATIVE_QUEUE", "queue": "edgephotos-restore-test-derivatives" }],
+        // As the top-level consumer: one message per invocation, at most 4 at once.
+        "consumers": [
+          {
+            "queue": "edgephotos-restore-test-derivatives",
+            "max_batch_size": 1,
+            "max_concurrency": 4,
+            "max_retries": 10
+          }
+        ]
+      },
       "vars": {
         "R2_BUCKET_NAME": "edgephotos-restore-test"
       },

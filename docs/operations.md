@@ -43,6 +43,7 @@ Workers の plan 料金を足した目安の表は [README](../README.md#費用)
 ```bash
 pnpm wrangler d1 create edgephotos-remote-test
 pnpm wrangler r2 bucket create edgephotos-remote-test
+pnpm wrangler queues create edgephotos-remote-test-derivatives   # server 側の derivative 生成（D-042）
 
 pnpm wrangler d1 migrations apply edgephotos-remote-test --env remote-test --remote
 CLOUDFLARE_ENV=remote-test pnpm build
@@ -54,6 +55,17 @@ pnpm wrangler deploy --config dist/edgephotos/wrangler.json --secrets-file <secr
 `wrangler.jsonc` に `database_id` を書かなくても deploy できます。wrangler が `database_name` で既存 D1 を解決します。
 
 R2 bucket は public access（r2.dev / custom domain）を有効にしません。
+
+### server 側の derivative 生成（Images と Queues）
+
+original が 20 MB 以下の写真は、thumbnail / preview を Worker が Cloudflare Images の binding で作ります（[D-042](decisions.md)）。`wrangler.jsonc` は環境ごとに次を宣言しています。
+
+- `images`（binding `IMAGES`）。Images を account で使えるようにしておく。Free plan の上限（月 5,000 unique transformation）を超えると、超えた分の upload は Browser 経路に戻る
+- `queues`（producer `DERIVATIVE_QUEUE` と consumer）。queue は deploy の前に `wrangler queues create <名前>` で作る
+- `triggers.crons`（5 分ごと）。message が失われた job の再送だけを行い、何も削除しない
+- consumer の `max_concurrency: 4`。import 中は backlog ができ、写真が順に timeline に現れる。Images の processing limit（9522）や timeout（9529）が多ければ下げ、backlog が長すぎれば上げる。値は Workers Logs の `derivative_job` と、queue の backlog の metrics で判断する
+
+`IMAGES` か `DERIVATIVE_QUEUE` を外して deploy すると、upload はすべて Browser 経路になります。外す前に、処理中の job が無いことを確かめます（`wrangler d1 execute DB --remote --command "SELECT state, COUNT(*) FROM derivative_jobs GROUP BY state"` で `queued` / `running` が 0）。残っていると、その upload は再送されないまま `pending` に残り、1 日後の cleanup でも処理中として残ります。
 
 初回の deploy は、deploy の成功で終わりにしません。[セットアップの確認](#7-セットアップの確認) の `pnpm diagnose` と、Browser での写真 1 枚の upload までを一続きの作業として行います。
 
@@ -622,12 +634,15 @@ EDGEPHOTOS_URL=... EDGEPHOTOS_ACCESS_TOKEN=... pnpm storage cleanup --apply
 | `original_checksum_unrecorded`（`--deep`） | D-018 より前の original で、R2 に SHA-256 の記録が無い | `pnpm backup verify` が download して照合する |
 | `unfinished_delete` | 完全削除が途中で止まった | 管理画面の「削除を再開」 |
 | `expired_upload` | finalize されずに期限を過ぎた upload（写真ではない） | 1 日たったら `cleanup --apply`。3 object が揃っていれば写真として登録され、それ以外は object と行を削除する |
+| `derivative_failed` | server が thumbnail / preview を作れなかった upload（写真ではない。original は残している。[D-042](decisions.md)） | 理由は `derivative_jobs.failure`。1 日たった後の `cleanup --apply` は、写真の性質でない失敗（`retry_exhausted`・`not_delivered` など）なら再 queue する。それ以外は写真をもう一度追加する（Web は server が失敗した写真を Browser 経路で作る）と、次の cleanup が重複として片付ける |
 | `duplicate_leftover` | 重複と判定された upload の残り object | `cleanup --apply` が削除する |
 | `unreferenced_objects` | どの D1 行も指さない object | 自動では削除しない。D1 を time travel で戻したあとなら、その期間に upload した写真の object の可能性がある。`originals/{id}` を R2 の Dashboard から取り出して upload し直すか、不要と判断できたら Dashboard で削除する |
 | `unexpected_key` | EdgePhotos の layout 外の key | EdgePhotos は触れない。書き込んだものを調べる |
 | `audit_incomplete` | 1 つの ID の下に layout 外の key が数千個あり、その ID の thumbnail / preview を確認しきれなかった | 問題なしとは扱わない（`audit` は exit 1、verify も失敗）。layout 外の key を取り除いてから再実行する |
 
-cleanup が触れないもの: 写真（`assets` 行のある ID の object）、止まった削除、どの行も指さない object、期限から 1 日以内の upload。
+cleanup が触れないもの: 写真（`assets` 行のある ID の object）、止まった削除、どの行も指さない object、期限から 1 日以内の upload、server が derivative を作っている途中の upload（結果の `processing`）、server が作れなかった upload の original（結果の `unrendered`）。
+
+server 側の derivative 生成の状態は D1 の `derivative_jobs` にあります。Workers Logs では `derivative_job`（1 件の結果）と `derivative_reconcile`（Cron の再送）を見ます。どちらも upload ID と結果の名前だけを出します。
 
 期限切れの件数が増え続ける場合は、取り込み中の画面ロックや回線断が多いことを疑います（[roadmap.md](roadmap.md) の Post-merge verification）。
 
@@ -656,7 +671,7 @@ share secret が漏れた場合は、その share を revoke するか再発行�
 
 backup から実際に戻せることを、drill 専用の環境へ restore して確かめます（頻度は [Backup と export](#頻度)）。production へは export 以外の書き込みをしません。
 
-drill 用の環境の定義は、`wrangler.jsonc` の `env.restore-test` に常に置いてあります。D1・R2・Worker は drill の前に作ります。restore した写真の複製は、drill が終わるたびに消します（[片付ける](#5-片付ける)）。Access application は、初回だけ [Cloudflare Access](#4-cloudflare-access) の手順で `edgephotos-restore-test.<subdomain>.workers.dev` に 2 つ（private と `/share` の Bypass）作ります。秘密情報もデータも持たないので、残して次の drill で再利用できます。private の Allow には、drill を行う member の email だけを入れます。
+drill 用の環境の定義は、`wrangler.jsonc` の `env.restore-test` に常に置いてあります。D1・R2・queue・Worker は drill の前に作ります。restore した写真の複製は、drill が終わるたびに消します（[片付ける](#5-片付ける)）。Access application は、初回だけ [Cloudflare Access](#4-cloudflare-access) の手順で `edgephotos-restore-test.<subdomain>.workers.dev` に 2 つ（private と `/share` の Bypass）作ります。秘密情報もデータも持たないので、残して次の drill で再利用できます。private の Allow には、drill を行う member の email だけを入れます。
 
 ### 1. backup を取り、確かめる
 
@@ -673,6 +688,7 @@ pnpm backup check ~/EdgePhotosBackup/edgephotos
 pnpm wrangler d1 create edgephotos-restore-test
 pnpm wrangler r2 bucket create edgephotos-restore-test
 pnpm wrangler r2 bucket cors set edgephotos-restore-test --file cors.json   # origin は restore-test の URL（R2 CORS）
+pnpm wrangler queues create edgephotos-restore-test-derivatives   # server 側の derivative 生成（D-042）
 pnpm wrangler d1 migrations apply edgephotos-restore-test --env restore-test --remote
 CLOUDFLARE_ENV=restore-test pnpm build
 pnpm wrangler deploy --config dist/edgephotos/wrangler.json --secrets-file <secrets.env>
@@ -729,9 +745,10 @@ restore 先には、production の写真の複製が入っています。終わ�
 ```bash
 pnpm wrangler delete --env restore-test
 pnpm wrangler d1 delete edgephotos-restore-test
+pnpm wrangler queues delete edgephotos-restore-test-derivatives
 ```
 
-1. 上のコマンドで Worker と D1 を削除する。Worker が無くなった時点で、restore-test の URL からは何も読めない
+1. 上のコマンドで Worker・D1・queue を削除する。Worker が無くなった時点で、restore-test の URL からは何も読めない
 2. Dashboard の R2 で `edgephotos-restore-test` の「設定」を開き、「Empty Bucket」で object をすべて削除してから bucket を削除する。bucket は空でないと削除できない
 3. R2 の「API トークンの管理」で、drill 用の token を削除する。token は鍵なので必ず消す
 4. 作業用の `restore-copy` を削除する

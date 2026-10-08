@@ -39,9 +39,12 @@ export async function runAudit(
 
 // Repeats cleanup while it reports more work and makes progress (an item that keeps failing is left for later).
 export async function runCleanup(cleanup: () => Promise<StorageCleanupResult>) {
-  const total = { completed: 0, abandoned: 0, cleared: 0, failed: 0 }
+  const total = { completed: 0, abandoned: 0, cleared: 0, failed: 0, processing: 0, unrendered: 0 }
   for (;;) {
     const r = await cleanup()
+    // The same in-progress uploads are reported by every call, so they are not summed.
+    total.processing = Math.max(total.processing, r.processing)
+    total.unrendered = Math.max(total.unrendered, r.unrendered)
     total.completed += r.completed.length
     total.abandoned += r.abandoned
     total.cleared += r.cleared
@@ -73,6 +76,10 @@ const TEXT: Record<IssueKind, { tone: Finding['tone']; text: string }> = {
   expired_upload: {
     tone: 'action',
     text: '途中で止まったアップロードです。写真としては登録されていません。',
+  },
+  derivative_failed: {
+    tone: 'action',
+    text: 'サーバーでサムネイルを作れなかったアップロードです。写真としては登録されていませんが、元ファイルは残しています。その写真をもう一度追加すると、「整理する」で片付きます。',
   },
   duplicate_leftover: {
     tone: 'action',
@@ -106,6 +113,11 @@ export function cleanupMessage(t: Awaited<ReturnType<typeof runCleanup>>): strin
   if (t.abandoned > 0) parts.push(`完了できない ${t.abandoned} 件のアップロードを破棄しました`)
   if (t.cleared > 0) parts.push(`${t.cleared} 件の残りファイルを削除しました`)
   if (parts.length === 0) parts.push('整理できるものはありませんでした（中断から 1 日以内のものは残します）')
+  if (t.processing > 0) parts.push(`サーバーで処理中の ${t.processing} 件は、そのまま残しました`)
+  if (t.unrendered > 0)
+    parts.push(
+      `サーバーで変換できなかった ${t.unrendered} 件は、元ファイルを残しました（同じ写真を追加し直してください）`,
+    )
   if (t.failed > 0) parts.push(`${t.failed} 件は処理できませんでした。時間をおいて再実行してください`)
   return `${parts.join('。')}。ライブラリの写真には触れていません。`
 }

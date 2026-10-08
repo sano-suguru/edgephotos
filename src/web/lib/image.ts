@@ -1,5 +1,5 @@
 import exifr from 'exifr'
-import { type ContentType, SNIFF_HEAD_BYTES, scanIsoBmffBoxes } from '../../contracts/image-type'
+import { type ContentType, SNIFF_HEAD_BYTES, scanHeifMirror, scanIsoBmffBoxes } from '../../contracts/image-type'
 import { exifDateToIso } from './exif-date'
 import { canDecodeHeic } from './heic-probe'
 import {
@@ -7,6 +7,7 @@ import {
   HeicNotDecodableHereError,
   ImageDecodeError,
   IncompleteFileError,
+  NeedsBrowserRenderingError,
   UnsupportedFileError,
 } from './image-errors'
 import { stripJpegMetadata } from './jpeg-metadata'
@@ -154,6 +155,29 @@ async function checkAndHash(file: File, contentType: ContentType): Promise<strin
   const buffer = await file.arrayBuffer()
   refuseIfIncomplete(contentType, new Uint8Array(buffer))
   return sha256Hex(buffer)
+}
+
+// For a photo the server renders (docs/decisions.md D-042): the same checks on the bytes as below, without decoding
+// them. This page then holds the file's bytes once, for the box walk and the digest, and never a bitmap.
+// The capture time is still read here, after the box walk: with no decode in front of it, the structure check is
+// what keeps the boxes exifr was seen to hang on (zero padding, D-030) away from it.
+// INSPECT_HEAD_BYTES on the server (src/worker/storage/inspect.ts).
+const SERVER_HEAD_BYTES = 256 * 1024
+
+export async function preparePhotoForServer(
+  file: File,
+): Promise<{ contentType: SupportedType; sha256: string; takenAt?: string }> {
+  if (file.size > ORIGINAL_MAX_BYTES) throw new FileTooLargeError(`File is larger than ${ORIGINAL_MAX_BYTES} bytes`)
+  const contentType = originalTypeOf(await file.slice(0, SNIFF_HEAD_BYTES).arrayBuffer())
+  if (!contentType) throw new UnsupportedFileError(`Unsupported file content: ${file.type || 'unknown'}`)
+  // The server refuses a HEIF that declares a mirror; finding that here saves a reservation and a transfer. The
+  // same head the server reads at finalize.
+  if (contentType === 'image/heic' || contentType === 'image/heif') {
+    const head = new Uint8Array(await file.slice(0, SERVER_HEAD_BYTES).arrayBuffer())
+    if (scanHeifMirror(head, file.size) !== 'none') throw new NeedsBrowserRenderingError('heic_mirror')
+  }
+  const sha256 = await checkAndHash(file, contentType)
+  return { contentType, sha256, takenAt: await readTakenAt(file) }
 }
 
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {

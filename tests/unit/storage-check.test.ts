@@ -56,16 +56,21 @@ describe('storage check helpers', () => {
 
   it('repeats cleanup while it makes progress and stops when it does not', async () => {
     const results: StorageCleanupResult[] = [
-      { completed: [id(1)], abandoned: 1, cleared: 1, failed: 0, more: true },
-      { completed: [], abandoned: 0, cleared: 0, failed: 2, more: true },
-      { completed: [], abandoned: 5, cleared: 5, failed: 0, more: false },
+      { completed: [id(1)], abandoned: 1, cleared: 1, failed: 0, processing: 2, unrendered: 1, more: true },
+      { completed: [], abandoned: 0, cleared: 0, failed: 2, processing: 2, unrendered: 1, more: true },
+      { completed: [], abandoned: 5, cleared: 5, failed: 0, processing: 0, unrendered: 0, more: false },
     ]
     let calls = 0
     const total = await runCleanup(async () => results[calls++])
     expect(calls).toBe(2)
-    expect(total).toEqual({ completed: 1, abandoned: 1, cleared: 1, failed: 2 })
-    expect(cleanupMessage(total)).toMatch(/1 枚をライブラリに追加.*2 件は処理できませんでした.*写真には触れていません/)
-    expect(cleanupMessage({ completed: 0, abandoned: 0, cleared: 0, failed: 0 })).toMatch(/1 日以内/)
+    // In-progress uploads repeat in every response, so they are not added up.
+    expect(total).toEqual({ completed: 1, abandoned: 1, cleared: 1, failed: 2, processing: 2, unrendered: 1 })
+    expect(cleanupMessage(total)).toMatch(
+      /1 枚をライブラリに追加.*処理中の 2 件は、そのまま残しました.*変換できなかった 1 件は、元ファイルを残しました.*2 件は処理できませんでした.*写真には触れていません/,
+    )
+    expect(cleanupMessage({ completed: 0, abandoned: 0, cleared: 0, failed: 0, processing: 0, unrendered: 0 })).toMatch(
+      /1 日以内/,
+    )
   })
 
   it('explains every finding without commands or storage internals', () => {

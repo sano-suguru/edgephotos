@@ -19,6 +19,7 @@ beta は置いていません。alpha と v1 の間に別の呼び名が要る�
 ## Production
 
 - 🟡 [運用・デプロイ・復元](operations.md) の setup / update を production で上から実走し、初見のセットアップで足りない手順を直す。setup は 2026-09-24 に production の作成・初回 deploy・diagnose・upload まで実走した。secrets file の置き場所だけ手順から外れた（[verification.md](verification.md#production-の作成と初回-deploy2026-09-24)）。update は 2026-09-25 に migration なしの手順で実走した（[verification.md](verification.md#deploy-と-diagnose)）。migration ありの update は未実走
+- ⬜ server 側の derivative 生成を production で有効にし、少数枚で確かめる（[D-042](decisions.md)、[verification.md](verification.md#production-での-server-側の-derivative-生成)）
 - ⬜ uninstall は、写真を置いていない使い捨ての環境で実走する。production では行わない
 - 🟡 家族の写真を入れる前: private app の CSP の deploy と desktop での確認、Workers Logs の確認、backup の取得は 2026-09-25 に済んだ（[verification.md](verification.md#家族の写真を入れる前の-production-確認2026-09-25)）。実機での CSP の確認は Post-merge verification の実機確認で行う。Access の independent MFA は、全員が同じ日に登録できるまで有効にしない（[D-038](decisions.md)）
 

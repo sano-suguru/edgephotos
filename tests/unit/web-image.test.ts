@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SNIFF_HEAD_BYTES, scanIsoBmffBoxes } from '../../src/contracts/image-type'
+import { SNIFF_HEAD_BYTES, scanHeifMirror, scanIsoBmffBoxes } from '../../src/contracts/image-type'
 import { LIMITS, ORIGINAL_CONTENT_TYPES } from '../../src/contracts/schemas'
 import { purgeOnce, resumePurges } from '../../src/web/features/settings/resume-purges'
 import {
@@ -20,13 +20,13 @@ import {
   UnsupportedFileError,
 } from '../../src/web/lib/image-errors'
 import { stripJpegMetadata } from '../../src/web/lib/jpeg-metadata'
-import { ORIGINAL_MAX_BYTES } from '../../src/web/lib/original-limit'
+import { ORIGINAL_MAX_BYTES, SERVER_DERIVATIVE_MAX_BYTES } from '../../src/web/lib/original-limit'
 import { originalTypeOf } from '../../src/web/lib/original-type'
 import { putOutcome } from '../../src/web/lib/storage-put'
 import { SUPPORTED_TYPES } from '../../src/web/lib/supported-types'
 import { createTaskLimiter } from '../../src/web/lib/task-limit'
 import { scanJpegForMetadata, sniffImageType } from '../../src/worker/storage/inspect'
-import { heicFixture, syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
+import { heicFixture, syntheticHeif, syntheticJpeg, syntheticPng, syntheticWebp } from '../helpers'
 
 describe('capture date for grouping', () => {
   it('uses the camera wall-clock digits whether or not takenAt has an offset', () => {
@@ -291,6 +291,7 @@ describe('client-side size limit', () => {
   // The client refuses oversized originals before reading them; it must agree with the server contract.
   it('matches the reserve schema', () => {
     expect(ORIGINAL_MAX_BYTES).toBe(LIMITS.originalMaxBytes)
+    expect(SERVER_DERIVATIVE_MAX_BYTES).toBe(LIMITS.serverDerivativeMaxBytes)
   })
 })
 
@@ -515,5 +516,37 @@ describe('ISO BMFF completeness', () => {
     // A file whose headers run past the head cannot be judged from it.
     const many = join(...Array.from({ length: 40 }, () => box('free', 92)), box('mdat', 40))
     expect(scanIsoBmffBoxes(many.subarray(0, 300), many.byteLength)).toBe('unverified')
+  })
+})
+
+describe('HEIF mirror property', () => {
+  const scan = (bytes: Uint8Array) => scanHeifMirror(bytes, bytes.byteLength)
+
+  it('finds an imir in the property container, and none in a file without one', () => {
+    expect(scan(syntheticHeif({ mirror: true, rotate: true }))).toBe('mirror')
+    expect(scan(syntheticHeif({ rotate: true }))).toBe('none')
+    expect(scan(heicFixture())).toBe('none')
+    // Only the boxes the scan walks are what a HEIF is: the sniff and the structure check accept these files.
+    const mirrored = syntheticHeif({ mirror: true })
+    expect(sniffImageType(mirrored)).toBe('image/heic')
+    expect(scanIsoBmffBoxes(mirrored, mirrored.byteLength)).toBe('complete')
+  })
+
+  it('reads the meta box after the image data too', () => {
+    expect(scan(syntheticHeif({ mirror: true, metaAfterData: true }))).toBe('mirror')
+  })
+
+  it('is unverified when the boxes it needs do not fit in the head it was handed', () => {
+    const file = syntheticHeif({ mirror: true })
+    // The head ends inside meta: the property container cannot be read, so nothing can be said.
+    expect(scanHeifMirror(file.subarray(0, 40), file.byteLength)).toBe('unverified')
+  })
+
+  it('does not trust a declared size that runs past its parent', () => {
+    const file = syntheticHeif({ mirror: true })
+    const broken = file.slice()
+    // meta starts after ftyp (24 bytes); claim it is far longer than the file.
+    broken.set([0x7f, 0, 0, 0], 24)
+    expect(scan(broken)).toBe('unverified')
   })
 })
