@@ -14,7 +14,7 @@ API: `POST /api/v1/uploads` は `thumbnail` / `preview` を省略できるよう
 
 更新時に要る作業: migration `0006_server_derivative_jobs` の適用、queue の作成（`wrangler queues create`）、account で Images を使えるようにすること（[operations.md](operations.md#server-側の-derivative-生成images-と-queues)）。
 
-remote-test と production では未確認です。Images の実際の出力が derivative の検査を通るか、original 保存から ready までの時間は、deploy 後に確かめます（[verification.md](verification.md#server-側の-derivative-生成2026-10-03)）。
+remote-test では、Images の出力が derivative の検査を通ることと、Queue / Cron による再送を確認しました。original 保存から ready までの時間も測りました。iPhone 17e の実写真（JPEG）も通しています。production と実機の HEIC は未確認です（[verification.md](verification.md#server-側の-derivative-生成2026-10-03)）。
 
 ## 復旧 drill の手順（2026-10-01）
 

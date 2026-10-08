@@ -10,7 +10,7 @@
 
 ## 現在の状態
 
-2026-10-03 時点。
+2026-10-05 時点。
 
 production では、upload から share の revoke までの操作、backup と restore、desktop の Browser での表示を確認済みです。v1 までに残っている主な確認は、iPhone / Android の実機、2 人での日常の利用、production での migration を含む更新、uninstall です。
 
@@ -58,6 +58,30 @@ production では、upload から share の revoke までの操作、backup と 
 ## 残っている検証
 
 確認の手順と合格の条件です。結果が出たら [検証の記録](#検証の記録) に書き、この節から外します。
+
+### production での server 側の derivative 生成
+
+server 側の derivative 生成（[D-042](decisions.md)）を production で有効にし、少数枚で確かめます。
+
+手順は、運用手順の [更新](operations.md#8-更新release-と-migration) のうち、追加だけの migration の場合に従います。その前に queue `edgephotos-derivatives` を作ります。bookmark を控え、migration `0006` の適用、deploy、`pnpm diagnose` の順に進めます。
+
+写真は 2 段階で入れます。
+
+1. 合成画像を約 5 枚。通常の JPEG、架空の GPS を入れた JPEG、`irot` を持つ HEIC、20 MB を超える写真（Browser 経路）を含める
+2. 1 が合格したら、利用者が iPhone で普段の写真を数枚入れる。写真の中身は開かず、状態と audit だけを見る
+
+合格の条件:
+
+- すべての写真が timeline に出る
+- `derivative_jobs` に `queued` / `running` / `failed` が残らない
+- `pnpm storage audit` の問題が 0 件
+- Workers Logs の `derivative_job` に `failed` と `retry` が無く、`derivative_reconcile` が出ていない（再送が 0 件）
+- queue の backlog が 0
+- 架空の GPS を入れた JPEG の thumbnail / preview に APP1 が無い
+
+不合格なら `IMAGES` と `DERIVATIVE_QUEUE` を外して deploy し直し、すべての upload を Browser 経路に戻します。外す前の確認は [server 側の derivative 生成](operations.md#server-側の-derivative-生成images-と-queues) にあります。migration は追加だけなので戻しません。
+
+合格したら、合成画像を完全削除します。
 
 ### iPhone / Android 実機での取り込み
 
